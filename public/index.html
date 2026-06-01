@@ -733,7 +733,7 @@ async function uploadContract(file) {
   const fd = new FormData();
   fd.append('file', file);
   try {
-    const res = await fetch('/api/contracts/upload', { method: 'POST', body: fd });
+    const res = await fetch('/api/contracts/upload', { method: 'POST', body: fd, headers: { 'Authorization': 'Bearer ' + AUTH_TOKEN } });
     const data = await res.json();
     if (data.project) {
       projects.push(data.project);
@@ -1015,7 +1015,7 @@ async function handleDocFiles(files) {
     const fd = new FormData();
     fd.append('file', file);
     fd.append('projectId', projectId);
-    await fetch('/api/contracts/upload', { method: 'POST', body: fd });
+    await fetch('/api/contracts/upload', { method: 'POST', body: fd, headers: { 'Authorization': 'Bearer ' + AUTH_TOKEN } });
   }
   renderDocs();
 }
