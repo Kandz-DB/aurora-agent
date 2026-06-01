@@ -1,143 +1,387 @@
 'use strict';
-
 require('dotenv').config();
-const express  = require('express');
-const cors     = require('cors');
-const fs       = require('fs');
-const path     = require('path');
-const multer   = require('multer');
-const cron     = require('node-cron');
+
+const express   = require('express');
+const cors      = require('cors');
+const fs        = require('fs');
+const path      = require('path');
+const multer    = require('multer');
+const cron      = require('node-cron');
 const Anthropic = require('@anthropic-ai/sdk');
-const axios    = require('axios');
+const axios     = require('axios');
+const nodemailer= require('nodemailer');
+const db        = require('./db');
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 const app    = express();
 const PORT   = process.env.PORT || 3001;
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-// Load Aurora's prompt
 const AURORA_PROMPT = fs.readFileSync(path.join(__dirname, 'prompt.txt'), 'utf8');
 
-// Data folder for storing drafts, spend, project cache
-const DATA = path.join(__dirname, 'data');
-fs.mkdirSync(DATA, { recursive: true });
-fs.mkdirSync(path.join(DATA, 'uploads'), { recursive: true });
+const INTERNAL_EMAILS = [
+  process.env.INTERNAL_EMAIL_1 || 'diane.k@risk2solution.com',
+  process.env.INTERNAL_EMAIL_2 || 'info@risk2solution.com',
+];
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.get(/^(?!\/api).*/, (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// Serve index.html for all non-API routes (frontend)
-app.get(/^(?!\/api).*/, (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+const upload = multer({
+  dest: path.join(db.DATA, 'uploads'),
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ok = ['.pdf', '.docx', '.doc', '.txt', '.md'].includes(
+      path.extname(file.originalname).toLowerCase()
+    );
+    cb(null, ok);
+  },
 });
-
-// File uploads
-const upload = multer({ dest: path.join(DATA, 'uploads'), limits: { fileSize: 20 * 1024 * 1024 } });
-
-// ── Simple file-based storage helpers ────────────────────────────────────────
-function readData(filename) {
-  try {
-    const f = path.join(DATA, filename);
-    return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : [];
-  } catch { return []; }
-}
-
-function writeData(filename, data) {
-  fs.writeFileSync(path.join(DATA, filename), JSON.stringify(data, null, 2));
-}
-
-function readJSON(filename, fallback) {
-  try {
-    const f = path.join(DATA, filename);
-    return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : fallback;
-  } catch { return fallback; }
-}
-
-function writeJSON(filename, data) {
-  fs.writeFileSync(path.join(DATA, filename), JSON.stringify(data, null, 2));
-}
 
 // ── Cost tracking ─────────────────────────────────────────────────────────────
 const CAP_USD = parseFloat(process.env.MONTHLY_SPEND_CAP_USD || '20');
 
-function getSpend() {
-  const saved = readJSON('spend.json', { month: '', total: 0, calls: 0 });
-  const month = new Date().toISOString().slice(0, 7);
-  if (saved.month !== month) return { month, total: 0, calls: 0 };
-  return saved;
-}
-
-function recordSpend(inputTokens, outputTokens, model) {
-  const rates = model.includes('haiku')
-    ? { in: 0.80, out: 4.00 }
-    : { in: 3.00, out: 15.00 };
-  const cost = (inputTokens / 1e6) * rates.in + (outputTokens / 1e6) * rates.out;
-  const spend = getSpend();
-  spend.total += cost;
-  spend.calls += 1;
-  writeJSON('spend.json', spend);
-  if (spend.total >= CAP_USD * 0.8 && spend.total < CAP_USD) {
-    console.warn(`[Cost] ⚠ 80% of monthly cap used: $${spend.total.toFixed(4)}`);
-  }
-  if (spend.total >= CAP_USD) throw new Error('MONTHLY_CAP_REACHED');
-  return cost;
-}
-
-// ── Core AI call ──────────────────────────────────────────────────────────────
-// Haiku for routine tasks, Sonnet only for chat and document analysis
 const TASK_MODELS = {
-  chat:             'claude-sonnet-4-6',
-  document_analysis:'claude-sonnet-4-6',
-  status_email:     'claude-haiku-4-5-20251001',
-  checkin_email:    'claude-haiku-4-5-20251001',
-  escalation_email: 'claude-haiku-4-5-20251001',
-  invoice_reminder: 'claude-haiku-4-5-20251001',
-  closeout_email:   'claude-haiku-4-5-20251001',
-  status_report:    'claude-haiku-4-5-20251001',
-  risk_summary:     'claude-haiku-4-5-20251001',
-  milestone_report: 'claude-haiku-4-5-20251001',
-  portfolio_report: 'claude-haiku-4-5-20251001',
-  closeout_report:  'claude-haiku-4-5-20251001',
-  invoice_summary:  'claude-haiku-4-5-20251001',
-  change_request:   'claude-haiku-4-5-20251001',
+  chat:              'claude-sonnet-4-6',
+  document_analysis: 'claude-sonnet-4-6',
+  contract_extract:  'claude-sonnet-4-6',
+  status_email:      'claude-haiku-4-5-20251001',
+  checkin_email:     'claude-haiku-4-5-20251001',
+  escalation_email:  'claude-haiku-4-5-20251001',
+  invoice_reminder:  'claude-haiku-4-5-20251001',
+  reminder_email:    'claude-haiku-4-5-20251001',
+  closeout_email:    'claude-haiku-4-5-20251001',
+  status_report:     'claude-haiku-4-5-20251001',
+  portfolio_report:  'claude-haiku-4-5-20251001',
+  closeout_report:   'claude-haiku-4-5-20251001',
 };
 
 const TASK_TOKENS = {
-  chat: 800, document_analysis: 1500,
+  chat: 800, document_analysis: 1500, contract_extract: 2000,
   status_email: 400, checkin_email: 350, escalation_email: 450,
-  invoice_reminder: 300, closeout_email: 400,
-  status_report: 800, risk_summary: 600, milestone_report: 600,
-  portfolio_report: 900, closeout_report: 900,
-  invoice_summary: 400, change_request: 600,
+  invoice_reminder: 300, reminder_email: 300, closeout_email: 400,
+  status_report: 800, portfolio_report: 900, closeout_report: 900,
 };
 
-async function aurora(taskType, userMessage, projectContext) {
-  const spend = getSpend();
+async function aurora(taskType, userMessage, context) {
+  const spend = await db.getSpend();
   if (spend.total >= CAP_USD) throw new Error('MONTHLY_CAP_REACHED');
 
   const model     = TASK_MODELS[taskType] || 'claude-haiku-4-5-20251001';
   const maxTokens = TASK_TOKENS[taskType] || 500;
-
-  const system = projectContext
-    ? `${AURORA_PROMPT}\n\nPROJECT CONTEXT:\n${projectContext}`
-    : AURORA_PROMPT;
+  const system    = context ? `${AURORA_PROMPT}\n\nPROJECT CONTEXT:\n${context}` : AURORA_PROMPT;
 
   const response = await client.messages.create({
-    model,
-    max_tokens: maxTokens,
+    model, max_tokens: maxTokens,
     system,
     messages: [{ role: 'user', content: userMessage }],
   });
 
-  recordSpend(response.usage.input_tokens, response.usage.output_tokens, model);
+  const rates = model.includes('haiku') ? { in: 0.80, out: 4.00 } : { in: 3.00, out: 15.00 };
+  const cost  = (response.usage.input_tokens / 1e6) * rates.in + (response.usage.output_tokens / 1e6) * rates.out;
+  await db.recordSpend(cost);
+
+  if (spend.total + cost >= CAP_USD * 0.8 && spend.total < CAP_USD * 0.8) {
+    await sendInternalEmail('⚠ Aurora spend alert', `Monthly API spend has reached 80% of the $${CAP_USD} USD cap. Current: $${(spend.total + cost).toFixed(2)}`);
+  }
 
   return response.content.filter(b => b.type === 'text').map(b => b.text).join('');
 }
 
-// ── Monday.com sync ───────────────────────────────────────────────────────────
-const ONGOING_KEYWORDS = ['ongoing', 'ongoing training delivery', 'training delivery', 'retainer'];
+// ── Email (Outlook via nodemailer / Graph API) ────────────────────────────────
+async function getOutlookToken() {
+  const tenantId     = process.env.OUTLOOK_TENANT_ID;
+  const clientId     = process.env.OUTLOOK_CLIENT_ID;
+  const clientSecret = process.env.OUTLOOK_CLIENT_SECRET;
+  if (!tenantId || !clientId || !clientSecret) return null;
+  try {
+    const res = await axios.post(
+      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+      new URLSearchParams({ client_id: clientId, client_secret: clientSecret, scope: 'https://graph.microsoft.com/.default', grant_type: 'client_credentials' }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 10000 }
+    );
+    return res.data.access_token;
+  } catch (err) {
+    console.error('[Email] Token failed:', err.message);
+    return null;
+  }
+}
+
+async function sendEmail(to, subject, body, isInternal = false, cc = []) {
+  const token = await getOutlookToken();
+  const fromMailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+
+  if (token) {
+    try {
+      const toArray = Array.isArray(to) ? to : [to];
+      const ccArray = Array.isArray(cc) ? cc : (cc ? [cc] : []);
+      const message = {
+        subject,
+        body: { contentType: 'Text', content: body },
+        toRecipients: toArray.map(addr => ({ emailAddress: { address: addr } })),
+        saveToSentItems: true,
+      };
+      if (ccArray.length > 0) {
+        message.ccRecipients = ccArray.map(addr => ({ emailAddress: { address: addr } }));
+      }
+      await axios.post(
+        `https://graph.microsoft.com/v1.0/users/${fromMailbox}/sendMail`,
+        { message },
+        { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+      );
+      console.log(`[Email] ✓ Sent to ${toArray.join(', ')}${ccArray.length ? ' CC: '+ccArray.join(', ') : ''}: ${subject}`);
+      return true;
+    } catch (err) {
+      console.error('[Email] Send failed:', err.response?.data || err.message);
+    }
+  }
+  // Fallback — log only
+  console.log(`[Email] [LOGGED - no Outlook config] To: ${to}${cc?' CC: '+cc:''} | Subject: ${subject}`);
+  return false;
+}
+
+async function sendInternalEmail(subject, body) {
+  return sendEmail(INTERNAL_EMAILS, subject, body, true);
+}
+
+async function saveDraftEmail(draft) {
+  // Save draft to Outlook shared mailbox drafts folder
+  const token = await getOutlookToken();
+  const fromMailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+  if (token) {
+    try {
+      await axios.post(
+        `https://graph.microsoft.com/v1.0/users/${fromMailbox}/messages`,
+        {
+          subject: draft.subject,
+          body: { contentType: 'Text', content: draft.body },
+          toRecipients: [{ emailAddress: { address: draft.toEmail || fromMailbox } }],
+        },
+        { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+      );
+      console.log(`[Email] Draft saved to Outlook: ${draft.subject}`);
+    } catch (err) {
+      console.error('[Email] Draft save failed:', err.message);
+    }
+  }
+}
+
+// ── Calendar (Outlook) ────────────────────────────────────────────────────────
+async function createCalendarReminder(subject, body, reminderDate) {
+  const token = await getOutlookToken();
+  const mailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+  if (!token) { console.log('[Calendar] No token — reminder logged only:', subject); return; }
+  try {
+    const start = new Date(reminderDate);
+    const end   = new Date(start.getTime() + 60 * 60 * 1000);
+    await axios.post(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/events`,
+      {
+        subject,
+        body: { contentType: 'Text', content: body },
+        start: { dateTime: start.toISOString(), timeZone: 'Australia/Brisbane' },
+        end:   { dateTime: end.toISOString(),   timeZone: 'Australia/Brisbane' },
+        isReminderOn: true, reminderMinutesBeforeStart: 60 * 24 * 3,
+      },
+      { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+    );
+    console.log(`[Calendar] ✓ Reminder set: ${subject} on ${reminderDate}`);
+  } catch (err) {
+    console.error('[Calendar] Failed:', err.message);
+  }
+}
+
+// ── Contract text extraction ──────────────────────────────────────────────────
+async function extractTextFromFile(filePath, mimeType) {
+  const ext = path.extname(filePath).toLowerCase();
+  try {
+    if (ext === '.pdf' || mimeType === 'application/pdf') {
+      const pdfParse = require('pdf-parse');
+      const buf  = fs.readFileSync(filePath);
+      const data = await pdfParse(buf);
+      return data.text;
+    }
+    if (ext === '.docx') {
+      const mammoth = require('mammoth');
+      const result  = await mammoth.extractRawText({ path: filePath });
+      return result.value;
+    }
+    return fs.readFileSync(filePath, 'utf8');
+  } catch (err) {
+    console.error('[Extract] Text extraction failed:', err.message);
+    return '';
+  }
+}
+
+async function analyseContract(rawText, filename) {
+  const truncated = rawText.slice(0, 15000);
+  const text = await aurora(
+    'contract_extract',
+    `You are reading a client contract or proposal for Risk 2 Solution (R2S). Extract ALL of the following information and return it as a valid JSON object with exactly these keys. Be thorough — read the entire document carefully before responding.
+
+{
+  "organisationName": "full legal organisation/company name of the client",
+  "clientName": "organisation name (same as above, used for display)",
+  "projectName": "project title or name of the engagement as written in the document",
+  "clientContact": "primary client contact person full name",
+  "clientEmail": "primary client contact email address",
+  "clientPhone": "primary client contact phone number",
+  "value": "total contract value as written e.g. $25,000 — include any per-session rates if relevant",
+  "contractStart": "contract start date or engagement commencement date",
+  "dueDate": "project completion date, contract end date, or due date",
+  "summary": "full description of services R2S is providing — extract the key paragraphs word for word describing what R2S will do for the client",
+  "deliverables": "all specific deliverables listed — e.g. reports, training sessions (with numbers and dates if given), assessments, presentations, workshops",
+  "milestones": "any key milestones, phases, or stages mentioned with dates or conditions",
+  "timeline": "overall project timeline description — start to finish with any phasing or scheduling mentioned",
+  "invoicingNotes": "full payment terms, invoicing schedule, milestone payment triggers, and invoicing frequency",
+  "consultant": "name(s) of any R2S consultant, trainer, or staff member assigned or mentioned",
+  "consultantEmail": "email address of the assigned consultant or trainer if mentioned",
+  "flightsRequired": "yes or no — are flights required for this engagement",
+  "accommodationRequired": "yes or no — is accommodation required for this engagement",
+  "notes": "any special conditions, exclusions, important requirements, or things the team should be aware of"
+}
+
+Return ONLY the JSON object. No markdown, no explanation, no other text. If a field is not found in the document, use an empty string "".
+
+Document: ${filename}
+---
+${truncated}`,
+    null
+  );
+
+  try {
+    const clean = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(clean);
+  } catch (err) {
+    console.error('[Contract] JSON parse failed:', err.message);
+    return { summary: text, deliverables: '', clientName: '', projectName: filename };
+  }
+}
+
+// ── Consultant / trainer briefing email ──────────────────────────────────────
+async function sendConsultantBriefing(project, extracted) {
+  const DIANE = 'diane.k@risk2solution.com';
+
+  // Consultant email — use extracted email if available, otherwise fall back to info@ for now
+  const consultantEmail = extracted.consultantEmail || process.env.CONSULTANT_DEFAULT_EMAIL || 'info@risk2solution.com';
+  const consultantName  = extracted.consultant || project.consultant || 'Team';
+
+  const context = buildContext(project);
+
+  const briefingBody = await aurora(
+    'status_email',
+    `Draft a professional project briefing email from R2S to ${consultantName}, who has been assigned as the consultant/trainer on this project.
+
+The email should brief them on:
+- The client and project
+- What we are delivering (scope and deliverables)
+- Key dates (start date, due/completion date, any milestones)
+- The timeline and any phasing
+- Invoicing terms (so they know how we are getting paid)
+- Whether flights or accommodation are required: ${extracted.flightsRequired || 'not specified'} / ${extracted.accommodationRequired || 'not specified'}
+- Any special requirements, conditions, or important notes
+- What is expected of them and next steps
+
+Write it as if from the R2S project management team. Professional, clear, and to the point. Not too long. End by asking them to confirm receipt and that they are clear on the requirements.
+
+This email will be CC'd to diane.k@risk2solution.com for our records.`,
+    context
+  );
+
+  const subject = `Project briefing: ${project.clientName} — ${project.projectName || project.clientName}`;
+
+  // Save as draft in Outlook shared mailbox (requires approval before sending)
+  const draft = {
+    id: `d_${Date.now()}_consult`,
+    projectId: project.id,
+    clientName: project.clientName,
+    projectName: project.projectName,
+    type: 'consultant_briefing',
+    urgency: 'routine',
+    toName: consultantName,
+    toEmail: consultantEmail,
+    ccEmail: DIANE,
+    subject,
+    body: briefingBody,
+    source: 'auto',
+  };
+
+  await db.saveDraft(draft);
+
+  // Save to Outlook drafts with CC
+  const token = await getOutlookToken();
+  const fromMailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+  if (token) {
+    try {
+      await axios.post(
+        `https://graph.microsoft.com/v1.0/users/${fromMailbox}/messages`,
+        {
+          subject,
+          body: { contentType: 'Text', content: briefingBody },
+          toRecipients: [{ emailAddress: { address: consultantEmail } }],
+          ccRecipients: [{ emailAddress: { address: DIANE } }],
+        },
+        { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+      );
+      console.log(`[Briefing] ✓ Consultant briefing draft saved for ${consultantName} (${consultantEmail})`);
+    } catch (err) {
+      console.error('[Briefing] Draft save failed:', err.message);
+    }
+  } else {
+    console.log(`[Briefing] [LOGGED] Consultant briefing for ${consultantName} — ${subject}`);
+  }
+
+  // Notify internal team that a briefing has been prepared
+  await sendInternalEmail(
+    `[Aurora] Consultant briefing ready: ${project.clientName}`,
+    `Aurora has prepared a consultant briefing email for ${consultantName} on the ${project.projectName || project.clientName} project.
+
+Please review and approve in the Comms Drafts section of Aurora or in the info@risk2solution.com Outlook shared mailbox drafts folder before sending.
+
+Project: ${project.projectName || project.clientName}
+Client: ${project.clientName}
+Consultant: ${consultantName}
+Due date: ${project.dueDate || 'TBC'}
+
+Aurora
+R2S Project Management Intelligence`
+  );
+
+  return draft;
+}
+
+// ── Project context builder ───────────────────────────────────────────────────
+const PHASES = ['Kick-off', 'Deployment', 'Monitoring & Review', 'Reporting', 'Close-out'];
+
+function buildContext(p, docs = []) {
+  if (!p || p.type === 'ongoing') return null;
+  const docText = docs.map(d => d.extract ? `Contract: ${d.name}\n${d.extract.slice(0, 2000)}` : '').filter(Boolean).join('\n\n');
+  return [
+    `Organisation: ${p.clientName}`,
+    `Project: ${p.projectName || p.clientName}`,
+    `Client contact: ${p.clientContact || ''}${p.clientEmail ? ` (${p.clientEmail})` : ''}${p.clientPhone ? ` Ph: ${p.clientPhone}` : ''}`,
+    `Phase: ${PHASES[p.phase || 0]}`,
+    `Status: ${p.status || 'In Progress'}`,
+    `Contract start: ${p.contractStart || 'TBC'}`,
+    `Due / completion date: ${p.dueDate || 'TBC'}`,
+    `Contract value: ${p.value || 'TBC'}`,
+    p.summary ? `Summary of service: ${p.summary}` : '',
+    p.deliverables ? `Deliverables: ${p.deliverables}` : '',
+    p.milestones ? `Milestones: ${p.milestones}` : '',
+    p.timeline ? `Timeline: ${p.timeline}` : '',
+    p.invoicingNotes ? `Invoicing terms: ${p.invoicingNotes}` : '',
+    p.consultant ? `Consultant/Trainer: ${p.consultant}${p.consultantEmail ? ` (${p.consultantEmail})` : ''}` : '',
+    p.flightsRequired ? `Flights required: ${p.flightsRequired}` : '',
+    p.accommodationRequired ? `Accommodation required: ${p.accommodationRequired}` : '',
+    p.notes ? `Notes / special requirements: ${p.notes}` : '',
+    docText ? `\nContract detail:\n${docText}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+// ── Monday.com sync (backup) ──────────────────────────────────────────────────
+const ONGOING_KEYWORDS = ['ongoing training delivery', 'ongoing training', 'ongoing', 'retainer', 'training delivery'];
 
 function isOngoing(status) {
   if (!status) return false;
@@ -147,12 +391,11 @@ function isOngoing(status) {
 async function syncMonday() {
   const apiKey  = process.env.MONDAY_API_KEY;
   const boardId = process.env.MONDAY_BOARD_ID;
-  if (!apiKey || !boardId) return readData('projects.json');
+  if (!apiKey || !boardId) return [];
 
   try {
     const query = `query {
       boards(ids:[${boardId}]) {
-        id name
         items_page(limit: 100) {
           items {
             id name
@@ -162,439 +405,470 @@ async function syncMonday() {
       }
     }`;
 
-    const res = await axios.post('https://api.monday.com/v2',
-      { query },
+    const res = await axios.post('https://api.monday.com/v2', { query },
       { headers: { Authorization: apiKey, 'Content-Type': 'application/json', 'API-Version': '2024-01' }, timeout: 10000 }
     );
 
-    const board = res.data?.data?.boards?.[0];
-    const items = board?.items_page?.items || [];
+    const items = res.data?.data?.boards?.[0]?.items_page?.items || [];
 
-    const projects = items.map(item => {
-      // Get column value by exact ID (IDs confirmed from board export)
-      const byId = (id) => item.column_values.find(c => c.id === id)?.text || '';
+    for (const item of items) {
+      const byId   = id   => item.column_values.find(c => c.id === id)?.text || '';
+      const byType = type => item.column_values.find(c => c.type === type)?.text || '';
 
-      // Get column value by type (fallback)
-      const byType = (type) => item.column_values.find(c => c.type === type)?.text || '';
-
-      // Status — confirmed ID: color_mks0pnz5
-      const status = byId('color_mks0pnz5') || byType('color') || '';
+      const status  = byId('color_mks0pnz5') || byType('color') || '';
       const ongoing = isOngoing(status);
-
-      // Contract value — confirmed column: "Value of Contract..." — type: numbers
-      // Try all numeric columns, pick the one that looks like a contract value
       const numCols = item.column_values.filter(c => c.type === 'numbers' && c.text && parseFloat(c.text) > 0);
-      const rawValue = numCols.length > 0 ? numCols[0].text : '';
-      const numValue = (rawValue || '').replace(/[$,]/g, '').trim();
-      const displayValue = numValue && !isNaN(parseFloat(numValue))
-        ? '$' + parseFloat(numValue).toLocaleString('en-AU')
-        : '';
-
-      // Project name — confirmed ID: text__1
-      const projectName = byId('text__1') || '';
-
-      // Client contact — confirmed ID: text8__1
-      const clientContact = byId('text8__1') || '';
-
-      // Client email — confirmed ID: client_contact_email__1
-      const clientEmail = byId('client_contact_email__1') || byType('email') || '';
-
-      // Summary of service provision — type: long_text (first long_text column)
+      const rawVal  = numCols[0]?.text || '';
+      const displayValue = rawVal ? '$' + parseFloat(rawVal.replace(/[$,]/g,'')).toLocaleString('en-AU') : '';
       const longTexts = item.column_values.filter(c => c.type === 'long_text' && c.text);
-      const summary = longTexts.length > 0 ? longTexts[0].text : '';
-
-      // Deliverables — look for column with id containing 'deliverable'
-      const delCol = item.column_values.find(c =>
-        c.id?.toLowerCase().includes('deliverable') ||
-        c.id?.toLowerCase().includes('deliver')
-      );
-      const deliverables = delCol?.text || '';
-
-      // SharePoint link — type: link
-      const spCol = item.column_values.find(c => c.type === 'link');
+      const dateCols  = item.column_values.filter(c => c.type === 'date' && c.text);
+      const spCol     = item.column_values.find(c => c.type === 'link');
       let sharepointUrl = '';
-      if (spCol && spCol.value) {
-        try {
-          const v = JSON.parse(spCol.value);
-          sharepointUrl = v.url || v.text || spCol.text || '';
-        } catch (e) { sharepointUrl = spCol.text || ''; }
-      }
+      if (spCol?.value) { try { const v = JSON.parse(spCol.value); sharepointUrl = v.url || ''; } catch { sharepointUrl = spCol.text || ''; } }
 
-      // Dates — type: date (contract start = first date, end = second date)
-      const dateCols = item.column_values.filter(c => c.type === 'date' && c.text);
-      const contractStart = dateCols.length > 0 ? dateCols[0].text : '';
-      const contractEnd   = dateCols.length > 1 ? dateCols[1].text : '';
-
-      // Invoicing frequency — type: dropdown or text containing 'invoic'
-      const invoiceCol = item.column_values.find(c =>
-        c.id?.toLowerCase().includes('invoic') ||
-        c.id?.toLowerCase().includes('billing')
-      );
-      const invoicingNotes = invoiceCol?.text || '';
-
-      // Required trainer/consultant
-      const consultantCol = item.column_values.find(c =>
-        c.id?.toLowerCase().includes('trainer') ||
-        c.id?.toLowerCase().includes('consultant')
-      );
-      const consultant = consultantCol?.text || '';
-
-      // Notes
-      const notes = longTexts.length > 1 ? longTexts[1].text : '';
-
-      return {
-        id:             item.id,
-        name:           item.name,
-        clientName:     item.name,
-        projectName:    projectName || item.name,
-        clientContact:  clientContact,
-        clientEmail:    clientEmail,
-        type:           ongoing ? 'ongoing' : 'standard',
+      const project = {
+        id:            `monday_${item.id}`,
+        mondayId:      item.id,
+        clientName:    item.name,
+        projectName:   byId('text__1') || item.name,
+        clientContact: byId('text8__1') || '',
+        clientEmail:   byId('client_contact_email__1') || byType('email') || '',
         status,
-        phase:          ongoing ? null : 0,
-        progress:       0,
-        dueDate:        ongoing ? null : contractEnd || '',
-        contractStart,
-        value:          displayValue,
-        summary,
-        deliverables,
-        invoicingNotes,
-        consultant,
-        notes,
+        type:          ongoing ? 'ongoing' : 'standard',
+        phase:         0,
+        value:         displayValue,
+        summary:       longTexts[0]?.text || '',
+        deliverables:  item.column_values.find(c => c.id?.includes('deliver'))?.text || '',
+        invoicingNotes:item.column_values.find(c => c.id?.includes('invoic'))?.text || '',
+        consultant:    item.column_values.find(c => c.id?.includes('trainer') || c.id?.includes('consultant'))?.text || '',
+        dueDate:       dateCols[1]?.text || dateCols[0]?.text || '',
+        contractStart: dateCols[0]?.text || '',
+        notes:         longTexts[1]?.text || '',
         sharepointUrl,
-        lastSynced:     new Date().toISOString(),
       };
-    });
 
-    writeData('projects.json', projects);
-    console.log(`[Monday] Synced ${projects.length} projects (${projects.filter(p=>p.type==='standard').length} standard, ${projects.filter(p=>p.type==='ongoing').length} ongoing)`);
-    return projects;
+      await db.upsertProject(project);
+    }
+
+    const count = items.length;
+    console.log(`[Monday] Synced ${count} projects`);
+    return await db.getProjects();
   } catch (err) {
     console.error('[Monday] Sync failed:', err.message);
-    return readData('projects.json');
+    return db.getProjects();
   }
 }
 
-// ── SharePoint contract reader ───────────────────────────────────────────────
-async function readSharePointContract(url) {
-  if (!url) return null;
-  const clientId     = process.env.OUTLOOK_CLIENT_ID;
-  const clientSecret = process.env.OUTLOOK_CLIENT_SECRET;
-  const tenantId     = process.env.OUTLOOK_TENANT_ID;
-  if (!clientId || !clientSecret || !tenantId) return null;
-
-  try {
-    // Get access token
-    const tokenRes = await axios.post(
-      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
-      new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        scope: 'https://graph.microsoft.com/.default',
-        grant_type: 'client_credentials',
-      }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 10000 }
-    );
-    const token = tokenRes.data.access_token;
-
-    // Convert SharePoint URL to Graph API URL and fetch file content
-    // Extract site and file path from SP URL
-    const spMatch = url.match(/https:\/\/([^/]+)\.sharepoint\.com(.*)/);
-    if (!spMatch) return null;
-
-    // Use Graph search to find the file
-    const searchRes = await axios.get(
-      `https://graph.microsoft.com/v1.0/search/query`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        params: { q: url },
-        timeout: 10000,
-      }
-    );
-
-    // Simpler: try to fetch the file directly via driveItem
-    // Just return the URL for now — Aurora will reference it
-    return `SharePoint document available at: ${url}`;
-  } catch (err) {
-    console.error('[SharePoint] Read failed:', err.message);
-    return null;
-  }
-}
-
-function parsePhase(text) {
-  if (!text) return 0;
-  const t = text.toLowerCase();
-  if (t.includes('kick')) return 0;
-  if (t.includes('deploy')) return 1;
-  if (t.includes('monitor') || t.includes('review')) return 2;
-  if (t.includes('report')) return 3;
-  if (t.includes('close')) return 4;
-  return 0;
-}
-
-function buildContext(project) {
-  if (!project || project.type === 'ongoing') return null;
-  const phases = ['Kick-off','Deployment','Monitoring & Review','Reporting','Close-out'];
-
-  // Include any stored document extracts for this project
-  const docs = readData('documents.json').filter(d => d.projectId === project.id && d.extract);
-  const docText = docs.map(d => `Document: ${d.name}\n${d.extract}`).join('\n\n');
-
-  return [
-    `Client: ${project.clientName}`,
-    `Project: ${project.name}`,
-    `Contact: ${project.clientContact}${project.clientEmail ? ` (${project.clientEmail})` : ''}`,
-    `Phase: ${phases[project.phase] || 'Unknown'}`,
-    `Progress: ${project.progress}%`,
-    `Due: ${project.dueDate || 'TBC'}`,
-    `Value: ${project.value || 'TBC'}`,
-    `Notes: ${project.notes || 'None'}`,
-    docText ? `\nDocuments:\n${docText}` : '',
-  ].filter(Boolean).join('\n');
-}
-
-// ── Daily batch (6am AEST) ────────────────────────────────────────────────────
-async function runBatch() {
-  console.log('[Batch] Starting daily batch...');
-  const projects = await syncMonday();
-  const standard = projects.filter(p => p.type === 'standard');
-  console.log(`[Batch] ${standard.length} standard projects | ${projects.length - standard.length} ongoing (skipped)`);
+// ── Due date reminder checker ─────────────────────────────────────────────────
+async function checkDueDateReminders() {
+  console.log('[Reminders] Checking due dates...');
+  const projects = await db.getProjects();
+  const standard = projects.filter(p => p.type === 'standard' && !['Completed','Terminated','Closed'].includes(p.status));
+  const today    = new Date();
 
   for (const p of standard) {
-    try {
-      const context = buildContext(p);
-      const today = new Date();
+    if (!p.dueDate) continue;
+    const due  = new Date(p.dueDate);
+    if (isNaN(due)) continue;
+    const days = Math.round((due - today) / (1000 * 60 * 60 * 24));
+    const context = buildContext(p);
 
-      // Weekly status email on Mondays
-      if (today.getDay() === 1) {
-        const phases = ['Kick-off','Deployment','Monitoring & Review','Reporting','Close-out'];
-        const text = await aurora('status_email',
-          `Draft a short weekly status update email to ${p.clientContact || 'the client'} at ${p.clientName} for the ${p.name} project. Current phase: ${phases[p.phase]}. Progress: ${p.progress}%. Keep it to 3-4 sentences.`,
-          context
-        );
-        saveDraft({ projectId: p.id, clientName: p.clientName, projectName: p.name, type: 'status_email', to: p.clientContact, toEmail: p.clientEmail, subject: `${p.name} — Weekly update`, body: text, source: 'batch' });
-      }
+    // Send reminders at 14, 7, and 3 days before due date
+    if ([14, 7, 3].includes(days)) {
+      const urgency = days <= 3 ? 'URGENT' : days <= 7 ? 'Important' : 'Reminder';
+      const subject = `[Aurora] ${urgency}: ${p.clientName} — ${p.projectName || 'Project'} due in ${days} day${days !== 1 ? 's' : ''}`;
 
-      // At-risk or behind — draft an escalation
-      if (p.progress < 35 && p.dueDate) {
-        const text = await aurora('escalation_email',
-          `Draft a professional email to ${p.clientContact || 'the client'} at ${p.clientName} about a schedule concern on the ${p.name} project. Progress is at ${p.progress}% with a deadline of ${p.dueDate}. Honest but constructive. Propose a brief call. Max 5 sentences.`,
-          context
-        );
-        saveDraft({ projectId: p.id, clientName: p.clientName, projectName: p.name, type: 'escalation_email', urgency: 'urgent', to: p.clientContact, toEmail: p.clientEmail, subject: `${p.name} — Project update`, body: text, source: 'batch' });
-      }
+      const body = await aurora(
+        'reminder_email',
+        `Draft an internal reminder email to the R2S team. The ${p.projectName || p.clientName} project is due in ${days} days (${p.dueDate}).
+Current phase: ${PHASES[p.phase || 0]}.
+${p.summary ? `Service: ${p.summary.slice(0, 300)}` : ''}
+${p.deliverables ? `Deliverables: ${p.deliverables.slice(0, 200)}` : ''}
+Ask the team to review the phase completion status, confirm all deliverables are on track, and flag anything outstanding. Keep it short and direct. This is an internal email only.`,
+        context
+      );
 
-    } catch (err) {
-      if (err.message === 'MONTHLY_CAP_REACHED') { console.error('[Batch] Cap reached — stopping'); break; }
-      console.error(`[Batch] Error on ${p.name}:`, err.message);
+      await sendInternalEmail(subject, body);
+      console.log(`[Reminders] ✓ ${days}-day reminder sent for ${p.clientName}`);
+    }
+
+    // Day of due date
+    if (days === 0) {
+      const subject = `[Aurora] Due today: ${p.clientName} — ${p.projectName || 'Project'}`;
+      const body = `The contract end date for ${p.clientName} (${p.projectName || 'project'}) is today.\n\nCurrent phase: ${PHASES[p.phase || 0]}\n\nPlease confirm whether the project is ready for close-out or if the date needs to be updated in Aurora.`;
+      await sendInternalEmail(subject, body);
+    }
+
+    // Overdue
+    if (days < 0 && days >= -3) {
+      const subject = `[Aurora] OVERDUE: ${p.clientName} — ${p.projectName || 'Project'} (${Math.abs(days)} days overdue)`;
+      const body = `The ${p.clientName} project was due ${Math.abs(days)} days ago and has not been marked complete in Aurora.\n\nPlease review and either update the due date or move to Close-out.`;
+      await sendInternalEmail(subject, body);
     }
   }
-  console.log('[Batch] Done');
 }
 
-// 6am AEST = 8pm UTC
+// ── Daily batch (6am AEST = 8pm UTC) ─────────────────────────────────────────
+async function runBatch() {
+  console.log('\n[Batch] ═══ Aurora daily batch starting ═══');
+  const projects = await db.getProjects();
+  const standard = projects.filter(p => p.type === 'standard');
+  const ongoing  = projects.filter(p => p.type === 'ongoing');
+  console.log(`[Batch] ${standard.length} standard | ${ongoing.length} ongoing (skipped)`);
+
+  // 1. Check due date reminders
+  await checkDueDateReminders();
+
+  // 2. Monday status emails (Mondays only)
+  if (new Date().getDay() === 1) {
+    for (const p of standard) {
+      if (['Completed','Terminated','On Hold'].includes(p.status)) continue;
+      try {
+        const context = buildContext(p);
+        const text = await aurora('status_email',
+          `Draft a short weekly status update email to ${p.clientContact || 'the client'} at ${p.clientName} for the ${p.projectName || p.clientName} project. Current phase: ${PHASES[p.phase||0]}. Keep it to 3-4 sentences covering what happened this week, what's next, and anything needed from the client.`,
+          context
+        );
+        const draft = {
+          id: `d_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+          projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+          type: 'status_email', urgency: 'routine',
+          toName: p.clientContact, toEmail: p.clientEmail,
+          subject: `${p.projectName || p.clientName} — Weekly update`,
+          body: text, source: 'batch',
+        };
+        await db.saveDraft(draft);
+        await saveDraftEmail(draft);
+      } catch (err) {
+        if (err.message === 'MONTHLY_CAP_REACHED') { console.error('[Batch] Cap reached'); break; }
+        console.error(`[Batch] Error on ${p.clientName}:`, err.message);
+      }
+    }
+  }
+
+  // 3. Send internal summary to team
+  const atRisk = standard.filter(p => p.dueDate && (() => {
+    const days = Math.round((new Date(p.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
+    return days <= 14 && days >= 0;
+  })());
+
+  if (atRisk.length > 0) {
+    const summary = atRisk.map(p => {
+      const days = Math.round((new Date(p.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
+      return `• ${p.clientName} (${p.projectName || 'project'}) — due in ${days} days — Phase: ${PHASES[p.phase||0]}`;
+    }).join('\n');
+    await sendInternalEmail(
+      '[Aurora] Projects due within 14 days',
+      `Good morning,\n\nAurora has identified ${atRisk.length} project(s) due within the next 14 days:\n\n${summary}\n\nPlease log into Aurora to review and action.\n\nAurora\nR2S Project Management Intelligence`
+    );
+  }
+
+  console.log('[Batch] ═══ Complete ═══\n');
+}
+
+// Schedule: 6am AEST (UTC+10) = 8pm UTC
 cron.schedule('0 20 * * *', () => runBatch().catch(console.error), { timezone: 'UTC' });
 
-// ── Draft store ───────────────────────────────────────────────────────────────
-function saveDraft(draft) {
-  const drafts = readData('drafts.json');
-  const full = { id: `d_${Date.now()}`, ...draft, approved: false, createdAt: new Date().toISOString() };
-  drafts.push(full);
-  writeData('drafts.json', drafts);
-  return full;
-}
-
 // ── API Routes ────────────────────────────────────────────────────────────────
-
-// Health
-app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Aurora R2S' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Aurora R2S v3', db: !!process.env.DATABASE_URL ? 'postgres' : 'json' }));
 
 // Projects
 app.get('/api/projects', async (req, res) => {
+  try { res.json({ projects: await db.getProjects() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/projects', express.json(), async (req, res) => {
+  try {
+    const p = req.body;
+    if (!p.clientName) return res.status(400).json({ error: 'clientName required' });
+    p.id = p.id || `p_${Date.now()}`;
+    p.type = p.type || 'standard';
+    p.phase = p.phase || 0;
+    await db.upsertProject(p);
+    res.json({ project: p });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/projects/:id', express.json(), async (req, res) => {
+  try {
+    const updated = await db.updateProjectField(req.params.id, req.body);
+    // If phase changed to Close-out (4), set 1yr and 2yr follow-up reminders
+    if (req.body.phase === 4 || req.body.status === 'Completed') {
+      const p = await db.getProject(req.params.id);
+      if (p) {
+        const yr1 = new Date(); yr1.setFullYear(yr1.getFullYear() + 1);
+        const yr2 = new Date(); yr2.setFullYear(yr2.getFullYear() + 2);
+        await createCalendarReminder(
+          `1-year follow-up: ${p.clientName}`,
+          `Check in with ${p.clientName} (${p.clientContact || ''}) — explore new service needs, pain points, and opportunities for R2S.`,
+          yr1.toISOString().slice(0,10)
+        );
+        await createCalendarReminder(
+          `2-year follow-up: ${p.clientName}`,
+          `2-year relationship check-in with ${p.clientName}. Review their current situation and how R2S can help.`,
+          yr2.toISOString().slice(0,10)
+        );
+        await sendInternalEmail(
+          `[Aurora] Project closed: ${p.clientName}`,
+          `The ${p.projectName || p.clientName} project has been marked complete.\n\nAurora has set 1-year and 2-year follow-up reminders in the Outlook calendar.\n\nAurora\nR2S Project Management Intelligence`
+        );
+      }
+    }
+    res.json({ project: updated });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/projects/:id', async (req, res) => {
+  try { await db.deleteProject(req.params.id); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Monday sync (backup)
+app.post('/api/projects/sync', async (req, res) => {
   try { res.json({ projects: await syncMonday() }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/projects/sync', async (req, res) => {
+// Contract upload — auto-creates project
+app.post('/api/contracts/upload', upload.single('file'), async (req, res) => {
   try {
-    // Clear cache and force fresh sync
-    writeData('projects.json', []);
-    res.json({ projects: await syncMonday() });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const spend = await db.getSpend();
+    if (spend.total >= CAP_USD) return res.status(429).json({ error: 'Monthly cap reached' });
 
-// Drafts
-app.get('/api/drafts', (req, res) => {
-  const drafts = readData('drafts.json').filter(d => !d.approved && !d.rejected);
-  res.json({ drafts });
-});
+    console.log(`[Contract] Reading ${req.file.originalname}...`);
+    const rawText = await extractTextFromFile(req.file.path, req.file.mimetype);
+    if (!rawText || rawText.trim().length < 100) {
+      return res.status(400).json({ error: 'Could not extract text from this file. Try a different format.' });
+    }
 
-app.post('/api/drafts/generate', async (req, res) => {
-  try {
-    const { projectId, taskType, prompt } = req.body;
-    const projects = await syncMonday();
-    const project  = projects.find(p => p.id === projectId);
+    const extracted = await analyseContract(rawText, req.file.originalname);
+    console.log(`[Contract] Extracted: ${extracted.clientName} — ${extracted.projectName}`);
 
-    if (!project) return res.status(404).json({ error: 'Project not found' });
-    if (project.type === 'ongoing') return res.status(400).json({ error: 'Ongoing projects do not use Aurora automation' });
+    // Create project from extracted data
+    const projectId = req.body.projectId || `p_${Date.now()}`;
+    const project = {
+      id:                   projectId,
+      clientName:           extracted.organisationName || extracted.clientName || req.body.clientName || 'Unknown client',
+      projectName:          extracted.projectName || req.file.originalname,
+      clientContact:        extracted.clientContact || '',
+      clientEmail:          extracted.clientEmail || '',
+      clientPhone:          extracted.clientPhone || '',
+      value:                extracted.value || '',
+      contractStart:        extracted.contractStart || '',
+      dueDate:              extracted.dueDate || '',
+      summary:              extracted.summary || '',
+      deliverables:         extracted.deliverables || '',
+      milestones:           extracted.milestones || '',
+      timeline:             extracted.timeline || '',
+      invoicingNotes:       extracted.invoicingNotes || '',
+      consultant:           extracted.consultant || '',
+      consultantEmail:      extracted.consultantEmail || '',
+      flightsRequired:      extracted.flightsRequired || '',
+      accommodationRequired:extracted.accommodationRequired || '',
+      notes:                extracted.notes || '',
+      status:               'In Progress',
+      phase:                0,
+      type:                 'standard',
+    };
 
-    const text = await aurora(taskType || 'status_email', prompt, buildContext(project));
-    const draft = saveDraft({ projectId, clientName: project.clientName, projectName: project.name, type: taskType, to: project.clientContact, toEmail: project.clientEmail, body: text, source: 'manual' });
-    res.json({ draft });
+    if (!req.body.projectId) {
+      await db.upsertProject(project);
+    } else {
+      await db.updateProjectField(projectId, {
+        summary: extracted.summary, deliverables: extracted.deliverables,
+        milestones: extracted.milestones, timeline: extracted.timeline,
+        value: extracted.value, dueDate: extracted.dueDate,
+        contractStart: extracted.contractStart, invoicingNotes: extracted.invoicingNotes,
+        consultant: extracted.consultant, consultantEmail: extracted.consultantEmail,
+        clientContact: extracted.clientContact, clientEmail: extracted.clientEmail,
+        clientPhone: extracted.clientPhone,
+        flightsRequired: extracted.flightsRequired,
+        accommodationRequired: extracted.accommodationRequired,
+      });
+    }
+
+    // Save document extract
+    await db.saveDocument({
+      id: `doc_${Date.now()}`,
+      projectId, name: req.file.originalname,
+      extract: rawText.slice(0, 8000),
+    });
+
+    // Send consultant briefing if a consultant/trainer is named
+    let briefingDraft = null;
+    if (extracted.consultant && extracted.consultant.trim()) {
+      try {
+        briefingDraft = await sendConsultantBriefing(project, extracted);
+        console.log(`[Contract] ✓ Consultant briefing prepared for ${extracted.consultant}`);
+      } catch (briefErr) {
+        console.error('[Contract] Briefing failed:', briefErr.message);
+      }
+    }
+
+    res.json({ project, extracted, briefingPrepared: !!briefingDraft });
   } catch (e) {
-    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly spend cap reached' });
+    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
+    console.error('[Contract] Error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-app.post('/api/drafts/:id/approve', (req, res) => {
-  const drafts = readData('drafts.json');
-  const draft  = drafts.find(d => d.id === req.params.id);
-  if (!draft) return res.status(404).json({ error: 'Not found' });
-  draft.approved = true;
-  draft.approvedAt = new Date().toISOString();
-  writeData('drafts.json', drafts);
-  // Outlook send happens here once Microsoft Graph is connected
-  res.json({ success: true, draft });
+// Drafts
+app.get('/api/drafts', async (req, res) => {
+  try { res.json({ drafts: await db.getDrafts() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/drafts/:id/reject', (req, res) => {
-  const drafts = readData('drafts.json');
-  const draft  = drafts.find(d => d.id === req.params.id);
-  if (!draft) return res.status(404).json({ error: 'Not found' });
-  draft.rejected = true;
-  writeData('drafts.json', drafts);
-  res.json({ success: true });
+app.post('/api/drafts/generate', express.json(), async (req, res) => {
+  try {
+    const { projectId, taskType, prompt } = req.body;
+    const p = await db.getProject(projectId);
+    if (!p) return res.status(404).json({ error: 'Project not found' });
+    if (p.type === 'ongoing') return res.status(400).json({ error: 'Ongoing projects do not use Aurora automation' });
+
+    const docs = await db.getDocuments(projectId);
+    const context = buildContext(p, docs);
+    const text = await aurora(taskType || 'status_email', prompt || `Draft a ${(taskType||'status email').replace(/_/g,' ')} for ${p.projectName||p.clientName} at ${p.clientName}.`, context);
+
+    const draft = {
+      id: `d_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+      projectId, clientName: p.clientName, projectName: p.projectName,
+      type: taskType || 'status_email', urgency: taskType?.includes('escalat') ? 'urgent' : 'routine',
+      toName: p.clientContact, toEmail: p.clientEmail,
+      subject: `${p.projectName || p.clientName}`, body: text, source: 'manual',
+    };
+    await db.saveDraft(draft);
+    await saveDraftEmail(draft);
+    res.json({ draft });
+  } catch (e) {
+    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
+    res.status(500).json({ error: e.message });
+  }
 });
 
-app.put('/api/drafts/:id', (req, res) => {
-  const drafts = readData('drafts.json');
-  const draft  = drafts.find(d => d.id === req.params.id);
-  if (!draft) return res.status(404).json({ error: 'Not found' });
-  if (req.body.body)    draft.body    = req.body.body;
-  if (req.body.subject) draft.subject = req.body.subject;
-  writeData('drafts.json', drafts);
-  res.json({ draft });
+app.post('/api/drafts/:id/approve', async (req, res) => {
+  try {
+    const drafts = db.readJSON('drafts.json');
+    const draft  = drafts.find(d => d.id === req.params.id);
+    if (!draft) return res.status(404).json({ error: 'Not found' });
+    // Send via Outlook
+    await sendEmail(draft.toEmail || INTERNAL_EMAILS[1], draft.subject, draft.body);
+    await db.updateDraft(req.params.id, { approved: true });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/drafts/:id/reject', async (req, res) => {
+  try { await db.updateDraft(req.params.id, { rejected: true }); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/drafts/:id', express.json(), async (req, res) => {
+  try { await db.updateDraft(req.params.id, req.body); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Chat
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', express.json(), async (req, res) => {
   try {
     const { message, projectId, history } = req.body;
     if (!message) return res.status(400).json({ error: 'message required' });
-
     let context = null;
     if (projectId) {
-      const projects = await syncMonday();
-      const project  = projects.find(p => p.id === projectId);
-      if (project && project.type !== 'ongoing') context = buildContext(project);
+      const p    = await db.getProject(projectId);
+      const docs = await db.getDocuments(projectId);
+      if (p && p.type !== 'ongoing') context = buildContext(p, docs);
     }
-
-    // Build conversation from history (last 6 turns)
     const turns = (history || []).slice(-6);
     const fullMessage = turns.length
       ? turns.map(t => `${t.role === 'user' ? 'User' : 'Aurora'}: ${t.content}`).join('\n') + `\nUser: ${message}`
       : message;
-
     const reply = await aurora('chat', fullMessage, context);
     res.json({ reply });
   } catch (e) {
-    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly spend cap reached' });
+    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
     res.status(500).json({ error: e.message });
   }
 });
 
 // Documents
-app.get('/api/documents', (req, res) => res.json({ documents: readData('documents.json') }));
-
-app.post('/api/documents/upload', upload.single('file'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    const { projectId, clientId } = req.body;
-
-    const projects = await syncMonday();
-    const project  = projects.find(p => p.id === projectId);
-    if (project?.type === 'ongoing') return res.status(400).json({ error: 'Ongoing projects do not use the document library' });
-
-    // Read file text (basic — works for txt files; PDF/DOCX need extra libs if needed later)
-    let rawText = '';
-    try { rawText = fs.readFileSync(req.file.path, 'utf8').slice(0, 12000); } catch { rawText = ''; }
-
-    // Analyse with Sonnet — one time only
-    let extract = null;
-    if (rawText.trim().length > 100) {
-      extract = await aurora('document_analysis',
-        `Extract key project management info from this document:\n\n${rawText}\n\nSummarise: scope, deliverables, timeline, fees, contacts, key conditions. Be concise.`,
-        buildContext(project)
-      );
-    }
-
-    const docs = readData('documents.json');
-    const doc  = { id: `doc_${Date.now()}`, name: req.file.originalname, projectId, clientId, uploadedAt: new Date().toISOString(), extract, archived: false };
-    docs.push(doc);
-    writeData('documents.json', docs);
-
-    res.json({ document: doc });
-  } catch (e) {
-    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly spend cap reached' });
-    res.status(500).json({ error: e.message });
-  }
+app.get('/api/documents', async (req, res) => {
+  try { res.json({ documents: await db.getDocuments(req.query.projectId) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Reports
-app.post('/api/reports', async (req, res) => {
+app.post('/api/reports', express.json(), async (req, res) => {
   try {
     const { reportType, projectId } = req.body;
-    const projects = await syncMonday();
-
+    const allProjects = await db.getProjects();
     const targets = projectId
-      ? projects.filter(p => p.id === projectId && p.type !== 'ongoing')
-      : projects.filter(p => p.type !== 'ongoing');
-
+      ? allProjects.filter(p => p.id === projectId && p.type !== 'ongoing')
+      : allProjects.filter(p => p.type !== 'ongoing');
     if (!targets.length) return res.status(404).json({ error: 'No projects found' });
 
-    const contextBlock = targets.map(buildContext).filter(Boolean).join('\n\n---\n\n');
+    const contextBlock = (await Promise.all(targets.map(async p => {
+      const docs = await db.getDocuments(p.id);
+      return buildContext(p, docs);
+    }))).filter(Boolean).join('\n\n---\n\n');
 
     const prompts = {
-      status:    'Write a concise project status report for each project. Phase, progress, RAG status, key activities this week, any blockers. Factual, no padding.',
-      milestones:'List all project milestones. For each: project, milestone name, due date, status. Simple table format.',
-      risks:     'Summarise the risk register. Format: project | risk | level | mitigation. Short and factual.',
-      closeout:  'Write a project close-out report. What was delivered, outcomes, 2-3 forward recommendations.',
-      invoices:  'Summarise invoice status. Format: client | project | amount | due date | status.',
-      portfolio: 'Write a one-page portfolio overview. RAG status per project, key dates, anything needing attention at the top.',
+      status:    'Write a concise project status report. For each project: current phase, status, what has been delivered so far, what is outstanding, any risks or blockers. Keep it factual and easy to read.',
+      milestones:'List deliverables and milestones for each project. Format clearly with project name, deliverable, and status (complete/in progress/outstanding).',
+      risks:     'Summarise risks across all projects. Format: project | risk | level | recommended action. Keep it brief and factual.',
+      closeout:  'Write a project close-out report. What was delivered, outcomes achieved, and 2-3 forward recommendations for the client.',
+      invoices:  'Summarise invoice and payment status. Format: client | project | contract value | invoicing terms | status.',
+      portfolio: 'Write a one-page portfolio overview for R2S leadership. Status per project, anything needing immediate attention at the top, key dates ahead.',
     };
 
     const taskType = reportType === 'portfolio' ? 'portfolio_report' : reportType === 'closeout' ? 'closeout_report' : 'status_report';
     const content  = await aurora(taskType, prompts[reportType] || prompts.status, contextBlock);
-
     res.json({ content, reportType, generatedAt: new Date().toISOString() });
   } catch (e) {
-    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly spend cap reached' });
+    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
     res.status(500).json({ error: e.message });
   }
 });
 
-// Cost summary
-app.get('/api/cost', (req, res) => {
-  const spend = getSpend();
-  res.json({
-    month: spend.month,
-    totalUSD: spend.total.toFixed(4),
-    totalAUD: (spend.total * 1.55).toFixed(2),
-    calls: spend.calls,
-    capUSD: CAP_USD,
-    percentUsed: ((spend.total / CAP_USD) * 100).toFixed(1),
-  });
+// Cost
+app.get('/api/cost', async (req, res) => {
+  try {
+    const spend = await db.getSpend();
+    res.json({
+      month: spend.month, totalUSD: spend.total.toFixed(4),
+      totalAUD: (spend.total * 1.55).toFixed(2),
+      calls: spend.calls, capUSD: CAP_USD,
+      percentUsed: ((spend.total / CAP_USD) * 100).toFixed(1),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Manual batch trigger
+// Manual batch + reminder triggers
 app.post('/api/batch', async (req, res) => {
   try { await runBatch(); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Start ─────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`\nAurora R2S — running on port ${PORT}`);
-  console.log(`Spend cap: $${CAP_USD} USD/month`);
+app.post('/api/reminders/check', async (req, res) => {
+  try { await checkDueDateReminders(); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+async function start() {
+  await db.initDB();
+  await db.ensureSpendConstraint();
+  app.listen(PORT, () => {
+    console.log(`\n╔══════════════════════════════════════╗`);
+    console.log(`║  Aurora R2S v3 — port ${PORT}          ║`);
+    console.log(`╚══════════════════════════════════════╝`);
+    console.log(`DB: ${process.env.DATABASE_URL ? 'PostgreSQL' : 'JSON files'}`);
+    console.log(`Spend cap: $${CAP_USD} USD/month`);
+    console.log(`Internal emails: ${INTERNAL_EMAILS.join(', ')}`);
+    console.log(`Reminders: 14, 7, 3 days before due date\n`);
+  });
+}
+
+start().catch(console.error);
