@@ -26,6 +26,34 @@ const INTERNAL_EMAILS = [
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
 app.use(express.json({ limit: '10mb' }));
+
+// ── Auth — simple password protection ────────────────────────────────────────
+const AURORA_PASSWORD = process.env.AURORA_PASSWORD || 'r2s-aurora-2026';
+
+app.post('/api/auth/login', (req, res) => {
+  const { password } = req.body;
+  if (password === AURORA_PASSWORD) {
+    const token = Buffer.from('aurora:' + AURORA_PASSWORD + ':' + Date.now()).toString('base64');
+    res.json({ success: true, token });
+  } else {
+    res.status(401).json({ success: false, error: 'Incorrect password' });
+  }
+});
+
+app.use('/api', (req, res, next) => {
+  if (req.path === '/auth/login') return next();
+  const authHeader = req.headers['authorization'] || '';
+  const token = authHeader.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ error: 'Not authenticated' });
+  try {
+    const decoded = Buffer.from(token, 'base64').toString('utf8');
+    if (!decoded.startsWith('aurora:' + AURORA_PASSWORD)) throw new Error('Invalid');
+    next();
+  } catch (e) {
+    res.status(401).json({ error: 'Invalid session — please log in again' });
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.get(/^(?!\/api).*/, (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
