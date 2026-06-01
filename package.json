@@ -4,8 +4,7 @@
   "description": "Aurora — R2S Project Management Intelligence",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "db:init": "node db.js init"
+    "start": "node server.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.55.0",
