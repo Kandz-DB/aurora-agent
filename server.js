@@ -150,20 +150,13 @@ async function syncMonday() {
   if (!apiKey || !boardId) return readData('projects.json');
 
   try {
-   const query = `query {
+    const query = `query {
       boards(ids:[${boardId}]) {
-        id
-        name
+        id name
         items_page(limit: 100) {
           items {
-            id
-            name
-            column_values {
-              id
-              type
-              text
-              value
-            }
+            id name
+            column_values { id type text value }
           }
         }
       }
@@ -174,17 +167,39 @@ async function syncMonday() {
       { headers: { Authorization: apiKey, 'Content-Type': 'application/json', 'API-Version': '2024-01' }, timeout: 10000 }
     );
 
-   console.log('[Monday]', JSON.stringify(res.data).slice(0, 500));
-const board = res.data?.data?.boards?.[0];
-const items = board?.items_page?.items || [];
-    console.log('[Monday Debug]', JSON.stringify(res.data?.data).slice(0, 800));
+    const board = res.data?.data?.boards?.[0];
+    const items = board?.items_page?.items || [];
 
     const projects = items.map(item => {
-      const col = (title)
+      // Helper to get column value by column ID
+      const byId  = (id)   => item.column_values.find(c => c.id === id)?.text || '';
+      // Helper to get column value by column type
+      const byType = (type) => item.column_values.find(c => c.type === type)?.text || '';
+
+      // Use exact column IDs from your Monday.com board
+      const status  = byId('color_mks0pnz5') || byType('status') || '';
+      const ongoing = isOngoing(status);
+
+      return {
+        id:           item.id,
+        name:         item.name,
+        clientName:   item.name,
+        projectName:  byId('text__1') || item.name,
+        clientContact:byId('text8__1') || '',
+        clientEmail:  byId('client_contact_email__1') || byType('email') || '',
+        type:         ongoing ? 'ongoing' : 'standard',
+        status,
+        phase:        ongoing ? null : parsePhase(byType('text')),
+        progress:     ongoing ? null : parseInt(byType('numeric') || byType('numbers') || '0') || 0,
+        dueDate:      ongoing ? null : byType('date') || byType('timeline') || '',
+        value:        byType('numbers') || byType('numeric') || '',
+        notes:        byType('long_text') || byType('text') || '',
+        lastSynced:   new Date().toISOString(),
       };
     });
 
     writeData('projects.json', projects);
+    console.log(`[Monday] Synced ${projects.length} projects (${projects.filter(p=>p.type==='standard').length} standard, ${projects.filter(p=>p.type==='ongoing').length} ongoing)`);
     return projects;
   } catch (err) {
     console.error('[Monday] Sync failed:', err.message);
