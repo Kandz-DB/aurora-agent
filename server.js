@@ -161,6 +161,7 @@ async function syncMonday() {
     );
 
     const items = res.data?.data?.boards?.[0]?.items_page?.items || [];
+    console.log('[Monday Debug]', JSON.stringify(res.data?.data).slice(0, 800));
 
     const projects = items.map(item => {
       const col = (title) => item.column_values.find(c => c.title?.toLowerCase().includes(title.toLowerCase()))?.text || '';
