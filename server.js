@@ -171,30 +171,43 @@ async function syncMonday() {
     const items = board?.items_page?.items || [];
 
     const projects = items.map(item => {
-      // Helper to get column value by column ID
-      const byId  = (id)   => item.column_values.find(c => c.id === id)?.text || '';
-      // Helper to get column value by column type
+      const byId   = (id)   => item.column_values.find(c => c.id === id)?.text || '';
       const byType = (type) => item.column_values.find(c => c.type === type)?.text || '';
 
-      // Use exact column IDs from your Monday.com board
+      // Get SharePoint link from "Link to relevant resources in Sharepoint" column
+      const spCol = item.column_values.find(c =>
+        c.type === 'link' ||
+        c.id?.toLowerCase().includes('link') ||
+        c.id?.toLowerCase().includes('sharepoint') ||
+        c.id?.toLowerCase().includes('resource')
+      );
+      let sharepointUrl = '';
+      if (spCol && spCol.value) {
+        try {
+          const v = JSON.parse(spCol.value);
+          sharepointUrl = v.url || v.text || spCol.text || '';
+        } catch (e) { sharepointUrl = spCol.text || ''; }
+      }
+
       const status  = byId('color_mks0pnz5') || byType('status') || '';
       const ongoing = isOngoing(status);
 
       return {
-        id:           item.id,
-        name:         item.name,
-        clientName:   item.name,
-        projectName:  byId('text__1') || item.name,
-        clientContact:byId('text8__1') || '',
-        clientEmail:  byId('client_contact_email__1') || byType('email') || '',
-        type:         ongoing ? 'ongoing' : 'standard',
+        id:            item.id,
+        name:          item.name,
+        clientName:    item.name,
+        projectName:   byId('text__1') || item.name,
+        clientContact: byId('text8__1') || '',
+        clientEmail:   byId('client_contact_email__1') || byType('email') || '',
+        type:          ongoing ? 'ongoing' : 'standard',
         status,
-        phase:        ongoing ? null : parsePhase(byType('text')),
-        progress:     ongoing ? null : parseInt(byType('numeric') || byType('numbers') || '0') || 0,
-        dueDate:      ongoing ? null : byType('date') || byType('timeline') || '',
-        value:        byType('numbers') || byType('numeric') || '',
-        notes:        byType('long_text') || byType('text') || '',
-        lastSynced:   new Date().toISOString(),
+        phase:         ongoing ? null : parsePhase(byType('text')),
+        progress:      ongoing ? null : parseInt(byType('numeric') || byType('numbers') || '0') || 0,
+        dueDate:       ongoing ? null : byType('date') || byType('timeline') || '',
+        value:         byType('numbers') || byType('numeric') || '',
+        notes:         byType('long_text') || byType('text') || '',
+        sharepointUrl,
+        lastSynced:    new Date().toISOString(),
       };
     });
 
@@ -204,6 +217,52 @@ async function syncMonday() {
   } catch (err) {
     console.error('[Monday] Sync failed:', err.message);
     return readData('projects.json');
+  }
+}
+
+// ── SharePoint contract reader ───────────────────────────────────────────────
+async function readSharePointContract(url) {
+  if (!url) return null;
+  const clientId     = process.env.OUTLOOK_CLIENT_ID;
+  const clientSecret = process.env.OUTLOOK_CLIENT_SECRET;
+  const tenantId     = process.env.OUTLOOK_TENANT_ID;
+  if (!clientId || !clientSecret || !tenantId) return null;
+
+  try {
+    // Get access token
+    const tokenRes = await axios.post(
+      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+      new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        scope: 'https://graph.microsoft.com/.default',
+        grant_type: 'client_credentials',
+      }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 10000 }
+    );
+    const token = tokenRes.data.access_token;
+
+    // Convert SharePoint URL to Graph API URL and fetch file content
+    // Extract site and file path from SP URL
+    const spMatch = url.match(/https:\/\/([^/]+)\.sharepoint\.com(.*)/);
+    if (!spMatch) return null;
+
+    // Use Graph search to find the file
+    const searchRes = await axios.get(
+      `https://graph.microsoft.com/v1.0/search/query`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { q: url },
+        timeout: 10000,
+      }
+    );
+
+    // Simpler: try to fetch the file directly via driveItem
+    // Just return the URL for now — Aurora will reference it
+    return `SharePoint document available at: ${url}`;
+  } catch (err) {
+    console.error('[SharePoint] Read failed:', err.message);
+    return null;
   }
 }
 
