@@ -150,17 +150,33 @@ async function syncMonday() {
   if (!apiKey || !boardId) return readData('projects.json');
 
   try {
-    const query = `query { boards(ids:[${boardId}]) { items_page(limit:100) { items {
-      id name
-      column_values { id title text }
-    }}}}`;
+   const query = `query {
+      boards(ids:[${boardId}]) {
+        id
+        name
+        items_page(limit: 100) {
+          items {
+            id
+            name
+            column_values {
+              id
+              title
+              text
+              value
+            }
+          }
+        }
+      }
+    }`;
 
     const res = await axios.post('https://api.monday.com/v2',
       { query },
       { headers: { Authorization: apiKey, 'Content-Type': 'application/json', 'API-Version': '2024-01' }, timeout: 10000 }
     );
 
-    const items = res.data?.data?.boards?.[0]?.items_page?.items || [];
+   console.log('[Monday]', JSON.stringify(res.data).slice(0, 500));
+const board = res.data?.data?.boards?.[0];
+const items = board?.items_page?.items || [];
     console.log('[Monday Debug]', JSON.stringify(res.data?.data).slice(0, 800));
 
     const projects = items.map(item => {
