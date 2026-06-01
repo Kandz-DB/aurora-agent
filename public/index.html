@@ -27,7 +27,7 @@ input::placeholder,textarea::placeholder{color:var(--text3)}
 /* Topbar */
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 18px;height:50px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
 .brand{display:flex;align-items:center;gap:9px}
-.mark{width:28px;height:28px;border-radius:7px;background:var(--pink);display:flex;align-items:center;justify-content:center;font-family:var(--fs);font-weight:600;font-size:14px;color:#fff}
+.mark{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,var(--teal),var(--pink));display:flex;align-items:center;justify-content:center;font-family:var(--fs);font-weight:600;font-size:14px;color:#fff}
 .bname{font-family:var(--fs);font-size:14px;font-weight:600}
 .bsub{font-size:9px;color:var(--text2);letter-spacing:.6px;text-transform:uppercase;margin-top:1px}
 .pills{display:flex;gap:6px}
@@ -40,7 +40,7 @@ input::placeholder,textarea::placeholder{color:var(--text3)}
 .nlbl{font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--text2);padding:0 13px;margin:12px 0 5px;font-family:var(--fs)}
 .ni{display:flex;align-items:center;gap:7px;padding:7px 13px;font-size:12px;color:var(--text2);cursor:pointer;border-left:2px solid transparent;transition:all .12s}
 .ni:hover{color:var(--text);background:rgba(255,255,255,.04)}
-.ni.on{color:var(--pink-light);border-left-color:var(--pink-light);background:rgba(232,25,122,.07)}
+.ni.on{color:var(--teal);border-left-color:var(--teal);background:rgba(0,232,187,.07)}
 .nbadge{margin-left:auto;background:var(--rose);color:#fff;font-size:9px;font-family:var(--fm);padding:1px 5px;border-radius:8px}
 .pane{flex:1;overflow-y:auto;padding:18px 20px}
 .pg{display:none}.pg.on{display:block}
@@ -132,23 +132,23 @@ input::placeholder,textarea::placeholder{color:var(--text3)}
 .msg{display:flex;gap:7px;align-items:flex-start}
 .msg.u{flex-direction:row-reverse}
 .av{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0;font-family:var(--fs)}
-.av-a{background:var(--pink);color:#fff}
+.av-a{background:var(--teal);color:#07090f}
 .av-u{background:var(--border2);color:var(--text2)}
 .bub{background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:8px 11px;font-size:12px;line-height:1.65;max-width:88%;white-space:pre-line;color:var(--text)}
 .msg.u .bub{background:rgba(106,163,255,.1);border-color:rgba(106,163,255,.2)}
 .cin-row{display:flex;gap:6px;padding-top:10px;border-top:1px solid var(--border)}
 .cin{flex:1}
-.csend{background:var(--pink);color:#fff;border:none;border-radius:6px;padding:0 14px;cursor:pointer;font-size:14px}
+.csend{background:var(--teal);color:#07090f;border:none;border-radius:6px;padding:0 14px;cursor:pointer;font-size:14px}
 .tdots{display:inline-flex;gap:3px;align-items:center}
 .tdots span{width:4px;height:4px;background:var(--text3);border-radius:50%;animation:td 1.2s ease-in-out infinite}
 .tdots span:nth-child(2){animation-delay:.2s}.tdots span:nth-child(3){animation-delay:.4s}
 @keyframes td{0%,80%,100%{opacity:.2}40%{opacity:1}}
 .chip{padding:4px 11px;border-radius:20px;font-size:11px;background:var(--card2);border:1px solid var(--border2);color:var(--text2);cursor:pointer;transition:all .12s}
-.chip:hover{border-color:var(--pink);color:var(--pink-light)}
+.chip:hover{border-color:var(--teal);color:var(--teal)}
 
 /* Upload zone */
 .upzone{border:1px dashed var(--border2);border-radius:9px;padding:18px;text-align:center;cursor:pointer;transition:all .15s}
-.upzone:hover,.upzone.over{background:rgba(232,25,122,.05);border-color:var(--pink)}
+.upzone:hover,.upzone.over{background:rgba(0,232,187,.05);border-color:var(--teal)}
 
 /* Reports */
 .rep-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -526,6 +526,19 @@ function openProject(id) {
     ? `<span class="badge ${alert.cls === 'behind' ? 'br' : alert.cls === 'on-hold' ? 'bb' : 'ba'}">${alert.label}</span>`
     : '<span class="badge bt">On track</span>';
 
+  const delHtml = (p.summary || p.deliverables) ? `
+    <div style="margin-bottom:14px">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.7px;color:var(--text2);margin-bottom:8px;font-family:var(--fs)">What we are delivering</div>
+      ${p.summary ? `<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin-bottom:6px">
+        <div style="font-size:10px;color:var(--teal);font-family:var(--fm);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">Service provision</div>
+        <div style="font-size:12px;color:var(--text);line-height:1.65">${p.summary}</div>
+      </div>` : ''}
+      ${p.deliverables ? `<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:11px 13px">
+        <div style="font-size:10px;color:var(--pink-light);font-family:var(--fm);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">Deliverables</div>
+        <div style="font-size:12px;color:var(--text);line-height:1.65">${p.deliverables}</div>
+      </div>` : ''}
+    </div>` : '';
+
   document.getElementById('modal-body').innerHTML = `
     <div class="phase-cards">${phasecards}</div>
     <div id="phase-detail-box" class="phase-detail-box">
@@ -535,17 +548,19 @@ function openProject(id) {
       </div>
       <div class="phase-detail-content">${PHASE_DESC[phase]}</div>
     </div>
+    ${delHtml}
     <div class="info-grid">
       <div class="info-item"><div class="info-label">Status</div><div class="info-val">${statusBadge}</div></div>
-      <div class="info-item"><div class="info-label">Contract value</div><div class="info-val">${p.value || '—'}</div></div>
-      <div class="info-item"><div class="info-label">Due date</div><div class="info-val">${p.dueDate || '—'}</div></div>
-      <div class="info-item"><div class="info-label">Contact</div><div class="info-val">${p.clientContact || '—'}</div></div>
+      <div class="info-item"><div class="info-label">Contract value</div><div class="info-val" style="color:var(--teal);font-family:var(--fm)">${p.value || '—'}</div></div>
+      <div class="info-item"><div class="info-label">Due / End date</div><div class="info-val">${p.dueDate || '—'}</div></div>
+      <div class="info-item"><div class="info-label">Contact</div><div class="info-val">${p.clientContact || '—'}${p.clientEmail ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">${p.clientEmail}</div>` : ''}</div></div>
+      ${p.invoicingNotes ? `<div class="info-item" style="grid-column:1/-1"><div class="info-label">Invoicing notes</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2)">${p.invoicingNotes}</div></div>` : ''}
+      ${p.consultant ? `<div class="info-item" style="grid-column:1/-1"><div class="info-label">Consultant / Trainer</div><div class="info-val">${p.consultant}</div></div>` : ''}
+      ${p.notes ? `<div class="info-item" style="grid-column:1/-1"><div class="info-label">Project notes</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2)">${p.notes}</div></div>` : ''}
     </div>
-    ${p.sharepointUrl ? `<div style="margin-bottom:14px"><a href="${p.sharepointUrl}" target="_blank" style="color:var(--blue);font-size:12px">📎 View contract / resources in SharePoint ↗</a></div>` : ''}
     <div class="arow">
       <button class="btn btn-p" onclick="closeModal();generateDraft('${p.id}','status_email','')">Draft status email ↗</button>
       <button class="btn btn-g" onclick="closeModal();askAboutProject('${p.id}')">Ask Aurora ↗</button>
-      ${p.sharepointUrl ? `<button class="btn btn-b" onclick="readContract('${p.id}')">Read contract ↗</button>` : ''}
     </div>`;
 
   document.getElementById('modal-bg').classList.add('open');
@@ -583,27 +598,70 @@ async function readContract(projectId) {
 function renderMilestones() {
   const standard = projects.filter(p => p.type === 'standard' && !isCompleted(p));
   if (!standard.length) { document.getElementById('milestones-list').innerHTML = '<div style="color:var(--text3);font-size:12px">No active projects. Sync Monday.com first.</div>'; return; }
+
   let html = '';
   standard.forEach(p => {
-    html += `<div style="margin-bottom:12px">
-      <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:5px">
+    const hasDeliverables = p.summary || p.deliverables;
+    html += `<div style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:6px">
         <div style="width:26px;height:26px;border-radius:6px;background:rgba(232,25,122,.12);color:var(--pink-light);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${initials(p.clientName)}</div>
-        <div style="flex:1;font-size:12px;font-weight:500">${p.clientName} · ${p.projectName || p.name}</div>
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:500">${p.clientName}</div>
+          <div style="font-size:11px;color:var(--text3)">${p.projectName || p.name}</div>
+        </div>
         <span class="badge bg">${PHASES[p.phase||0]}</span>
+        ${p.dueDate ? `<span class="badge bg">📅 ${p.dueDate}</span>` : ''}
       </div>
-      <div style="padding-left:6px">
-        <div class="card">
-          <div style="font-size:12px;font-weight:500;margin-bottom:4px">Current phase: ${PHASES[p.phase||0]}</div>
-          <div style="font-size:11px;color:var(--text2);margin-bottom:8px">${PHASE_DESC[p.phase||0]}</div>
-          ${p.dueDate ? `<div style="font-size:11px;color:var(--text2);margin-bottom:8px">📅 Due: ${p.dueDate}</div>` : ''}
-          <div class="arow">
-            <button class="btn btn-p" style="font-size:10px" onclick="generateDraft('${p.id}','status_email','Draft a monitoring and review weekly summary email for ${p.projectName||p.name} at ${p.clientName}')">Draft weekly update ↗</button>
-          </div>
+      <div style="padding-left:6px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        ${p.summary ? `<div class="card" style="cursor:pointer;border-left:3px solid var(--teal)" onclick="openMilestoneDetail('${p.id}','summary')">
+          <div style="font-size:10px;color:var(--teal);font-family:var(--fm);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Service provision</div>
+          <div style="font-size:12px;color:var(--text);line-height:1.55">${p.summary.slice(0,120)}${p.summary.length > 120 ? '…' : ''}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:6px">Click to view full detail ↗</div>
+        </div>` : ''}
+        ${p.deliverables ? `<div class="card" style="cursor:pointer;border-left:3px solid var(--pink)" onclick="openMilestoneDetail('${p.id}','deliverables')">
+          <div style="font-size:10px;color:var(--pink-light);font-family:var(--fm);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Deliverables</div>
+          <div style="font-size:12px;color:var(--text);line-height:1.55">${p.deliverables.slice(0,120)}${p.deliverables.length > 120 ? '…' : ''}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:6px">Click to view full detail ↗</div>
+        </div>` : ''}
+        ${!hasDeliverables ? `<div class="card" style="grid-column:1/-1;color:var(--text3);font-size:11px;text-align:center;padding:16px">No deliverables found in Monday.com. Add to the Summary of service provision or Deliverables columns.</div>` : ''}
+      </div>
+      <div style="padding-left:6px;margin-top:6px">
+        <div class="arow">
+          <button class="btn btn-p" style="font-size:10px" onclick="generateDraft('${p.id}','status_email','Draft a monitoring and review weekly summary email for the ${p.projectName||p.name} project at ${p.clientName}. Cover what has been done, what is happening this week, and any actions needed.')">Draft weekly update ↗</button>
+          <button class="btn btn-g" style="font-size:10px" onclick="openProject('${p.id}')">View full project ↗</button>
         </div>
       </div>
     </div>`;
   });
   document.getElementById('milestones-list').innerHTML = html;
+}
+
+function openMilestoneDetail(projectId, type) {
+  const p = projects.find(x => x.id === projectId);
+  if (!p) return;
+  const isService = type === 'summary';
+  const title = isService ? 'Service provision' : 'Deliverables';
+  const content = isService ? p.summary : p.deliverables;
+  const color = isService ? 'var(--teal)' : 'var(--pink-light)';
+
+  document.getElementById('modal-title').textContent = p.clientName;
+  document.getElementById('modal-sub').textContent = p.projectName || p.name;
+  document.getElementById('modal-body').innerHTML = `
+    <div style="background:var(--card2);border:1px solid var(--border);border-left:3px solid ${color};border-radius:9px;padding:14px;margin-bottom:14px">
+      <div style="font-size:10px;color:${color};font-family:var(--fm);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">${title}</div>
+      <div style="font-size:13px;color:var(--text);line-height:1.75">${content || '—'}</div>
+    </div>
+    <div class="info-grid">
+      <div class="info-item"><div class="info-label">Current phase</div><div class="info-val">${PHASES[p.phase||0]}</div></div>
+      <div class="info-item"><div class="info-label">Contract value</div><div class="info-val" style="color:var(--teal);font-family:var(--fm)">${p.value || '—'}</div></div>
+      <div class="info-item"><div class="info-label">Due / End date</div><div class="info-val">${p.dueDate || '—'}</div></div>
+      <div class="info-item"><div class="info-label">Contact</div><div class="info-val">${p.clientContact || '—'}</div></div>
+    </div>
+    <div class="arow">
+      <button class="btn btn-p" onclick="closeModal();generateDraft('${p.id}','status_email','')">Draft update email ↗</button>
+      <button class="btn btn-g" onclick="showPhaseDetail(${p.phase||0},'${p.id}');document.getElementById('modal-body').querySelector('.phase-cards') ? null : openProject('${p.id}')">View full project ↗</button>
+    </div>`;
+  document.getElementById('modal-bg').classList.add('open');
 }
 
 // ── Risks ─────────────────────────────────────────────────────────────────────
@@ -895,3 +953,4 @@ loadProjects();
 </script>
 </body>
 </html>
+
