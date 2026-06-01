@@ -12,6 +12,7 @@
   --bg:#07090f;--surface:#0d1120;--card:#131825;--card2:#1a2030;
   --border:#2a3550;--border2:#344060;
   --teal:#00e8bb;--blue:#6aa3ff;--amber:#ffb340;--rose:#ff6080;--violet:#c4a8ff;
+  --pink:#e8197a;--pink-light:#ff4da6;
   --text:#ffffff;--text2:#a8b8d8;--text3:#5a7090;
   --fs:'Syne',sans-serif;--fb:'DM Sans',sans-serif;--fm:'DM Mono',monospace;
 }
@@ -19,95 +20,149 @@ body{font-family:var(--fb);background:var(--bg);color:var(--text);font-size:13px
 ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
 button{font-family:var(--fb);cursor:pointer;transition:opacity .12s}
 button:active{transform:scale(.98)}
-input,select,textarea{font-family:var(--fb);font-size:13px;color:var(--text);background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:8px 11px;outline:none}
+input,select,textarea{font-family:var(--fb);font-size:13px;color:var(--text);background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:8px 11px;outline:none;transition:border-color .15s}
 input:focus,select:focus,textarea:focus{border-color:var(--teal)}
 input::placeholder,textarea::placeholder{color:var(--text3)}
 
-/* Layout */
+/* Topbar */
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 18px;height:50px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
 .brand{display:flex;align-items:center;gap:9px}
-.mark{width:28px;height:28px;border-radius:7px;background:var(--teal);display:flex;align-items:center;justify-content:center;font-family:var(--fs);font-weight:600;font-size:14px;color:#07090f}
+.mark{width:28px;height:28px;border-radius:7px;background:var(--pink);display:flex;align-items:center;justify-content:center;font-family:var(--fs);font-weight:600;font-size:14px;color:#fff}
 .bname{font-family:var(--fs);font-size:14px;font-weight:600}
 .bsub{font-size:9px;color:var(--text2);letter-spacing:.6px;text-transform:uppercase;margin-top:1px}
 .pills{display:flex;gap:6px}
 .pill{display:flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:10px;border:1px solid var(--border2);color:var(--text2)}
 .dot{width:5px;height:5px;border-radius:50%}
 
+/* Layout */
 .body{display:flex;flex:1;overflow:hidden}
 .nav{width:176px;background:var(--surface);border-right:1px solid var(--border);padding:10px 0;overflow-y:auto;flex-shrink:0}
 .nlbl{font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--text2);padding:0 13px;margin:12px 0 5px;font-family:var(--fs)}
 .ni{display:flex;align-items:center;gap:7px;padding:7px 13px;font-size:12px;color:var(--text2);cursor:pointer;border-left:2px solid transparent;transition:all .12s}
 .ni:hover{color:var(--text);background:rgba(255,255,255,.04)}
-.ni.on{color:var(--teal);border-left-color:var(--teal);background:rgba(0,232,187,.07)}
+.ni.on{color:var(--pink-light);border-left-color:var(--pink-light);background:rgba(232,25,122,.07)}
 .nbadge{margin-left:auto;background:var(--rose);color:#fff;font-size:9px;font-family:var(--fm);padding:1px 5px;border-radius:8px}
 .pane{flex:1;overflow-y:auto;padding:18px 20px}
 .pg{display:none}.pg.on{display:block}
 
-/* Components */
+/* Typography */
 .ph-title{font-family:var(--fs);font-size:16px;font-weight:600;margin-bottom:3px}
 .ph-sub{font-size:11px;color:var(--text2);margin-bottom:14px}
-.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
-.kpi{background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:10px 12px}
-.kl{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px}
-.kv{font-size:20px;font-family:var(--fs);font-weight:600}
-.kt{font-size:10px;margin-top:2px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:12px 14px;margin-bottom:6px}
-.sec{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text2);margin:14px 0 7px;font-family:var(--fs)}
+.sec{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text2);margin:16px 0 8px;font-family:var(--fs)}
+
+/* Badges */
 .badge{display:inline-flex;align-items:center;font-size:10px;padding:2px 8px;border-radius:10px;font-family:var(--fm)}
-.bt{background:rgba(0,212,170,.12);color:var(--teal);border:1px solid rgba(0,212,170,.25)}
-.ba{background:rgba(244,161,48,.12);color:var(--amber);border:1px solid rgba(244,161,48,.25)}
-.br{background:rgba(242,82,112,.12);color:var(--rose);border:1px solid rgba(242,82,112,.25)}
-.bb{background:rgba(79,142,247,.12);color:var(--blue);border:1px solid rgba(79,142,247,.25)}
-.bg{background:var(--card2);color:var(--text2);border:1px solid var(--border2)}.btn{display:inline-flex;align-items:center;gap:4px;padding:5px 12px;border-radius:6px;font-size:11px;font-weight:500;border:none;cursor:pointer}
-.btn-p{background:var(--teal);color:#07090f}.btn-p:hover{opacity:.88}
+.bt{background:rgba(0,232,187,.12);color:var(--teal);border:1px solid rgba(0,232,187,.25)}
+.ba{background:rgba(255,179,64,.12);color:var(--amber);border:1px solid rgba(255,179,64,.25)}
+.br{background:rgba(255,96,128,.12);color:var(--rose);border:1px solid rgba(255,96,128,.25)}
+.bb{background:rgba(106,163,255,.12);color:var(--blue);border:1px solid rgba(106,163,255,.25)}
+.bp{background:rgba(232,25,122,.15);color:var(--pink-light);border:1px solid rgba(232,25,122,.3)}
+.bg{background:var(--card2);color:var(--text2);border:1px solid var(--border2)}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:4px;padding:5px 12px;border-radius:6px;font-size:11px;font-weight:500;border:none;cursor:pointer}
+.btn-p{background:var(--pink);color:#fff}.btn-p:hover{opacity:.88}
+.btn-t{background:var(--teal);color:#07090f}.btn-t:hover{opacity:.88}
 .btn-g{background:var(--border2);color:var(--text2)}.btn-g:hover{background:var(--border);color:var(--text)}
-.btn-r{background:rgba(242,82,112,.15);color:var(--rose);border:1px solid rgba(242,82,112,.3)}
-.btn-a{background:rgba(244,161,48,.15);color:var(--amber);border:1px solid rgba(244,161,48,.3)}
-.btn-b{background:rgba(79,142,247,.15);color:var(--blue);border:1px solid rgba(79,142,247,.3)}
+.btn-r{background:rgba(255,96,128,.15);color:var(--rose);border:1px solid rgba(255,96,128,.3)}
+.btn-b{background:rgba(106,163,255,.15);color:var(--blue);border:1px solid rgba(106,163,255,.3)}
 .arow{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
-.bar-wrap{flex:1;height:4px;background:var(--border2);border-radius:2px;overflow:hidden}
-.bar-fill{height:100%;border-radius:2px}
-.phase-bar{display:flex;border-radius:6px;overflow:hidden;border:1px solid var(--border2);margin-bottom:8px}
-.ph{flex:1;padding:5px 3px;text-align:center;border-right:1px solid var(--border2);font-size:9px}
-.ph:last-child{border-right:none}
-.ph .pn{display:block;font-family:var(--fm);color:var(--text3);margin-bottom:1px}
-.ph .pl{color:var(--text2)}
-.ph.done{background:rgba(34,197,94,.08)}.ph.done .pl,.ph.done .pn{color:#22c55e}
-.ph.now{background:rgba(79,142,247,.1)}.ph.now .pl{color:var(--blue);font-weight:500}.ph.now .pn{color:var(--blue)}
-.ph.pend{background:var(--surface)}
-.cg-hdr{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:5px}
-.cg-av{width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;font-family:var(--fs);flex-shrink:0}
-.cg-name{font-size:12px;font-weight:500;flex:1}
-.cg-body{padding-left:6px;display:flex;flex-direction:column;gap:5px;margin-bottom:10px}
-.ibanner{background:rgba(244,161,48,.08);border:1px solid rgba(244,161,48,.25);border-radius:9px;padding:9px 12px;display:flex;gap:8px;margin-bottom:12px;font-size:11px;color:var(--amber);line-height:1.55}
+
+/* Cards */
+.card{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:12px 14px;margin-bottom:6px}
+
+/* Project tiles grid */
+.tiles-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-bottom:16px}
+.tile{background:var(--card);border:1px solid var(--border);border-radius:11px;padding:14px;cursor:pointer;position:relative;transition:border-color .15s,transform .12s}
+.tile:hover{border-color:var(--border2);transform:translateY(-1px)}
+.tile-alert{position:absolute;top:10px;right:10px;font-size:10px;font-weight:500;font-family:var(--fm);padding:2px 8px;border-radius:8px}
+.tile-alert.behind{background:rgba(255,96,128,.2);color:var(--rose);border:1px solid rgba(255,96,128,.4)}
+.tile-alert.at-risk{background:rgba(255,179,64,.2);color:var(--amber);border:1px solid rgba(255,179,64,.4)}
+.tile-alert.on-hold{background:rgba(106,163,255,.2);color:var(--blue);border:1px solid rgba(106,163,255,.4)}
+.tile-alert.finalising{background:rgba(0,232,187,.15);color:var(--teal);border:1px solid rgba(0,232,187,.3)}
+.tile-client{font-size:13px;font-weight:600;color:var(--text);font-family:var(--fs);margin-bottom:2px;padding-right:70px}
+.tile-project{font-size:11px;color:var(--text2);margin-bottom:10px;padding-right:70px}
+
+/* Phase bar on tile */
+.tile-phases{display:flex;gap:2px;margin-bottom:10px}
+.tile-ph{flex:1;height:5px;border-radius:3px;background:var(--border2)}
+.tile-ph.done{background:rgba(0,232,187,.4)}
+.tile-ph.now{background:var(--pink)}
+.tile-ph-labels{display:flex;gap:2px;margin-bottom:10px}
+.tile-ph-label{flex:1;font-size:8px;text-align:center;font-family:var(--fm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile-ph-label.now{color:var(--pink-light);font-weight:500}
+.tile-ph-label.done{color:rgba(0,232,187,.6)}
+.tile-ph-label.pend{color:var(--text3)}
+
+.tile-meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+
+/* Project detail modal */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border2);border-radius:14px;width:680px;max-width:95vw;max-height:85vh;overflow-y:auto;padding:24px}
+.modal-hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px}
+.modal-title{font-family:var(--fs);font-size:18px;font-weight:600;color:var(--text)}
+.modal-sub{font-size:12px;color:var(--text2);margin-top:3px}
+.modal-close{background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer;padding:0;line-height:1}
+.modal-close:hover{color:var(--text)}
+
+/* Phase detail cards in modal */
+.phase-cards{display:flex;gap:6px;margin-bottom:16px;overflow-x:auto;padding-bottom:4px}
+.phase-card{flex-shrink:0;width:120px;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:10px;cursor:pointer;transition:all .12s}
+.phase-card:hover{border-color:var(--border2)}
+.phase-card.active{background:var(--pink);border-color:var(--pink)}
+.phase-card.done{background:rgba(0,232,187,.08);border-color:rgba(0,232,187,.25)}
+.phase-card.pending{opacity:.5}
+.phase-num{font-size:9px;font-family:var(--fm);margin-bottom:4px}
+.phase-name{font-size:11px;font-weight:500}
+.phase-card.active .phase-num,.phase-card.active .phase-name{color:#fff}
+.phase-card.done .phase-num,.phase-card.done .phase-name{color:var(--teal)}
+
+.phase-detail-box{background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:13px;margin-bottom:14px}
+.phase-detail-title{font-size:12px;font-weight:500;color:var(--text);margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.phase-detail-content{font-size:12px;color:var(--text2);line-height:1.7}
+
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+.info-item{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 12px}
+.info-label{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:4px}
+.info-val{font-size:13px;font-weight:500;color:var(--text)}
 
 /* Chat */
 .chat-msgs{min-height:260px;max-height:360px;overflow-y:auto;display:flex;flex-direction:column;gap:9px;padding-bottom:10px}
 .msg{display:flex;gap:7px;align-items:flex-start}
 .msg.u{flex-direction:row-reverse}
 .av{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0;font-family:var(--fs)}
-.av-a{background:var(--teal);color:#07090f}
+.av-a{background:var(--pink);color:#fff}
 .av-u{background:var(--border2);color:var(--text2)}
 .bub{background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:8px 11px;font-size:12px;line-height:1.65;max-width:88%;white-space:pre-line;color:var(--text)}
-.msg.u .bub{background:rgba(106,163,255,.1);border-color:rgba(106,163,255,.25)}
+.msg.u .bub{background:rgba(106,163,255,.1);border-color:rgba(106,163,255,.2)}
 .cin-row{display:flex;gap:6px;padding-top:10px;border-top:1px solid var(--border)}
 .cin{flex:1}
-.csend{background:var(--teal);color:#07090f;border:none;border-radius:6px;padding:0 14px;cursor:pointer;font-size:14px}
+.csend{background:var(--pink);color:#fff;border:none;border-radius:6px;padding:0 14px;cursor:pointer;font-size:14px}
 .tdots{display:inline-flex;gap:3px;align-items:center}
 .tdots span{width:4px;height:4px;background:var(--text3);border-radius:50%;animation:td 1.2s ease-in-out infinite}
 .tdots span:nth-child(2){animation-delay:.2s}.tdots span:nth-child(3){animation-delay:.4s}
 @keyframes td{0%,80%,100%{opacity:.2}40%{opacity:1}}
 .chip{padding:4px 11px;border-radius:20px;font-size:11px;background:var(--card2);border:1px solid var(--border2);color:var(--text2);cursor:pointer;transition:all .12s}
-.chip:hover{border-color:var(--teal);color:var(--teal)}
+.chip:hover{border-color:var(--pink);color:var(--pink-light)}
 
 /* Upload zone */
 .upzone{border:1px dashed var(--border2);border-radius:9px;padding:18px;text-align:center;cursor:pointer;transition:all .15s}
-.upzone:hover,.upzone.over{background:rgba(0,212,170,.05);border-color:var(--teal)}
+.upzone:hover,.upzone.over{background:rgba(232,25,122,.05);border-color:var(--pink)}
 
-/* Report grid */
+/* Reports */
 .rep-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.rep-card{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:12px 14px;cursor:pointer}
+.rep-card{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:12px 14px;cursor:pointer;transition:border-color .12s}
 .rep-card:hover{border-color:var(--border2)}
+
+/* IBanner */
+.ibanner{background:rgba(255,179,64,.08);border:1px solid rgba(255,179,64,.25);border-radius:9px;padding:9px 12px;display:flex;gap:8px;margin-bottom:12px;font-size:11px;color:var(--amber);line-height:1.55}
+
+/* Completed toggle */
+.completed-toggle{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--card2);border:1px solid var(--border);border-radius:9px;cursor:pointer;font-size:12px;color:var(--text2);margin-top:8px}
+.completed-toggle:hover{color:var(--text)}
+.completed-section{display:none;margin-top:8px}
+.completed-section.open{display:block}
 </style>
 </head>
 <body>
@@ -119,14 +174,14 @@ input::placeholder,textarea::placeholder{color:var(--text3)}
   </div>
   <div class="pills">
     <div class="pill"><div class="dot" style="background:var(--teal)"></div>Monday.com</div>
-    <div class="pill"><div class="dot" style="background:var(--teal)"></div>Doc library</div>
+    <div class="pill"><div class="dot" style="background:var(--teal)"></div>SharePoint</div>
     <div class="pill"><div class="dot" style="background:var(--blue)"></div>Outlook · info@risk2solution.com</div>
     <div class="pill"><div class="dot" style="background:var(--amber)"></div>Training calendar</div>
   </div>
 </div>
 
 <div class="body">
-  <div class="nav" id="nav">
+  <div class="nav">
     <div class="nlbl">Command</div>
     <div class="ni on" onclick="nav('overview',this)">⬜ Overview</div>
     <div class="ni" onclick="nav('projects',this)">💼 Projects</div>
@@ -150,43 +205,27 @@ input::placeholder,textarea::placeholder{color:var(--text3)}
     <div id="pg-overview" class="pg on">
       <div class="ph-title">Good morning</div>
       <div class="ph-sub" id="overview-sub">Aurora is reviewing your projects…</div>
-      <div class="kpis">
-        <div class="kpi"><div class="kl">Active projects</div><div class="kv" id="k-active">—</div><div class="kt" style="color:var(--teal)">Managed by Aurora</div></div>
-        <div class="kpi"><div class="kl">On track</div><div class="kv" id="k-ontrack">—</div><div class="kt" style="color:var(--teal)">Healthy</div></div>
-        <div class="kpi"><div class="kl">Needs attention</div><div class="kv" id="k-atrisk">—</div><div class="kt" style="color:var(--amber)">Review today</div></div>
-        <div class="kpi"><div class="kl">Ongoing</div><div class="kv" id="k-ongoing">—</div><div class="kt" style="color:var(--text3)">Display only</div></div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+        <div class="card" style="padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Active projects</div><div style="font-size:20px;font-family:var(--fs);font-weight:600" id="k-active">—</div><div style="font-size:10px;color:var(--teal);margin-top:2px">Managed by Aurora</div></div>
+        <div class="card" style="padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">On track</div><div style="font-size:20px;font-family:var(--fs);font-weight:600" id="k-ontrack">—</div><div style="font-size:10px;color:var(--teal);margin-top:2px">Healthy</div></div>
+        <div class="card" style="padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Needs attention</div><div style="font-size:20px;font-family:var(--fs);font-weight:600" id="k-atrisk">—</div><div style="font-size:10px;color:var(--amber);margin-top:2px">Review today</div></div>
+        <div class="card" style="padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Ongoing</div><div style="font-size:20px;font-family:var(--fs);font-weight:600" id="k-ongoing">—</div><div style="font-size:10px;color:var(--text3);margin-top:2px">Display only</div></div>
       </div>
-      <div class="ibanner">ℹ <div><strong style="display:block;margin-bottom:2px">Human approval required</strong>Aurora drafts all communications and reports. Nothing sends to clients without your approval. Internal alerts go to info@risk2solution.com automatically.</div></div>
+      <div class="ibanner">ℹ <div><strong style="display:block;margin-bottom:2px">Human approval required</strong>Aurora drafts all communications. Nothing sends to clients without your approval. Internal alerts go to info@risk2solution.com.</div></div>
       <div class="sec">Quick actions</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div class="card" style="cursor:pointer" onclick="nav('comms',document.querySelector('[onclick*=comms]'))">
-          <div style="font-size:16px;margin-bottom:6px;color:var(--teal)">✉</div>
-          <div style="font-size:12px;font-weight:500;margin-bottom:3px">Comms drafts</div>
-          <div style="font-size:11px;color:var(--text2)">Review and approve Aurora's drafted emails before they go to clients.</div>
-        </div>
-        <div class="card" style="cursor:pointer" onclick="nav('ask',document.querySelector('[onclick*=ask]'))">
-          <div style="font-size:16px;margin-bottom:6px;color:var(--violet)">✦</div>
-          <div style="font-size:12px;font-weight:500;margin-bottom:3px">Ask Aurora</div>
-          <div style="font-size:11px;color:var(--text2)">Get a project briefing, draft a report, or ask anything about your portfolio.</div>
-        </div>
-        <div class="card" style="cursor:pointer" onclick="nav('reports',document.querySelector('[onclick*=reports]'))">
-          <div style="font-size:16px;margin-bottom:6px;color:var(--blue)">≡</div>
-          <div style="font-size:12px;font-weight:500;margin-bottom:3px">Reports</div>
-          <div style="font-size:11px;color:var(--text2)">Generate status, risk, milestone or portfolio reports on demand.</div>
-        </div>
-        <div class="card" style="cursor:pointer" onclick="nav('docs',document.querySelector('[onclick*=docs]'))">
-          <div style="font-size:16px;margin-bottom:6px;color:var(--amber)">◧</div>
-          <div style="font-size:12px;font-weight:500;margin-bottom:3px">Document library</div>
-          <div style="font-size:11px;color:var(--text2)">Upload contracts and proposals. Aurora reads them and uses them to manage projects.</div>
-        </div>
+        <div class="card" style="cursor:pointer" onclick="nav('projects',document.querySelector('[onclick*=projects]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--pink-light)">💼</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">View all projects</div><div style="font-size:11px;color:var(--text2)">See project tiles, phases, and status at a glance.</div></div>
+        <div class="card" style="cursor:pointer" onclick="nav('comms',document.querySelector('[onclick*=comms]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--teal)">✉</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Comms drafts</div><div style="font-size:11px;color:var(--text2)">Review and approve Aurora's drafted emails.</div></div>
+        <div class="card" style="cursor:pointer" onclick="nav('ask',document.querySelector('[onclick*=ask]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--violet)">✦</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Ask Aurora</div><div style="font-size:11px;color:var(--text2)">Get a briefing, draft a report, or ask anything.</div></div>
+        <div class="card" style="cursor:pointer" onclick="nav('reports',document.querySelector('[onclick*=reports]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--blue)">≡</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Reports</div><div style="font-size:11px;color:var(--text2)">Generate status, risk, milestone, or portfolio reports.</div></div>
       </div>
     </div>
 
     <!-- PROJECTS -->
     <div id="pg-projects" class="pg">
       <div class="ph-title">Projects</div>
-      <div class="ph-sub">Synced from Monday.com · Aurora manages all standard projects.</div>
-      <div style="display:flex;gap:6px;margin-bottom:12px">
+      <div class="ph-sub">Click any tile to open full project detail. Active phase shown in pink.</div>
+      <div style="display:flex;gap:6px;margin-bottom:14px">
         <button class="btn btn-p" onclick="syncProjects()">↻ Sync Monday.com</button>
       </div>
       <div id="projects-list"><div style="color:var(--text3);font-size:12px">Loading projects…</div></div>
@@ -195,10 +234,10 @@ input::placeholder,textarea::placeholder{color:var(--text3)}
     <!-- ASK AURORA -->
     <div id="pg-ask" class="pg">
       <div class="ph-title">Ask Aurora</div>
-      <div class="ph-sub">Your AI project manager — ask anything about projects, clients, or documents.</div>
+      <div class="ph-sub">Your AI project manager — ask anything about projects, contracts, or deliverables.</div>
       <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px" id="chips"></div>
       <div class="chat-msgs" id="chat-msgs">
-        <div class="msg"><div class="av av-a">A</div><div class="bub">Morning. I'm across all your projects. I manage the full lifecycle — Kick-off through Close-out — track milestones, risks, stakeholders, and training sessions, and draft all communications for your review. Ongoing training delivery projects are in my list but I don't action them. What would you like to work on?</div></div>
+        <div class="msg"><div class="av av-a">A</div><div class="bub">Morning. I'm across all your projects. I manage the full lifecycle — Kick-off through Close-out — pull deliverables and scope from your SharePoint contracts, and draft all communications for your review. What would you like to work on?</div></div>
       </div>
       <div class="cin-row">
         <input class="cin" id="cin" placeholder="Ask Aurora anything…" onkeydown="if(event.key==='Enter')sendChat()"/>
@@ -245,33 +284,18 @@ input::placeholder,textarea::placeholder{color:var(--text3)}
     <!-- CALENDAR -->
     <div id="pg-calendar" class="pg">
       <div class="ph-title">Training & education calendar</div>
-      <div class="ph-sub">Outlook training calendar · project milestones, training sessions, and auto follow-up reminders.</div>
-      <div class="card">
-        <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Upcoming events sync from Monday.com and Outlook. Aurora automatically sets 1-year and 2-year client follow-up reminders when a project closes.</div>
-        <div style="display:flex;gap:12px;font-size:11px;color:var(--text2)">
-          <span><span style="color:var(--blue)">●</span> Milestone</span>
-          <span><span style="color:var(--violet)">●</span> Meeting/Training</span>
-          <span><span style="color:var(--amber)">●</span> Follow-up reminder</span>
-          <span><span style="color:var(--rose)">●</span> Invoice due</span>
-        </div>
-      </div>
+      <div class="ph-sub">Outlook training calendar · milestones, training sessions, and auto follow-up reminders.</div>
+      <div class="card"><div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:10px">Aurora reads the R2S Training & Education calendar to check if training or consulting sessions have been delivered, then updates project status accordingly. Client follow-up reminders are written to the info@risk2solution.com calendar.</div>
+      <div style="display:flex;gap:12px;font-size:11px;color:var(--text2)"><span><span style="color:var(--blue)">●</span> Milestone</span><span><span style="color:var(--violet)">●</span> Training</span><span><span style="color:var(--amber)">●</span> Follow-up</span><span><span style="color:var(--rose)">●</span> Invoice due</span></div></div>
       <div class="sec">Auto follow-up reminders (set by Aurora on close-out)</div>
-      <div class="card">
-        <div style="font-size:12px;font-weight:500;margin-bottom:3px">When a project closes, Aurora automatically:</div>
-        <div style="font-size:11px;color:var(--text2);line-height:1.7">
-          1. Sets a 1-year reminder in the Outlook training calendar<br>
-          2. Sets a 2-year reminder in the Outlook training calendar<br>
-          3. Prepares a draft check-in email for each reminder<br>
-          4. Sends internal notification to info@risk2solution.com
-        </div>
-      </div>
+      <div class="card"><div style="font-size:12px;font-weight:500;margin-bottom:6px">When a project closes, Aurora automatically:</div><div style="font-size:11px;color:var(--text2);line-height:1.8">1. Sets a 1-year reminder in the info@risk2solution.com Outlook calendar<br>2. Sets a 2-year reminder in the info@risk2solution.com Outlook calendar<br>3. Prepares a draft check-in email for each reminder<br>4. Sends internal notification to info@risk2solution.com</div></div>
     </div>
 
     <!-- DOCUMENTS -->
     <div id="pg-docs" class="pg">
       <div class="ph-title">Document library</div>
-      <div class="ph-sub">Upload contracts and proposals. Aurora reads them once and uses the info across all tasks.</div>
-      <div class="ibanner">ℹ Upload a client contract or proposal and Aurora will extract scope, deliverables, fees, and key dates — and use that information to manage the project. Documents from completed projects are retained for future reference.</div>
+      <div class="ph-sub">Aurora reads contracts from SharePoint automatically. Upload additional documents here.</div>
+      <div class="ibanner">ℹ Aurora reads contracts linked in Monday.com via SharePoint. Upload any additional documents here and Aurora will extract scope, deliverables, fees, and dates to manage the project.</div>
       <div id="docs-list"></div>
       <div class="upzone" id="upzone" onclick="document.getElementById('file-input').click()" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="handleDrop(event)">
         <div style="font-size:24px;margin-bottom:6px">⬆</div>
@@ -287,43 +311,57 @@ input::placeholder,textarea::placeholder{color:var(--text3)}
       <div class="ph-sub">Select a client and report type. Aurora generates it — clear, concise, ready to download.</div>
       <div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
         <label style="font-size:11px;color:var(--text2)">Client</label>
-        <select id="rep-client" onchange="updateRepProjects()" style="min-width:160px">
-          <option value="">All clients</option>
-        </select>
+        <select id="rep-client" onchange="updateRepProjects()" style="min-width:160px"><option value="">All clients</option></select>
         <label style="font-size:11px;color:var(--text2)">Project</label>
-        <select id="rep-project" style="min-width:160px">
-          <option value="">All projects</option>
-        </select>
+        <select id="rep-project" style="min-width:160px"><option value="">All projects</option></select>
       </div>
       <div class="rep-grid">
         <div class="rep-card" onclick="generateReport('status')"><div style="font-size:18px;margin-bottom:7px;color:var(--blue)">📄</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Project status report</div><div style="font-size:11px;color:var(--text2)">Where we are, what's next, any issues. Short and factual.</div><div style="margin-top:8px"><span class="badge bb">Word</span></div></div>
         <div class="rep-card" onclick="generateReport('milestones')"><div style="font-size:18px;margin-bottom:7px;color:var(--teal)">📊</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Milestone tracker</div><div style="font-size:11px;color:var(--text2)">All milestones, due dates, and status in a clean table.</div><div style="margin-top:8px"><span class="badge bt">Excel</span></div></div>
-        <div class="rep-card" onclick="generateReport('risks')"><div style="font-size:18px;margin-bottom:7px;color:var(--amber)">🛡</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Risk register</div><div style="font-size:11px;color:var(--text2)">Risks, ratings, and mitigations. Simple table, no fluff.</div><div style="margin-top:8px"><span class="badge ba">Excel</span></div></div>
+        <div class="rep-card" onclick="generateReport('risks')"><div style="font-size:18px;margin-bottom:7px;color:var(--amber)">🛡</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Risk register</div><div style="font-size:11px;color:var(--text2)">Risks, ratings, and mitigations. Simple, no fluff.</div><div style="margin-top:8px"><span class="badge ba">Excel</span></div></div>
         <div class="rep-card" onclick="generateReport('closeout')"><div style="font-size:18px;margin-bottom:7px;color:var(--teal)">🏁</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Close-out report</div><div style="font-size:11px;color:var(--text2)">What was delivered, outcomes, forward recommendations.</div><div style="margin-top:8px"><span class="badge bt">Word</span></div></div>
-        <div class="rep-card" onclick="generateReport('invoices')"><div style="font-size:18px;margin-bottom:7px;color:var(--rose)">🧾</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Invoice summary</div><div style="font-size:11px;color:var(--text2)">Invoice status and payments across a project or client.</div><div style="margin-top:8px"><span class="badge bt">Excel</span></div></div>
-        <div class="rep-card" onclick="generateReport('portfolio')"><div style="font-size:18px;margin-bottom:7px;color:var(--violet)">⬜</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Portfolio overview</div><div style="font-size:11px;color:var(--text2)">All active projects on one page — status, dates, actions.</div><div style="margin-top:8px"><span class="badge bb">Word</span></div></div>
+        <div class="rep-card" onclick="generateReport('invoices')"><div style="font-size:18px;margin-bottom:7px;color:var(--rose)">🧾</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Invoice summary</div><div style="font-size:11px;color:var(--text2)">Invoice status and payment summary.</div><div style="margin-top:8px"><span class="badge bt">Excel</span></div></div>
+        <div class="rep-card" onclick="generateReport('portfolio')"><div style="font-size:18px;margin-bottom:7px;color:var(--violet)">⬜</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Portfolio overview</div><div style="font-size:11px;color:var(--text2)">All active projects — status, dates, actions needed.</div><div style="margin-top:8px"><span class="badge bb">Word</span></div></div>
       </div>
       <div id="report-output" style="display:none;margin-top:14px">
         <div class="sec">Generated report</div>
         <div class="card" style="white-space:pre-line;font-size:12px;line-height:1.7;color:var(--text2)" id="report-content"></div>
-        <div class="arow" style="margin-top:10px">
-          <button class="btn btn-p" onclick="downloadReport()">⬇ Download</button>
-          <button class="btn btn-g" onclick="document.getElementById('report-output').style.display='none'">Close</button>
-        </div>
+        <div class="arow" style="margin-top:10px"><button class="btn btn-t" onclick="downloadReport()">⬇ Download</button><button class="btn btn-g" onclick="document.getElementById('report-output').style.display='none'">Close</button></div>
       </div>
     </div>
 
-  </div><!-- /pane -->
-</div><!-- /body -->
+  </div>
+</div>
+
+<!-- PROJECT DETAIL MODAL -->
+<div class="modal-bg" id="modal-bg" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modal-content">
+    <div class="modal-hdr">
+      <div>
+        <div class="modal-title" id="modal-title">Project</div>
+        <div class="modal-sub" id="modal-sub"></div>
+      </div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
 
 <script>
-const API = '';  // same origin — backend serves frontend
+const API = '';
+const PHASES = ['Kick-off','Deployment','Monitoring & Review','Reporting','Close-out'];
+const PHASE_DESC = {
+  0: 'Initial project meeting with client and R2S team. Confirm scope, contacts, timelines, and project expectations. Set up project in Monday.com and document library.',
+  1: 'Active service delivery phase. This is where the contracted work happens — assessments, training sessions, audits, or consulting as per the SOW. Deliverables are being produced.',
+  2: 'Service or systems are in place. Weekly monitoring report and project summary. Aurora drafts weekly email updates to client covering progress, what\'s been done, what\'s next, and any actions required from either party.',
+  3: 'Compile and finalise all deliverables, reports, and documentation. Aurora drafts the final report and any client-facing summaries for your approval before sending.',
+  4: 'Final delivery confirmed. Invoice issued. Aurora sets 1-year and 2-year follow-up reminders in Outlook calendar for client relationship management.'
+};
 
-// ── State ─────────────────────────────────────────────────────────────────────
 let projects = [];
-let drafts   = [];
+let drafts = [];
 let chatHistory = [];
-let lastReport  = '';
+let lastReport = '';
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 function nav(id, el) {
@@ -340,12 +378,9 @@ function nav(id, el) {
   if (id === 'docs')        renderDocs();
 }
 
-// ── API helpers ───────────────────────────────────────────────────────────────
+// ── API ───────────────────────────────────────────────────────────────────────
 async function api(path, opts = {}) {
-  const res = await fetch(API + path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-  });
+  const res = await fetch(API + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
   return res.json();
 }
 
@@ -367,168 +402,283 @@ async function syncProjects() {
 function updateOverview() {
   const standard = projects.filter(p => p.type === 'standard');
   const ongoing  = projects.filter(p => p.type === 'ongoing');
-  const ontrack  = standard.filter(p => p.progress >= 55).length;
-  const atrisk   = standard.filter(p => p.progress < 55).length;
+  const ontrack  = standard.filter(p => !isAtRisk(p)).length;
+  const atrisk   = standard.filter(p => isAtRisk(p)).length;
   document.getElementById('k-active').textContent  = standard.length;
   document.getElementById('k-ontrack').textContent = ontrack;
   document.getElementById('k-atrisk').textContent  = atrisk;
   document.getElementById('k-ongoing').textContent = ongoing.length;
   document.getElementById('overview-sub').textContent =
-    `Aurora has reviewed all projects. ${atrisk} project${atrisk !== 1 ? 's' : ''} need${atrisk === 1 ? 's' : ''} attention.`;
+    atrisk > 0 ? `${atrisk} project${atrisk > 1 ? 's' : ''} need${atrisk === 1 ? 's' : ''} your attention today.` : 'All projects on track.';
 }
 
-const PHASES = ['Kick-off','Deployment','Monitoring & Review','Reporting','Close-out'];
-const COLORS  = { standard: '', ongoing: '' };
-
-function clientInitials(name) {
-  return name.split(' ').slice(0,2).map(w => w[0]).join('').toUpperCase();
+function isAtRisk(p) {
+  const s = (p.status || '').toLowerCase();
+  return s.includes('behind') || s.includes('risk') || s.includes('overdue') || (p.progress < 40 && p.dueDate);
 }
 
-function phaseBar(phase) {
-  return PHASES.map((p, i) => {
-    const cls = i < phase ? 'done' : i === phase ? 'now' : 'pend';
-    return `<div class="ph ${cls}"><span class="pn">${String(i+1).padStart(2,'0')}</span><span class="pl">${p}</span></div>`;
-  }).join('');
+function isOnHold(p) {
+  return (p.status || '').toLowerCase().includes('hold');
 }
 
-function statusBadge(p) {
-  if (p.type === 'ongoing') return '<span class="badge bg">Ongoing</span>';
-  if (p.progress >= 90)     return '<span class="badge bb">Finalising</span>';
-  if (p.progress < 35)      return '<span class="badge br">Behind</span>';
-  if (p.progress < 55)      return '<span class="badge ba">At risk</span>';
-  return '<span class="badge bt">On track</span>';
+function isCompleted(p) {
+  return (p.status || '').toLowerCase().includes('complet') || p.phase >= 4;
 }
 
-function barColor(p) {
-  if (p.progress >= 90) return 'var(--blue)';
-  if (p.progress < 35)  return 'var(--rose)';
-  if (p.progress < 55)  return 'var(--amber)';
-  return 'var(--teal)';
+function alertLabel(p) {
+  const s = (p.status || '').toLowerCase();
+  if (isOnHold(p)) return { label: 'On Hold', cls: 'on-hold' };
+  if (s.includes('behind')) return { label: 'Behind', cls: 'behind' };
+  if (s.includes('risk'))   return { label: 'At Risk', cls: 'at-risk' };
+  if (p.phase >= 4)         return { label: 'Finalising', cls: 'finalising' };
+  return null;
 }
 
 function renderProjects() {
-  if (!projects.length) { document.getElementById('projects-list').innerHTML = '<div style="color:var(--text3);font-size:12px">No projects found. Connect Monday.com to sync.</div>'; return; }
+  const standard  = projects.filter(p => p.type === 'standard' && !isCompleted(p));
+  const completed = projects.filter(p => p.type === 'standard' && isCompleted(p));
+  const ongoing   = projects.filter(p => p.type === 'ongoing');
 
-  const standard = projects.filter(p => p.type === 'standard');
-  const ongoing  = projects.filter(p => p.type === 'ongoing');
   let html = '';
 
   if (standard.length) {
-    html += `<div class="sec">Active projects</div>`;
-    standard.forEach(p => {
-      html += `<div class="cg-hdr"><div class="cg-av" style="background:rgba(0,212,170,.12);color:var(--teal)">${clientInitials(p.clientName)}</div><div class="cg-name">${p.clientName}</div>${statusBadge(p)}</div>
-      <div class="cg-body"><div class="card">
-        <div style="font-size:12px;font-weight:500;margin-bottom:8px">${p.name}</div>
-        <div class="phase-bar">${phaseBar(p.phase)}</div>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <div class="bar-wrap"><div class="bar-fill" style="width:${p.progress}%;background:${barColor(p)}"></div></div>
-          <span style="font-size:11px;font-family:var(--fm);color:var(--text2)">${p.progress}%</span>
-        </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-          ${p.dueDate ? `<span class="badge bg">📅 ${p.dueDate}</span>` : ''}
-          ${p.value ? `<span class="badge bg">${p.value}</span>` : ''}
-          <button class="btn btn-g" style="margin-left:auto;font-size:10px" onclick="askAboutProject('${p.id}')">Briefing ↗</button>
-        </div>
-      </div></div>`;
-    });
+    html += '<div class="tiles-grid">' + standard.map(p => tileHTML(p)).join('') + '</div>';
   }
 
   if (ongoing.length) {
-    html += `<div class="sec">Ongoing training delivery — display only</div>`;
+    html += `<div class="sec">Ongoing training delivery — display only</div><div style="display:flex;flex-direction:column;gap:5px">`;
     ongoing.forEach(p => {
       html += `<div class="card" style="display:flex;align-items:center;gap:10px">
-        <div class="cg-av" style="background:var(--card2);color:var(--text3)">${clientInitials(p.clientName)}</div>
-        <div style="flex:1"><div style="font-size:12px;font-weight:500">${p.clientName}</div><div style="font-size:11px;color:var(--text3)">${p.name}</div></div>
+        <div style="width:26px;height:26px;border-radius:6px;background:var(--card2);color:var(--text3);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${initials(p.clientName)}</div>
+        <div style="flex:1"><div style="font-size:12px;font-weight:500">${p.clientName}</div><div style="font-size:11px;color:var(--text3)">${p.projectName || p.name}</div></div>
         <span class="badge bg">Ongoing</span>
       </div>`;
     });
+    html += '</div>';
   }
 
+  if (completed.length) {
+    html += `<div class="completed-toggle" onclick="toggleCompleted()">
+      <span>▶</span> <span>Completed projects (${completed.length})</span>
+    </div>
+    <div class="completed-section" id="completed-section">
+      <div class="tiles-grid" style="margin-top:8px">` +
+      completed.map(p => tileHTML(p, true)).join('') +
+      `</div></div>`;
+  }
+
+  if (!html) html = '<div style="color:var(--text3);font-size:12px">No projects found. Click "Sync Monday.com" to load your projects.</div>';
   document.getElementById('projects-list').innerHTML = html;
 }
 
-function askAboutProject(id) {
+function tileHTML(p, dimmed) {
+  const phase = p.phase || 0;
+  const alert = alertLabel(p);
+  const phaseBars = PHASES.map((ph, i) => {
+    const cls = i < phase ? 'done' : i === phase ? 'now' : '';
+    return `<div class="tile-ph ${cls}"></div>`;
+  }).join('');
+  const phaseLabels = PHASES.map((ph, i) => {
+    const cls = i < phase ? 'done' : i === phase ? 'now' : 'pend';
+    return `<div class="tile-ph-label ${cls}">${ph.split(' ')[0]}</div>`;
+  }).join('');
+
+  return `<div class="tile" onclick="openProject('${p.id}')" style="${dimmed ? 'opacity:.7' : ''}">
+    ${alert ? `<div class="tile-alert ${alert.cls}">${alert.label}</div>` : ''}
+    <div class="tile-client">${p.clientName}</div>
+    <div class="tile-project">${p.projectName || ''}</div>
+    <div class="tile-phases">${phaseBars}</div>
+    <div class="tile-ph-labels">${phaseLabels}</div>
+    <div class="tile-meta">
+      ${p.value ? `<span class="badge bg">${p.value}</span>` : ''}
+      ${p.dueDate ? `<span class="badge bg">📅 ${p.dueDate}</span>` : ''}
+      ${isCompleted(p) ? '<span class="badge bt">✓ Complete</span>' : ''}
+    </div>
+  </div>`;
+}
+
+function toggleCompleted() {
+  const s = document.getElementById('completed-section');
+  const t = document.querySelector('.completed-toggle');
+  s.classList.toggle('open');
+  t.querySelector('span').textContent = s.classList.contains('open') ? '▼' : '▶';
+}
+
+// ── Project detail modal ──────────────────────────────────────────────────────
+function openProject(id) {
   const p = projects.find(x => x.id === id);
   if (!p) return;
-  document.getElementById('cin').value = `Give me a full briefing on the ${p.name} project for ${p.clientName}`;
+  const phase = p.phase || 0;
+
+  document.getElementById('modal-title').textContent = p.clientName;
+  document.getElementById('modal-sub').textContent = p.projectName || p.name;
+
+  const phasecards = PHASES.map((ph, i) => {
+    const cls = i < phase ? 'done' : i === phase ? 'active' : 'pending';
+    return `<div class="phase-card ${cls}" onclick="showPhaseDetail(${i}, '${id}')">
+      <div class="phase-num">Phase ${i+1}</div>
+      <div class="phase-name">${ph}</div>
+    </div>`;
+  }).join('');
+
+  const alert = alertLabel(p);
+  const statusBadge = alert
+    ? `<span class="badge ${alert.cls === 'behind' ? 'br' : alert.cls === 'on-hold' ? 'bb' : 'ba'}">${alert.label}</span>`
+    : '<span class="badge bt">On track</span>';
+
+  document.getElementById('modal-body').innerHTML = `
+    <div class="phase-cards">${phasecards}</div>
+    <div id="phase-detail-box" class="phase-detail-box">
+      <div class="phase-detail-title">
+        <span style="background:var(--pink);color:#fff;padding:2px 8px;border-radius:6px;font-size:11px">Phase ${phase+1}</span>
+        <span style="font-size:13px;font-weight:500">${PHASES[phase]}</span>
+      </div>
+      <div class="phase-detail-content">${PHASE_DESC[phase]}</div>
+    </div>
+    <div class="info-grid">
+      <div class="info-item"><div class="info-label">Status</div><div class="info-val">${statusBadge}</div></div>
+      <div class="info-item"><div class="info-label">Contract value</div><div class="info-val">${p.value || '—'}</div></div>
+      <div class="info-item"><div class="info-label">Due date</div><div class="info-val">${p.dueDate || '—'}</div></div>
+      <div class="info-item"><div class="info-label">Contact</div><div class="info-val">${p.clientContact || '—'}</div></div>
+    </div>
+    ${p.sharepointUrl ? `<div style="margin-bottom:14px"><a href="${p.sharepointUrl}" target="_blank" style="color:var(--blue);font-size:12px">📎 View contract / resources in SharePoint ↗</a></div>` : ''}
+    <div class="arow">
+      <button class="btn btn-p" onclick="closeModal();generateDraft('${p.id}','status_email','')">Draft status email ↗</button>
+      <button class="btn btn-g" onclick="closeModal();askAboutProject('${p.id}')">Ask Aurora ↗</button>
+      ${p.sharepointUrl ? `<button class="btn btn-b" onclick="readContract('${p.id}')">Read contract ↗</button>` : ''}
+    </div>`;
+
+  document.getElementById('modal-bg').classList.add('open');
+}
+
+function showPhaseDetail(phaseIdx, projectId) {
+  const box = document.getElementById('phase-detail-box');
+  if (!box) return;
+  document.querySelectorAll('.phase-card').forEach((c,i) => {
+    const p = projects.find(x => x.id === projectId);
+    const phase = p?.phase || 0;
+    c.className = `phase-card ${i < phase ? 'done' : i === phaseIdx ? 'active' : 'pending'}`;
+  });
+  box.innerHTML = `
+    <div class="phase-detail-title">
+      <span style="background:var(--pink);color:#fff;padding:2px 8px;border-radius:6px;font-size:11px">Phase ${phaseIdx+1}</span>
+      <span style="font-size:13px;font-weight:500">${PHASES[phaseIdx]}</span>
+    </div>
+    <div class="phase-detail-content">${PHASE_DESC[phaseIdx]}</div>`;
+}
+
+function closeModal() {
+  document.getElementById('modal-bg').classList.remove('open');
+}
+
+async function readContract(projectId) {
+  const p = projects.find(x => x.id === projectId);
+  if (!p || !p.sharepointUrl) return;
+  document.getElementById('cin').value = `Read the SharePoint contract for ${p.clientName} and tell me the key deliverables, scope, and timeline.`;
   nav('ask', document.querySelector('[onclick*="ask"]'));
   sendChat();
 }
 
-// ── Milestones (pulled from projects for now) ─────────────────────────────────
+// ── Milestones ────────────────────────────────────────────────────────────────
 function renderMilestones() {
-  const standard = projects.filter(p => p.type === 'standard');
-  if (!standard.length) { document.getElementById('milestones-list').innerHTML = '<div style="color:var(--text3);font-size:12px">No projects loaded. Go to Projects and sync first.</div>'; return; }
+  const standard = projects.filter(p => p.type === 'standard' && !isCompleted(p));
+  if (!standard.length) { document.getElementById('milestones-list').innerHTML = '<div style="color:var(--text3);font-size:12px">No active projects. Sync Monday.com first.</div>'; return; }
   let html = '';
   standard.forEach(p => {
-    const phase = PHASES[p.phase] || 'Unknown';
-    html += `<div class="cg-hdr"><div class="cg-av" style="background:rgba(0,212,170,.12);color:var(--teal)">${clientInitials(p.clientName)}</div><div class="cg-name">${p.clientName} · ${p.name}</div>${statusBadge(p)}</div>
-    <div class="cg-body"><div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-        <span style="font-size:12px;font-weight:500">Current phase: ${phase}</span>
-        ${p.dueDate ? `<span class="badge bg">${p.dueDate}</span>` : ''}
+    html += `<div style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:5px">
+        <div style="width:26px;height:26px;border-radius:6px;background:rgba(232,25,122,.12);color:var(--pink-light);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${initials(p.clientName)}</div>
+        <div style="flex:1;font-size:12px;font-weight:500">${p.clientName} · ${p.projectName || p.name}</div>
+        <span class="badge bg">${PHASES[p.phase||0]}</span>
       </div>
-      <div style="font-size:11px;color:var(--text2);margin-bottom:8px">${p.notes || 'No notes.'}</div>
-      <div class="arow"><button class="btn btn-p" onclick="generateDraft('${p.id}','status_email','Draft a milestone update email for ${p.name} at ${p.clientName}')">Draft milestone update ↗</button></div>
-    </div></div>`;
+      <div style="padding-left:6px">
+        <div class="card">
+          <div style="font-size:12px;font-weight:500;margin-bottom:4px">Current phase: ${PHASES[p.phase||0]}</div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:8px">${PHASE_DESC[p.phase||0]}</div>
+          ${p.dueDate ? `<div style="font-size:11px;color:var(--text2);margin-bottom:8px">📅 Due: ${p.dueDate}</div>` : ''}
+          <div class="arow">
+            <button class="btn btn-p" style="font-size:10px" onclick="generateDraft('${p.id}','status_email','Draft a monitoring and review weekly summary email for ${p.projectName||p.name} at ${p.clientName}')">Draft weekly update ↗</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
   });
   document.getElementById('milestones-list').innerHTML = html;
 }
 
 // ── Risks ─────────────────────────────────────────────────────────────────────
 function renderRisks() {
-  const atrisk = projects.filter(p => p.type === 'standard' && p.progress < 55);
-  if (!atrisk.length) { document.getElementById('risks-list').innerHTML = '<div style="color:var(--text3);font-size:12px">No at-risk projects currently. All projects on track.</div>'; return; }
+  const atrisk = projects.filter(p => p.type === 'standard' && isAtRisk(p) && !isCompleted(p));
+  if (!atrisk.length) { document.getElementById('risks-list').innerHTML = '<div style="color:var(--text3);font-size:12px">No at-risk projects. All projects on track.</div>'; return; }
   let html = '';
   atrisk.forEach(p => {
-    const level = p.progress < 35 ? 'High' : 'Medium';
-    const bc    = p.progress < 35 ? 'br' : 'ba';
-    html += `<div class="cg-hdr"><div class="cg-av" style="background:rgba(242,82,112,.12);color:var(--rose)">${clientInitials(p.clientName)}</div><div class="cg-name">${p.clientName} · ${p.name}</div><span class="badge ${bc}">${level} risk</span></div>
-    <div class="cg-body"><div class="card" style="border-left:3px solid ${p.progress < 35 ? 'var(--rose)' : 'var(--amber)'}">
-      <div style="font-size:12px;font-weight:500;margin-bottom:4px">Schedule risk — ${p.progress}% complete, due ${p.dueDate || 'TBC'}</div>
-      <div style="font-size:11px;color:var(--text2);margin-bottom:8px">${p.notes || 'Project is behind expected progress.'}</div>
-      <div class="arow"><button class="btn btn-r" onclick="generateDraft('${p.id}','escalation_email','')">Draft escalation ↗</button></div>
-    </div></div>`;
+    const alert = alertLabel(p);
+    html += `<div style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:5px">
+        <div style="width:26px;height:26px;border-radius:6px;background:rgba(255,96,128,.12);color:var(--rose);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${initials(p.clientName)}</div>
+        <div style="flex:1;font-size:12px;font-weight:500">${p.clientName} · ${p.projectName || p.name}</div>
+        <span class="badge br">${alert?.label || 'At risk'}</span>
+      </div>
+      <div style="padding-left:6px">
+        <div class="card" style="border-left:3px solid var(--rose)">
+          <div style="font-size:12px;font-weight:500;margin-bottom:4px">Schedule risk</div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:8px">Status: ${p.status || 'Unknown'}${p.dueDate ? ` · Due ${p.dueDate}` : ''}</div>
+          <div class="arow"><button class="btn btn-r" style="font-size:10px" onclick="generateDraft('${p.id}','escalation_email','')">Draft escalation ↗</button></div>
+        </div>
+      </div>
+    </div>`;
   });
   document.getElementById('risks-list').innerHTML = html;
 }
 
 // ── Stakeholders ──────────────────────────────────────────────────────────────
 function renderStakeholders() {
-  const standard = projects.filter(p => p.type === 'standard');
-  if (!standard.length) { document.getElementById('stakeholders-list').innerHTML = '<div style="color:var(--text3);font-size:12px">No projects loaded.</div>'; return; }
+  const standard = projects.filter(p => p.type === 'standard' && !isCompleted(p));
+  if (!standard.length) { document.getElementById('stakeholders-list').innerHTML = '<div style="color:var(--text3);font-size:12px">No active projects.</div>'; return; }
   let html = '';
   standard.forEach(p => {
-    const hasContact = p.clientContact || p.clientEmail;
-    html += `<div class="cg-hdr"><div class="cg-av" style="background:rgba(0,212,170,.12);color:var(--teal)">${clientInitials(p.clientName)}</div><div class="cg-name">${p.clientName} · ${p.name}</div></div>
-    <div class="cg-body"><div class="card">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-        <div style="width:30px;height:30px;border-radius:50%;background:rgba(0,212,170,.12);color:var(--teal);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">${clientInitials(p.clientContact || p.clientName)}</div>
-        <div><div style="font-size:12px;font-weight:500">${p.clientContact || 'Contact not set'}</div><div style="font-size:11px;color:var(--text3)">${p.clientEmail || ''}</div></div>
+    html += `<div style="margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:5px">
+        <div style="width:26px;height:26px;border-radius:6px;background:rgba(0,232,187,.12);color:var(--teal);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${initials(p.clientName)}</div>
+        <div style="flex:1;font-size:12px;font-weight:500">${p.clientName} · ${p.projectName || p.name}</div>
       </div>
-      <div class="arow">
-        <button class="btn btn-p" onclick="generateDraft('${p.id}','checkin_email','')">Draft check-in ↗</button>
-        <button class="btn btn-g" onclick="generateDraft('${p.id}','status_email','')">Status email ↗</button>
-      </div>
-    </div></div>`;
+      <div style="padding-left:6px"><div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <div style="width:30px;height:30px;border-radius:50%;background:rgba(0,232,187,.12);color:var(--teal);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">${initials(p.clientContact||p.clientName)}</div>
+          <div><div style="font-size:12px;font-weight:500">${p.clientContact||'Contact not set'}</div><div style="font-size:11px;color:var(--text3)">${p.clientEmail||''}</div></div>
+        </div>
+        <div class="arow">
+          <button class="btn btn-p" style="font-size:10px" onclick="generateDraft('${p.id}','checkin_email','')">Draft check-in ↗</button>
+          <button class="btn btn-g" style="font-size:10px" onclick="generateDraft('${p.id}','status_email','')">Status email ↗</button>
+        </div>
+      </div></div>
+    </div>`;
   });
   document.getElementById('stakeholders-list').innerHTML = html;
 }
 
 // ── Invoicing ─────────────────────────────────────────────────────────────────
 function renderInvoicing() {
-  const standard = projects.filter(p => p.type === 'standard' && p.value);
-  if (!standard.length) { document.getElementById('invoicing-list').innerHTML = '<div style="color:var(--text3);font-size:12px">No invoice data. Add values to your Monday.com projects.</div>'; return; }
+  const standard = projects.filter(p => p.type === 'standard');
+  const withValue = standard.filter(p => p.value);
+  if (!withValue.length) { document.getElementById('invoicing-list').innerHTML = '<div style="color:var(--text3);font-size:12px">No invoice data. Add contract values to your Monday.com projects.</div>'; return; }
   let html = '';
-  standard.forEach(p => {
-    html += `<div class="cg-hdr"><div class="cg-av" style="background:rgba(242,82,112,.12);color:var(--rose)">${clientInitials(p.clientName)}</div><div class="cg-name">${p.clientName} · ${p.name}</div></div>
-    <div class="cg-body"><div class="card">
-      <div style="display:flex;justify-content:space-between;margin-bottom:5px">
-        <span style="font-size:12px;font-weight:500">${p.value}</span>
-        ${p.dueDate ? `<span class="badge bg">Due ${p.dueDate}</span>` : '<span class="badge bg">No due date</span>'}
+  withValue.forEach(p => {
+    const completed = isCompleted(p);
+    html += `<div style="margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:5px">
+        <div style="width:26px;height:26px;border-radius:6px;background:rgba(255,96,128,.12);color:var(--rose);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${initials(p.clientName)}</div>
+        <div style="flex:1;font-size:12px;font-weight:500">${p.clientName} · ${p.projectName||p.name}</div>
+        ${completed ? '<span class="badge bt">Completed</span>' : '<span class="badge bg">Active</span>'}
       </div>
-      <div class="arow"><button class="btn btn-r" onclick="generateDraft('${p.id}','invoice_reminder','')">Draft invoice reminder ↗</button></div>
-    </div></div>`;
+      <div style="padding-left:6px"><div class="card">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:13px;font-weight:500">${p.value}</span>
+          ${p.dueDate ? `<span class="badge bg">Due ${p.dueDate}</span>` : ''}
+        </div>
+        <div class="arow"><button class="btn btn-r" style="font-size:10px" onclick="generateDraft('${p.id}','invoice_reminder','')">Draft invoice reminder ↗</button></div>
+      </div></div>
+    </div>`;
   });
   document.getElementById('invoicing-list').innerHTML = html;
 }
@@ -542,29 +692,35 @@ async function loadDrafts() {
 
 function renderDrafts() {
   if (!drafts.length) {
-    document.getElementById('drafts-list').innerHTML = '<div class="card" style="color:var(--text3);font-size:12px;text-align:center;padding:20px">No drafts waiting. Aurora will generate them during the daily batch or when you trigger one from a project.</div>';
+    document.getElementById('drafts-list').innerHTML = '<div class="card" style="color:var(--text3);font-size:12px;text-align:center;padding:20px">No drafts waiting. Aurora generates drafts during the daily 6am batch, or you can trigger one from any project.</div>';
     return;
   }
   const grouped = {};
   drafts.forEach(d => { const k = d.clientName || 'Unknown'; if (!grouped[k]) grouped[k] = []; grouped[k].push(d); });
   let html = '';
   Object.entries(grouped).forEach(([client, items]) => {
-    html += `<div class="cg-hdr"><div class="cg-av" style="background:rgba(0,212,170,.12);color:var(--teal)">${clientInitials(client)}</div><div class="cg-name">${client}</div><span class="badge bg">${items.length} draft${items.length>1?'s':''}</span></div><div class="cg-body">`;
+    html += `<div style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:5px">
+        <div style="width:26px;height:26px;border-radius:6px;background:rgba(232,25,122,.12);color:var(--pink-light);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${initials(client)}</div>
+        <div style="flex:1;font-size:12px;font-weight:500">${client}</div>
+        <span class="badge bg">${items.length} draft${items.length>1?'s':''}</span>
+      </div>
+      <div style="padding-left:6px;display:flex;flex-direction:column;gap:5px">`;
     items.forEach(d => {
       html += `<div class="card" id="draft-${d.id}">
         <div style="display:flex;justify-content:space-between;margin-bottom:5px">
-          <span style="font-size:11px;color:var(--text2)">To: ${d.to || 'client contact'}</span>
-          <span class="badge ${d.urgency==='urgent'?'br':'bg'}">${d.type?.replace(/_/g,' ')}</span>
+          <span style="font-size:11px;color:var(--text2)">To: ${d.to||'client contact'}</span>
+          <span class="badge ${d.urgency==='urgent'?'br':'bg'}">${(d.type||'').replace(/_/g,' ')}</span>
         </div>
-        <div style="font-size:13px;font-weight:500;margin-bottom:6px;font-family:var(--fs)">${d.subject || d.projectName}</div>
+        <div style="font-size:13px;font-weight:500;margin-bottom:6px;font-family:var(--fs)">${d.subject||d.projectName||''}</div>
         <div style="font-size:11px;color:var(--text2);line-height:1.6;border-left:2px solid var(--border2);padding-left:10px;margin-bottom:8px">${(d.body||'').slice(0,220)}…</div>
         <div class="arow">
-          <button class="btn btn-p" onclick="approveDraft('${d.id}')">✓ Approve & send</button>
-          <button class="btn btn-g" onclick="rejectDraft('${d.id}')">Reject</button>
+          <button class="btn btn-p" style="font-size:10px" onclick="approveDraft('${d.id}')">✓ Approve & send</button>
+          <button class="btn btn-g" style="font-size:10px" onclick="rejectDraft('${d.id}')">Reject</button>
         </div>
       </div>`;
     });
-    html += '</div>';
+    html += '</div></div>';
   });
   document.getElementById('drafts-list').innerHTML = html;
 }
@@ -574,10 +730,9 @@ async function generateDraft(projectId, taskType, customPrompt) {
   if (!p) return;
   const btn = event?.target;
   if (btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
-  const prompt = customPrompt || `Draft a ${taskType.replace(/_/g,' ')} for ${p.name} at ${p.clientName}.`;
-  const data = await api('/api/drafts/generate', { method: 'POST', body: JSON.stringify({ projectId, taskType, prompt }) });
+  const prompt = customPrompt || `Draft a ${taskType.replace(/_/g,' ')} for ${p.projectName||p.name} at ${p.clientName}.`;
+  await api('/api/drafts/generate', { method: 'POST', body: JSON.stringify({ projectId, taskType, prompt }) });
   if (btn) { btn.textContent = '✓ Draft ready — check Comms'; btn.disabled = false; }
-  if (data.draft) { drafts.unshift(data.draft); }
 }
 
 async function approveDraft(id) {
@@ -602,32 +757,36 @@ async function renderDocs() {
     docs.forEach(d => { if (!grouped[d.projectId]) grouped[d.projectId] = []; grouped[d.projectId].push(d); });
     Object.entries(grouped).forEach(([pid, items]) => {
       const p = projects.find(x => x.id === pid);
-      const name = p ? `${p.clientName} · ${p.name}` : pid;
-      html += `<div class="cg-hdr"><div class="cg-av" style="background:rgba(0,212,170,.12);color:var(--teal)">${clientInitials(name)}</div><div class="cg-name">${name}</div><span class="badge bt">Active</span></div><div class="cg-body">`;
-      items.forEach(d => {
-        html += `<div class="card" style="display:flex;align-items:center;gap:9px">
-          <span style="font-size:15px">📎</span>
-          <span style="flex:1;font-size:12px">${d.name}</span>
-          <span style="font-size:10px;color:var(--text3)">${d.uploadedAt?.slice(0,10)}</span>
-          ${d.extract ? '<span class="badge bt">Analysed</span>' : '<span class="badge bg">Pending</span>'}
+      const name = p ? `${p.clientName} · ${p.projectName||p.name}` : pid;
+      html += `<div style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:5px">
+          <div style="width:26px;height:26px;border-radius:6px;background:rgba(0,232,187,.12);color:var(--teal);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${initials(name)}</div>
+          <div style="flex:1;font-size:12px;font-weight:500">${name}</div>
+          <span class="badge bt">Active</span>
+        </div>
+        <div style="background:var(--card2);border:1px solid var(--border);border-radius:9px;overflow:hidden;padding-left:6px">`;
+      items.forEach((d,i) => {
+        html += `<div style="display:flex;align-items:center;gap:9px;padding:9px 12px;border-bottom:${i<items.length-1?'1px solid var(--border)':'none'};font-size:11px">
+          <span style="font-size:14px">📎</span>
+          <span style="flex:1;color:var(--text)">${d.name}</span>
+          <span style="font-size:10px;color:var(--text3)">${(d.uploadedAt||'').slice(0,10)}</span>
+          ${d.extract?'<span class="badge bt">Analysed</span>':'<span class="badge bg">Pending</span>'}
         </div>`;
       });
-      html += '</div>';
+      html += '</div></div>';
     });
   }
   document.getElementById('docs-list').innerHTML = html;
 }
 
 async function handleFiles(files) {
-  const projectId = prompt('Enter the project ID to attach this document to (or leave blank):') || 'general';
+  const projectId = prompt('Enter the project name or ID to attach this document to:') || 'general';
   for (const file of files) {
     const fd = new FormData();
     fd.append('file', file);
     fd.append('projectId', projectId);
     fd.append('clientId', projectId);
-    const res = await fetch('/api/documents/upload', { method: 'POST', body: fd });
-    const data = await res.json();
-    console.log('Uploaded:', data);
+    await fetch('/api/documents/upload', { method: 'POST', body: fd });
   }
   renderDocs();
 }
@@ -648,9 +807,9 @@ function populateReportSelects() {
 
 function updateRepProjects() {
   const client = document.getElementById('rep-client').value;
-  const sel    = document.getElementById('rep-project');
-  const opts   = projects.filter(p => p.type === 'standard' && (!client || p.clientName === client));
-  sel.innerHTML = '<option value="">All projects</option>' + opts.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  const sel = document.getElementById('rep-project');
+  const opts = projects.filter(p => p.type === 'standard' && (!client || p.clientName === client));
+  sel.innerHTML = '<option value="">All projects</option>' + opts.map(p => `<option value="${p.id}">${p.projectName||p.name}</option>`).join('');
 }
 
 async function generateReport(type) {
@@ -678,21 +837,21 @@ const CHIPS = [
   "What needs attention today?",
   "Portfolio snapshot",
   "Which projects are at risk?",
-  "Draft all status emails",
-  "Upcoming training sessions",
+  "Draft weekly monitoring updates for all projects",
+  "What are the deliverables for Glencore?",
 ];
 
 function initChips() {
   document.getElementById('chips').innerHTML = CHIPS.map(c =>
-    `<div class="chip" onclick="document.getElementById('cin').value='${c}';sendChat()">${c}</div>`
+    `<div class="chip" onclick="document.getElementById('cin').value=\`${c}\`;sendChat()">${c}</div>`
   ).join('');
 }
 
 function addMsg(role, text) {
   const msgs = document.getElementById('chat-msgs');
-  const div  = document.createElement('div');
+  const div = document.createElement('div');
   div.className = `msg ${role === 'user' ? 'u' : ''}`;
-  div.innerHTML = `<div class="av av-${role === 'user' ? 'u' : 'a'}">${role === 'user' ? 'U' : 'A'}</div><div class="bub">${text}</div>`;
+  div.innerHTML = `<div class="av av-${role==='user'?'u':'a'}">${role==='user'?'U':'A'}</div><div class="bub">${text}</div>`;
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
   return div;
@@ -705,7 +864,6 @@ async function sendChat() {
   cin.value = '';
   addMsg('user', msg);
   chatHistory.push({ role: 'user', content: msg });
-
   const typing = addMsg('aurora', '<span class="tdots"><span></span><span></span><span></span></span>');
   const data = await api('/api/chat', {
     method: 'POST',
@@ -715,6 +873,20 @@ async function sendChat() {
   typing.querySelector('.bub').textContent = reply;
   chatHistory.push({ role: 'assistant', content: reply });
   document.getElementById('chat-msgs').scrollTop = 99999;
+}
+
+function askAboutProject(id) {
+  const p = projects.find(x => x.id === id);
+  if (!p) return;
+  document.getElementById('cin').value = `Give me a full briefing on the ${p.projectName||p.name} project for ${p.clientName} including current phase, deliverables from the contract, and what Aurora should be doing right now.`;
+  nav('ask', document.querySelector('[onclick*="ask"]'));
+  sendChat();
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function initials(name) {
+  if (!name) return '?';
+  return name.split(' ').slice(0,2).map(w => w[0]||'').join('').toUpperCase();
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
