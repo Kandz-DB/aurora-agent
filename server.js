@@ -299,22 +299,63 @@ async function sendConsultantBriefing(project, extracted) {
   const context = buildContext(project);
 
   const briefingBody = await aurora(
-    'status_email',
-    `Draft a professional project briefing email from R2S to ${consultantName}, who has been assigned as the consultant/trainer on this project.
+    'consultant_briefing',
+    `Write a project briefing email to ${consultantName}, who has been assigned to this project.
 
-The email should brief them on:
-- The client and project
-- What we are delivering (scope and deliverables)
-- Key dates (start date, due/completion date, any milestones)
-- The timeline and any phasing
-- Invoicing terms (so they know how we are getting paid)
-- Whether flights or accommodation are required: ${extracted.flightsRequired || 'not specified'} / ${extracted.accommodationRequired || 'not specified'}
-- Any special requirements, conditions, or important notes
-- What is expected of them and next steps
+CRITICAL FORMATTING RULES — follow exactly:
+- Plain text only. No asterisks, no bold markdown, no ** anywhere.
+- No TO/CC/Subject header block in the body.
+- Use plain section headings followed by a colon, e.g. "CLIENT:" on its own line.
+- Deliverables must be a numbered list, one per line.
+- Phases/timeline must be a numbered list, one per line, include the week range if available.
+- Do NOT cut off — include every phase, every deliverable fully.
+- Sign off exactly as shown at the bottom of this prompt.
 
-Write it as if from the R2S project management team. Professional, clear, and to the point. Not too long. End by asking them to confirm receipt and that they are clear on the requirements.
+Write the email body only, starting with "Hi ${consultantName.split(' ')[0]}," and covering:
 
-This email will be CC'd to diane.k@risk2solution.com for our records.`,
+CLIENT:
+Full organisation name, location, primary contact name, email and phone.
+
+PROJECT:
+Project name and a 2-3 sentence description of what we are doing for them.
+
+SCOPE OF SERVICE:
+Brief paragraph on the overall approach.
+
+DELIVERABLES:
+Numbered list — one deliverable per line. Extract every deliverable from the contract.
+
+TIMELINE AND PHASES:
+Numbered list — one phase per line with week range and what happens in that phase.
+Example format:
+1. Phase 1 (Wk 1-2): Description of what happens
+2. Phase 2 (Wk 3-4): Description of what happens
+
+KEY DATES:
+Contract start: [date or TBC]
+Completion date: [date or TBC]
+
+TRAVEL:
+Flights required: [yes/no]
+Accommodation required: [yes/no]
+
+INVOICING:
+[Invoicing terms]
+
+IMPORTANT NOTES:
+[Any special conditions or requirements. If none, write "None."]
+
+Please confirm receipt of this briefing and that you are clear on all requirements. If you have any questions, contact Diane directly.
+
+Kind regards,
+
+Diane Kruger
+Corporate Operations Lead
+Risk 2 Solution Group
+P: 1300 459 970 | M: +61 415 748 747
+E: diane.k@risk2solution.com
+W: www.risk2solution.com
+Queensland, Australia`,
     context
   );
 
