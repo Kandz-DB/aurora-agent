@@ -394,6 +394,16 @@ function saveDraft(draft) {
 
 // Health
 app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Aurora R2S' }));
+app.get('/api/debug', async (req, res) => {
+  try {
+    const apiKey = process.env.MONDAY_API_KEY;
+    const boardId = process.env.MONDAY_BOARD_ID;
+    const query = `query { boards(ids:[${boardId}]) { id name groups { id title } items_page(limit:3) { items { id name } } } }`;
+    const r = await require('axios').post('https://api.monday.com/v2', { query },
+      { headers: { Authorization: apiKey, 'Content-Type': 'application/json', 'API-Version': '2024-01' }, timeout: 10000 });
+    res.json(r.data);
+  } catch(e) { res.json({ error: e.message }); }
+});
 
 // Projects
 app.get('/api/projects', async (req, res) => {
