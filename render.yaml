@@ -10,15 +10,30 @@ services:
         value: production
       - key: MONTHLY_SPEND_CAP_USD
         value: "20"
-      - key: SPEND_ALERT_THRESHOLD
-        value: "0.8"
+      - key: INTERNAL_EMAIL_1
+        value: diane.k@risk2solution.com
+      - key: INTERNAL_EMAIL_2
+        value: info@risk2solution.com
+      - key: OUTLOOK_SHARED_MAILBOX
+        value: info@risk2solution.com
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: MONDAY_API_KEY
         sync: false
       - key: MONDAY_BOARD_ID
         sync: false
-      - key: OUTLOOK_SHARED_MAILBOX
-        value: info@risk2solution.com
+      - key: OUTLOOK_CLIENT_ID
+        sync: false
+      - key: OUTLOOK_CLIENT_SECRET
+        sync: false
+      - key: OUTLOOK_TENANT_ID
+        sync: false
+      - key: DATABASE_URL
+        sync: false
       - key: FRONTEND_URL
         sync: false
+
+databases:
+  - name: aurora-db
+    databaseName: aurora
+    plan: free
