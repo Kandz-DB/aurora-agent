@@ -156,7 +156,7 @@ async function syncMonday() {
         items_page(limit: 100) {
           items {
             id name
-            column_values { id type text value }
+            column_values { id type title text value }
           }
         }
       }
@@ -171,43 +171,84 @@ async function syncMonday() {
     const items = board?.items_page?.items || [];
 
     const projects = items.map(item => {
+      // Match column by title (most reliable for named columns)
+      const byTitle = (title) => {
+        const t = title.toLowerCase();
+        const col = item.column_values.find(c =>
+          (c.title || '').toLowerCase().includes(t)
+        );
+        return col?.text || '';
+      };
       const byId   = (id)   => item.column_values.find(c => c.id === id)?.text || '';
       const byType = (type) => item.column_values.find(c => c.type === type)?.text || '';
 
-      // Get SharePoint link from "Link to relevant resources in Sharepoint" column
-      const spCol = item.column_values.find(c =>
-        c.type === 'link' ||
-        c.id?.toLowerCase().includes('link') ||
-        c.id?.toLowerCase().includes('sharepoint') ||
-        c.id?.toLowerCase().includes('resource')
-      );
-      let sharepointUrl = '';
-      if (spCol && spCol.value) {
-        try {
-          const v = JSON.parse(spCol.value);
-          sharepointUrl = v.url || v.text || spCol.text || '';
-        } catch (e) { sharepointUrl = spCol.text || ''; }
-      }
-
-      const status  = byId('color_mks0pnz5') || byType('status') || '';
+      // Status column
+      const status  = byId('color_mks0pnz5') || byType('color') || byType('status') || '';
       const ongoing = isOngoing(status);
 
+      // Contract value — strip $ and commas, format properly
+      const rawValue = byTitle('value of contract') || byTitle('contract') || byType('numbers') || byType('numeric') || '';
+      const numValue = rawValue.replace(/[$,]/g, '').trim();
+      const displayValue = numValue ? '$' + parseFloat(numValue).toLocaleString('en-AU') : '';
+
+      // Summary of service provision
+      const summary = byTitle('summary of service') || byTitle('service provision') || '';
+
+      // Deliverables
+      const deliverables = byTitle('deliverables') || '';
+
+      // SharePoint link
+      const spCol = item.column_values.find(c =>
+        (c.title || '').toLowerCase().includes('sharepoint') ||
+        (c.title || '').toLowerCase().includes('link to relevant') ||
+        c.type === 'link'
+      );
+      let sharepointUrl = '';
+      if (spCol) {
+        if (spCol.value) {
+          try {
+            const v = JSON.parse(spCol.value);
+            sharepointUrl = v.url || v.text || spCol.text || '';
+          } catch (e) { sharepointUrl = spCol.text || ''; }
+        } else {
+          sharepointUrl = spCol.text || '';
+        }
+      }
+
+      // Contract start and end dates
+      const contractStart = byTitle('contract start') || '';
+      const contractEnd   = byTitle('completion due') || byTitle('contract end') || '';
+
+      // Notes on invoicing
+      const invoicingNotes = byTitle('notes on invoicing') || byTitle('invoicing frequency') || '';
+
+      // Required trainer/consultant
+      const consultant = byTitle('required trainer') || byTitle('consultant') || '';
+
+      // Past challenges / notes
+      const notes = byTitle('past challenges') || byTitle('notes re') || '';
+
       return {
-        id:            item.id,
-        name:          item.name,
-        clientName:    item.name,
-        projectName:   byId('text__1') || item.name,
-        clientContact: byId('text8__1') || '',
-        clientEmail:   byId('client_contact_email__1') || byType('email') || '',
-        type:          ongoing ? 'ongoing' : 'standard',
+        id:             item.id,
+        name:           item.name,
+        clientName:     item.name,
+        projectName:    byTitle('project') || byId('text__1') || item.name,
+        clientContact:  byTitle('client contact person') || byId('text8__1') || '',
+        clientEmail:    byTitle('client contact email') || byId('client_contact_email__1') || byType('email') || '',
+        type:           ongoing ? 'ongoing' : 'standard',
         status,
-        phase:         ongoing ? null : parsePhase(byType('text')),
-        progress:      ongoing ? null : parseInt(byType('numeric') || byType('numbers') || '0') || 0,
-        dueDate:       ongoing ? null : byType('date') || byType('timeline') || '',
-        value:         byType('numbers') || byType('numeric') || '',
-        notes:         byType('long_text') || byType('text') || '',
+        phase:          ongoing ? null : 0,
+        progress:       0,
+        dueDate:        ongoing ? null : contractEnd || '',
+        contractStart,
+        value:          displayValue,
+        summary,
+        deliverables,
+        invoicingNotes,
+        consultant,
+        notes,
         sharepointUrl,
-        lastSynced:    new Date().toISOString(),
+        lastSynced:     new Date().toISOString(),
       };
     });
 
@@ -353,13 +394,6 @@ function saveDraft(draft) {
 
 // Health
 app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Aurora R2S' }));
-app.get('/api/debug/columns', async (req, res) => {
-  const apiKey = process.env.MONDAY_API_KEY;
-  const boardId = process.env.MONDAY_BOARD_ID;
-  const query = `query { boards(ids:[${boardId}]) { items_page(limit:1) { items { id name column_values { id type title text } } } } }`;
-  const r = await require('axios').post('https://api.monday.com/v2', { query }, { headers: { Authorization: apiKey, 'Content-Type': 'application/json', 'API-Version': '2024-01' } });
-  res.json(r.data?.data?.boards?.[0]?.items_page?.items?.[0]?.column_values || []);
-});
 
 // Projects
 app.get('/api/projects', async (req, res) => {
