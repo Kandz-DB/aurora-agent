@@ -160,7 +160,7 @@ async function syncMonday() {
             name
             column_values {
               id
-              title
+              type
               text
               value
             }
@@ -180,7 +180,7 @@ const items = board?.items_page?.items || [];
     console.log('[Monday Debug]', JSON.stringify(res.data?.data).slice(0, 800));
 
     const projects = items.map(item => {
-      const col = (title) => item.column_values.find(c => c.title?.toLowerCase().includes(title.toLowerCase()))?.text || '';
+      const col = (title) => item.column_values.find(c => c.id?.toLowerCase().includes(title.toLowerCase()) || c.type?.toLowerCase().includes(title.toLowerCase()))?.text || '';
       const status = col('status');
       const ongoing = isOngoing(status);
       return {
