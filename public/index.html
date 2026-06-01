@@ -16,6 +16,18 @@
   --text:#ffffff;--text2:#a8b8d8;--text3:#5a7090;
   --fs:'Syne',sans-serif;--fb:'DM Sans',sans-serif;--fm:'DM Mono',monospace;
 }
+/* Login screen */
+.login-screen{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:999;flex-direction:column;gap:0}
+.login-box{background:var(--surface);border:1px solid var(--border2);border-radius:16px;padding:36px 40px;width:360px;text-align:center}
+.login-logo{width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,var(--teal),var(--pink));display:flex;align-items:center;justify-content:center;font-family:var(--fs);font-weight:600;font-size:22px;color:#fff;margin:0 auto 16px}
+.login-title{font-family:var(--fs);font-size:20px;font-weight:600;color:var(--text);margin-bottom:4px}
+.login-sub{font-size:12px;color:var(--text2);margin-bottom:24px}
+.login-input{width:100%;padding:11px 14px;background:var(--card);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-size:13px;font-family:var(--fb);outline:none;text-align:center;letter-spacing:2px;margin-bottom:12px}
+.login-input:focus{border-color:var(--teal)}
+.login-btn{width:100%;padding:11px;background:var(--pink);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:500;font-family:var(--fb);cursor:pointer;transition:opacity .12s}
+.login-btn:hover{opacity:.88}
+.login-error{font-size:11px;color:var(--rose);margin-top:8px;min-height:16px}
+.login-brand{font-size:10px;color:var(--text3);margin-top:20px;letter-spacing:.5px;text-transform:uppercase}
 body{font-family:var(--fb);background:var(--bg);color:var(--text);font-size:13px;height:100vh;display:flex;flex-direction:column;overflow:hidden}
 ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
 button{font-family:var(--fb);cursor:pointer;transition:opacity .12s}
@@ -455,8 +467,7 @@ function nav(id, el) {
 }
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
-  return res.json();
+  return _baseApi(path, opts);
 }
 
 // ── Projects ──────────────────────────────────────────────────────────────────
@@ -1088,7 +1099,73 @@ function askAbout(id) {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-loadProjects();
+
+// Auth
+let AUTH_TOKEN = sessionStorage.getItem('aurora_token') || '';
+
+async function doLogin() {
+  const pwd = document.getElementById('login-pwd').value;
+  const err = document.getElementById('login-error');
+  err.textContent = '';
+  if (!pwd) { err.textContent = 'Please enter the password.'; return; }
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pwd }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      AUTH_TOKEN = data.token;
+      sessionStorage.setItem('aurora_token', AUTH_TOKEN);
+      document.getElementById('login-screen').style.display = 'none';
+      loadProjects();
+    } else {
+      err.textContent = 'Incorrect password. Please try again.';
+      document.getElementById('login-pwd').value = '';
+      document.getElementById('login-pwd').focus();
+    }
+  } catch (e) {
+    err.textContent = 'Connection error. Please try again.';
+  }
+}
+
+// Override api() to include auth token
+const _baseApi = async (path, opts = {}) => {
+  const res = await fetch(path, {
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH_TOKEN },
+    ...opts,
+    headers: { ...(opts.headers || {}), 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH_TOKEN },
+  });
+  if (res.status === 401) {
+    sessionStorage.removeItem('aurora_token');
+    AUTH_TOKEN = '';
+    document.getElementById('login-screen').style.display = 'flex';
+    throw new Error('Session expired');
+  }
+  return res.json();
+};
+
+// Check if already logged in
+if (AUTH_TOKEN) {
+  document.getElementById('login-screen').style.display = 'none';
+  loadProjects();
+} else {
+  setTimeout(() => document.getElementById('login-pwd').focus(), 100);
+}
 </script>
+
+<!-- LOGIN SCREEN -->
+<div class="login-screen" id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">A</div>
+    <div class="login-title">Aurora</div>
+    <div class="login-sub">R2S Project Management Intelligence</div>
+    <input class="login-input" id="login-pwd" type="password" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()"/>
+    <button class="login-btn" onclick="doLogin()">Sign in</button>
+    <div class="login-error" id="login-error"></div>
+  </div>
+  <div class="login-brand">Risk 2 Solution · Confidential</div>
+</div>
 </body>
 </html>
