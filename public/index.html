@@ -532,21 +532,52 @@ function ini(name) {
   return name.split(' ').slice(0,2).map(w => w[0]||'').join('').toUpperCase();
 }
 
+function bulletList(text) {
+  if (!text) return '';
+  // Convert text to bullet points — split on newlines, numbered items, or sentence ends
+  const lines = text
+    .split(/\n|(?<=\.)\s+(?=[A-Z0-9])|(?:^|\s)\d+\.\s+/)
+    .map(l => l.trim())
+    .filter(l => l.length > 4);
+  if (lines.length <= 1) {
+    // Single block — try splitting on commas or semicolons
+    const parts = text.split(/[;,]/).map(l => l.trim()).filter(l => l.length > 4);
+    if (parts.length > 1) return parts.map(p => `• ${p}`).join('\n');
+    return `• ${text.trim()}`;
+  }
+  return lines.map(l => `• ${l.replace(/^[•\-\*]\s*/, '')}`).join('\n');
+}
+
 function tileHTML(p) {
   const phase = p.phase || 0;
   const alert = alertLabel(p);
   const bars  = PHASES.map((_,i) => `<div class="tile-ph ${i<phase?'done':i===phase?'now':''}"></div>`).join('');
-  const labels= PHASES.map((ph,i) => `<div class="tile-ph-label ${i<phase?'done':i===phase?'now':'pend'}">${ph.split(' ')[0]}</div>`).join('');
+
+  // Clean summary — max 3 bullet points on the tile
+  const summaryText = p.summary || p.deliverables || '';
+  const bullets = summaryText
+    .split(/\n|(?<=\.)\s+(?=[A-Z0-9•\-])|[;]/)
+    .map(l => l.trim().replace(/^[•\-\*\d\.]+\s*/, ''))
+    .filter(l => l.length > 4)
+    .slice(0, 3);
+  const summaryHTML = bullets.length
+    ? bullets.map(b => `<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:3px"><span style="color:var(--teal);flex-shrink:0;font-size:10px;margin-top:1px">•</span><span style="font-size:11px;color:var(--text2);line-height:1.4">${b}</span></div>`).join('')
+    : '';
+
+  const val = p.value ? (p.value.startsWith('$') ? p.value : '$'+p.value) : '';
+
   return `<div class="tile" onclick="openProject('${p.id}')">
     ${alert ? `<div class="tile-alert ${alert.cls}">${alert.label}</div>` : ''}
     <div class="tile-client">${p.clientName}</div>
-    <div class="tile-project">${p.projectName || ''}</div>
-    <div class="tile-phases">${bars}</div>
-    <div class="tile-ph-labels">${labels}</div>
-    <div class="tile-meta">
-      ${p.value ? `<span class="badge bg">${p.value.startsWith('$') ? p.value : '$'+p.value}</span>` : ''}
-      ${p.dueDate ? `<span class="badge bg">📅 ${p.dueDate}</span>` : ''}
-      ${isCompleted(p) ? '<span class="badge bt">✓ Complete</span>' : ''}
+    <div class="tile-project" style="margin-bottom:10px">${p.projectName || ''}</div>
+    ${summaryHTML ? `<div style="margin-bottom:10px">${summaryHTML}</div>` : ''}
+    <div class="tile-phases" style="margin-bottom:6px">${bars}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px">
+      ${val ? `<span style="font-size:12px;font-weight:600;font-family:var(--fs);color:var(--teal)">${val}</span>` : '<span></span>'}
+      <div style="display:flex;gap:5px;align-items:center">
+        ${p.dueDate ? `<span class="badge bg" style="font-size:10px">📅 ${p.dueDate}</span>` : ''}
+        ${isCompleted(p) ? '<span class="badge bt">✓ Complete</span>' : ''}
+      </div>
     </div>
   </div>`;
 }
@@ -608,18 +639,49 @@ function openProject(id) {
     ? `<span class="badge ${alert.cls==='behind'?'br':alert.cls==='on-hold'?'bb':'ba'}">${alert.label}</span>`
     : `<span class="badge bt">${p.status||'In Progress'}</span>`;
 
+  // Format as numbered list for modal
+  function fmtNumbered(text) {
+    if (!text) return '';
+    const lines = text
+      .split(/\n|(?<=\d\.)\s+/)
+      .map(l => l.trim().replace(/^[•\-\*]\s*/, '').replace(/^\d+\.\s*/, ''))
+      .filter(l => l.length > 3);
+    if (lines.length <= 1) return `<div style="font-size:12px;color:var(--text);line-height:1.65">${text}</div>`;
+    return lines.map((l,i) => `<div style="display:flex;gap:8px;margin-bottom:5px"><span style="color:var(--teal);font-family:var(--fm);font-size:11px;flex-shrink:0;min-width:18px">${i+1}.</span><span style="font-size:12px;color:var(--text);line-height:1.5">${l}</span></div>`).join('');
+  }
+
   const delHtml = (p.summary || p.deliverables) ? `
     <div style="margin-bottom:14px">
       <div class="sec" style="margin-top:0">What we are delivering</div>
       ${p.summary ? `<div style="background:var(--card2);border:1px solid var(--border);border-left:3px solid var(--teal);border-radius:8px;padding:11px 13px;margin-bottom:6px">
-        <div style="font-size:10px;color:var(--teal);font-family:var(--fm);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">Service provision</div>
-        <div style="font-size:12px;color:var(--text);line-height:1.65">${p.summary}</div>
+        <div style="font-size:10px;color:var(--teal);font-family:var(--fm);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Service provision</div>
+        ${fmtNumbered(p.summary)}
       </div>` : ''}
       ${p.deliverables ? `<div style="background:var(--card2);border:1px solid var(--border);border-left:3px solid var(--pink);border-radius:8px;padding:11px 13px">
-        <div style="font-size:10px;color:var(--pink-light);font-family:var(--fm);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">Deliverables</div>
-        <div style="font-size:12px;color:var(--text);line-height:1.65">${p.deliverables}</div>
+        <div style="font-size:10px;color:var(--pink-light);font-family:var(--fm);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Deliverables</div>
+        ${fmtNumbered(p.deliverables)}
       </div>` : ''}
     </div>` : '';
+
+  // Format deliverables as numbered list
+  function fmtList(text, numbered) {
+    if (!text) return '—';
+    const lines = text
+      .split(/\n|(?<=\d\.)\s+/)
+      .map(l => l.trim().replace(/^[•\-\*]\s*/, '').replace(/^\d+\.\s*/, ''))
+      .filter(l => l.length > 3);
+    if (lines.length <= 1) {
+      // Try splitting on sentences
+      const parts = text.split(/(?<=\.)\s+(?=[A-Z0-9])/).map(l=>l.trim()).filter(l=>l.length>3);
+      if (parts.length > 1) return parts.map((l,i) => numbered ? `${i+1}. ${l}` : `• ${l}`).join('<br>');
+      return text;
+    }
+    return lines.map((l,i) => numbered ? `${i+1}. ${l}` : `• ${l}`).join('<br>');
+  }
+
+  const val = p.value ? (p.value.startsWith('$') ? p.value : '$'+p.value) : '—';
+
+  const CONSULTANT_LIST = ${str(CONSULTANTS).replace("'",'"').replace("'",'"')};
 
   document.getElementById('modal-body').innerHTML = `
     <div class="phase-cards">${phasecards}</div>
@@ -631,28 +693,74 @@ function openProject(id) {
       <div style="font-size:12px;color:var(--text2);line-height:1.6">${PHASE_DESC[phase]}</div>
     </div>
     ${delHtml}
-    <div class="info-grid">
-      <div class="info-item"><div class="info-label">Status</div><div class="info-val">${statusBadge}</div></div>
-      <div class="info-item"><div class="info-label">Contract value</div><div class="info-val" style="color:var(--teal);font-family:var(--fm)">${p.value ? (p.value.startsWith('$') ? p.value : '$'+p.value) : '—'}</div></div>
-      <div class="info-item"><div class="info-label">Due / end date</div><div class="info-val">${p.dueDate || '—'}</div></div>
-      <div class="info-item"><div class="info-label">Contact</div><div class="info-val">${p.clientContact||'—'}${p.clientEmail?`<div style="font-size:11px;color:var(--text3);margin-top:2px">${p.clientEmail}</div>`:''}</div></div>
-      ${p.clientPhone?`<div class="info-item"><div class="info-label">Client phone</div><div class="info-val" style="font-size:12px">${p.clientPhone}</div></div>`:''}
-      ${p.contractStart?`<div class="info-item"><div class="info-label">Contract start</div><div class="info-val" style="font-size:12px">${p.contractStart}</div></div>`:''}
-      ${(p.flightsRequired&&p.flightsRequired.toLowerCase()!=='no'&&p.flightsRequired!=='')?`<div class="info-item"><div class="info-label">Flights</div><div class="info-val" style="color:var(--amber)">${p.flightsRequired}</div></div>`:''}
-      ${(p.accommodationRequired&&p.accommodationRequired.toLowerCase()!=='no'&&p.accommodationRequired!=='')?`<div class="info-item"><div class="info-label">Accommodation</div><div class="info-val" style="color:var(--amber)">${p.accommodationRequired}</div></div>`:''}
-      ${p.consultant?`<div class="info-item" style="grid-column:1/-1"><div class="info-label">Consultant / Trainer</div><div class="info-val">${p.consultant}${p.consultantEmail?`<div style="font-size:11px;color:var(--text3);margin-top:2px">${p.consultantEmail}</div>`:''}</div></div>`:''}
-      ${p.milestones?`<div class="info-item" style="grid-column:1/-1"><div class="info-label">Milestones</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2)">${p.milestones}</div></div>`:''}
-      ${p.timeline?`<div class="info-item" style="grid-column:1/-1"><div class="info-label">Timeline</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2)">${p.timeline}</div></div>`:''}
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+      <!-- Status dropdown -->
+      <div class="info-item">
+        <div class="info-label">Status</div>
+        <select onchange="updateStatus('${p.id}',this.value)" style="width:100%;margin-top:4px;font-size:12px;padding:5px 8px;border-radius:6px;background:var(--card2);border:1px solid var(--border2);color:var(--text)">
+          <option value="In Progress" ${p.status==='In Progress'?'selected':''}>In Progress</option>
+          <option value="On Hold" ${p.status==='On Hold'?'selected':''}>On Hold</option>
+          <option value="Completed" ${p.status==='Completed'?'selected':''}>Completed</option>
+        </select>
+      </div>
+      <!-- Contract value -->
+      <div class="info-item">
+        <div class="info-label">Total project cost</div>
+        <div class="info-val" style="color:var(--teal);font-family:var(--fm);font-size:16px">${val}</div>
+      </div>
+      <!-- Contract start with date picker -->
+      <div class="info-item">
+        <div class="info-label">Contract start</div>
+        <input type="date" value="${p.contractStart||''}" onchange="updateField('${p.id}','contractStart',this.value)"
+          style="width:100%;margin-top:4px;font-size:12px;padding:5px 8px;border-radius:6px;background:var(--card2);border:1px solid var(--border2);color:var(--text)"/>
+      </div>
+      <!-- Due date with date picker -->
+      <div class="info-item">
+        <div class="info-label">Completion / due date</div>
+        <input type="date" value="${p.dueDate||''}" onchange="updateField('${p.id}','dueDate',this.value)"
+          style="width:100%;margin-top:4px;font-size:12px;padding:5px 8px;border-radius:6px;background:var(--card2);border:1px solid var(--border2);color:var(--text)"/>
+      </div>
+      <!-- Contact -->
+      <div class="info-item">
+        <div class="info-label">Client contact</div>
+        <div class="info-val" style="font-size:12px">${p.clientContact||'—'}${p.clientEmail?`<div style="font-size:11px;color:var(--text3);margin-top:2px">${p.clientEmail}</div>`:''}</div>
+      </div>
+      <!-- Phone -->
+      <div class="info-item">
+        <div class="info-label">Client phone</div>
+        <div class="info-val" style="font-size:12px">${p.clientPhone||'—'}</div>
+      </div>
+      <!-- Consultant dropdown -->
+      <div class="info-item" style="grid-column:1/-1">
+        <div class="info-label">Consultant / Trainer assigned</div>
+        <select onchange="updateConsultant('${p.id}',this.value)" style="width:100%;margin-top:4px;font-size:12px;padding:5px 8px;border-radius:6px;background:var(--card2);border:1px solid var(--border2);color:var(--text)">
+          <option value="">— Select consultant or trainer —</option>
+          ${['Mick Harran','Paul Johnston','Dave Cohen','Ross Mackenzie','Lawrence Phillips','Marina Toailoa','Gavriel Schneider','Pierre Andipatin','Daniel Du Plessis','Gavriel Guriel'].map(c => `<option value="${c}" ${p.consultant===c?'selected':''}>${c}</option>`).join('')}
+        </select>
+      </div>
+      <!-- Travel -->
+      ${(p.flightsRequired&&p.flightsRequired.toLowerCase()!=='no'&&p.flightsRequired!=='')||
+        (p.accommodationRequired&&p.accommodationRequired.toLowerCase()!=='no'&&p.accommodationRequired!=='') ?
+        `<div class="info-item" style="grid-column:1/-1">
+          <div class="info-label">Travel requirements</div>
+          <div class="info-val" style="font-size:12px;color:var(--amber)">
+            Flights: ${p.flightsRequired||'N/A'} &nbsp;·&nbsp; Accommodation: ${p.accommodationRequired||'N/A'}
+          </div>
+        </div>` : ''}
+      <!-- Invoicing -->
       ${p.invoicingNotes?`<div class="info-item" style="grid-column:1/-1"><div class="info-label">Invoicing terms</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2)">${p.invoicingNotes}</div></div>`:''}
-      ${p.notes?`<div class="info-item" style="grid-column:1/-1"><div class="info-label">Notes / requirements</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2)">${p.notes}</div></div>`:''}
+      <!-- Milestones — numbered -->
+      ${p.milestones?`<div class="info-item" style="grid-column:1/-1"><div class="info-label">Milestones</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2);line-height:1.8">${fmtList(p.milestones,true)}</div></div>`:''}
+      <!-- Timeline -->
+      ${p.timeline?`<div class="info-item" style="grid-column:1/-1"><div class="info-label">Timeline</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2);line-height:1.8">${fmtList(p.timeline,true)}</div></div>`:''}
+      <!-- Notes -->
+      ${p.notes?`<div class="info-item" style="grid-column:1/-1"><div class="info-label">Notes</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2)">${p.notes}</div></div>`:''}
     </div>
+
     <div class="sec">Update phase</div>
     <div style="display:flex;gap:4px;margin-bottom:14px;flex-wrap:wrap">
       ${PHASES.map((ph,i) => `<button class="phase-btn ${i===phase?'selected':''}" onclick="updatePhase('${p.id}',${i})" style="flex:1;min-width:80px">${ph}</button>`).join('')}
-    </div>
-    <div class="sec">Update status</div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">
-      ${['In Progress','On Hold','Not Started','Completed'].map(s => `<button class="btn ${p.status===s?'btn-t':'btn-g'} btn-sm" onclick="updateStatus('${p.id}','${s}')">${s}</button>`).join('')}
     </div>
     <div class="arow">
       <button class="btn btn-p" onclick="closeModal();generateDraft('${p.id}','status_email','')">Draft status email ↗</button>
@@ -684,7 +792,27 @@ async function updatePhase(id, phase) {
 async function updateStatus(id, status) {
   await api(`/api/projects/${id}`, { method: 'PUT', body: JSON.stringify({ status }) });
   const p = projects.find(x => x.id === id);
-  if (p) { p.status = status; openProject(id); renderProjects(); }
+  if (p) { p.status = status; renderProjects(); updateOverview(); }
+}
+
+async function updateField(id, field, value) {
+  await api(`/api/projects/${id}`, { method: 'PUT', body: JSON.stringify({ [field]: value }) });
+  const p = projects.find(x => x.id === id);
+  if (p) p[field] = value;
+}
+
+async function updateConsultant(id, consultantName) {
+  const emailMap = {
+    'Mick Harran':'info@risk2solution.com','Paul Johnston':'info@risk2solution.com',
+    'Dave Cohen':'dave.c@risk2solution.com','Ross Mackenzie':'info@risk2solution.com',
+    'Lawrence Phillips':'info@risk2solution.com','Marina Toailoa':'info@risk2solution.com',
+    'Gavriel Schneider':'info@risk2solution.com','Pierre Andipatin':'info@risk2solution.com',
+    'Daniel Du Plessis':'info@risk2solution.com','Gavriel Guriel':'info@risk2solution.com',
+  };
+  const consultantEmail = emailMap[consultantName] || 'info@risk2solution.com';
+  await api(`/api/projects/${id}`, { method: 'PUT', body: JSON.stringify({ consultant: consultantName, consultantEmail }) });
+  const p = projects.find(x => x.id === id);
+  if (p) { p.consultant = consultantName; p.consultantEmail = consultantEmail; }
 }
 
 function closeModal() { document.getElementById('modal-bg').classList.remove('open'); }
@@ -812,6 +940,16 @@ function renderMilestones() {
   document.getElementById('milestones-list').innerHTML = html;
 }
 
+function fmtNumberedModal(text) {
+  if (!text) return '<span style="color:var(--text3)">—</span>';
+  const lines = text
+    .split(/\n|(?<=\d\.)\s+/)
+    .map(l => l.trim().replace(/^[•\-\*]\s*/, '').replace(/^\d+\.\s*/, ''))
+    .filter(l => l.length > 3);
+  if (lines.length <= 1) return `<div style="font-size:13px;color:var(--text);line-height:1.65">${text}</div>`;
+  return lines.map((l,i) => `<div style="display:flex;gap:8px;margin-bottom:6px"><span style="color:var(--teal);font-family:var(--fm);font-size:11px;flex-shrink:0;min-width:20px">${i+1}.</span><span style="font-size:13px;color:var(--text);line-height:1.5">${l}</span></div>`).join('');
+}
+
 function openMilestoneDetail(id, type) {
   const p = projects.find(x => x.id === id);
   if (!p) return;
@@ -820,8 +958,8 @@ function openMilestoneDetail(id, type) {
   document.getElementById('modal-sub').textContent   = p.projectName || '';
   document.getElementById('modal-body').innerHTML = `
     <div style="background:var(--card2);border:1px solid var(--border);border-left:3px solid ${isSrv?'var(--teal)':'var(--pink)'};border-radius:9px;padding:14px;margin-bottom:14px">
-      <div style="font-size:10px;color:${isSrv?'var(--teal)':'var(--pink-light)'};font-family:var(--fm);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">${isSrv?'Service provision':'Deliverables'}</div>
-      <div style="font-size:13px;color:var(--text);line-height:1.75">${(isSrv?p.summary:p.deliverables)||'—'}</div>
+      <div style="font-size:10px;color:${isSrv?'var(--teal)':'var(--pink-light)'};font-family:var(--fm);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">${isSrv?'Service provision':'Deliverables'}</div>
+      ${fmtNumberedModal(isSrv?p.summary:p.deliverables)}
     </div>
     <div class="info-grid">
       <div class="info-item"><div class="info-label">Current phase</div><div class="info-val">${PHASES[p.phase||0]}</div></div>
