@@ -180,23 +180,7 @@ const items = board?.items_page?.items || [];
     console.log('[Monday Debug]', JSON.stringify(res.data?.data).slice(0, 800));
 
     const projects = items.map(item => {
-      const col = (title) => item.column_values.find(c => c.id?.toLowerCase().includes(title.toLowerCase()) || c.type?.toLowerCase().includes(title.toLowerCase()))?.text || '';
-      const status = col('status');
-      const ongoing = isOngoing(status);
-      return {
-        id: item.id,
-        name: item.name,
-        clientName: col('client') || col('company') || 'Unknown',
-        clientContact: col('contact') || col('owner') || '',
-        clientEmail: col('email') || '',
-        type: ongoing ? 'ongoing' : 'standard',
-        status,
-        phase: ongoing ? null : parsePhase(col('phase') || col('stage')),
-        progress: ongoing ? null : parseInt(col('progress') || '0'),
-        dueDate: ongoing ? null : col('due') || col('deadline'),
-        value: col('value') || col('budget') || '',
-        notes: col('notes') || '',
-        lastSynced: new Date().toISOString(),
+      const col = (title)
       };
     });
 
