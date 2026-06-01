@@ -156,7 +156,7 @@ async function syncMonday() {
         items_page(limit: 100) {
           items {
             id name
-            column_values { id type title text value }
+            column_values { id type text value }
           }
         }
       }
@@ -171,62 +171,76 @@ async function syncMonday() {
     const items = board?.items_page?.items || [];
 
     const projects = items.map(item => {
-      // Match column by title (most reliable for named columns)
-      const byTitle = (title) => {
-        const t = title.toLowerCase();
-        const col = item.column_values.find(c =>
-          (c.title || '').toLowerCase().includes(t)
-        );
-        return col?.text || '';
-      };
-      const byId   = (id)   => item.column_values.find(c => c.id === id)?.text || '';
+      // Get column value by exact ID (IDs confirmed from board export)
+      const byId = (id) => item.column_values.find(c => c.id === id)?.text || '';
+
+      // Get column value by type (fallback)
       const byType = (type) => item.column_values.find(c => c.type === type)?.text || '';
 
-      // Status column
-      const status  = byId('color_mks0pnz5') || byType('color') || byType('status') || '';
+      // Status — confirmed ID: color_mks0pnz5
+      const status = byId('color_mks0pnz5') || byType('color') || '';
       const ongoing = isOngoing(status);
 
-      // Contract value — strip $ and commas, format properly
-      const rawValue = byTitle('value of contract') || byTitle('contract') || byType('numbers') || byType('numeric') || '';
-      const numValue = rawValue.replace(/[$,]/g, '').trim();
-      const displayValue = numValue ? '$' + parseFloat(numValue).toLocaleString('en-AU') : '';
+      // Contract value — confirmed column: "Value of Contract..." — type: numbers
+      // Try all numeric columns, pick the one that looks like a contract value
+      const numCols = item.column_values.filter(c => c.type === 'numbers' && c.text && parseFloat(c.text) > 0);
+      const rawValue = numCols.length > 0 ? numCols[0].text : '';
+      const numValue = (rawValue || '').replace(/[$,]/g, '').trim();
+      const displayValue = numValue && !isNaN(parseFloat(numValue))
+        ? '$' + parseFloat(numValue).toLocaleString('en-AU')
+        : '';
 
-      // Summary of service provision
-      const summary = byTitle('summary of service') || byTitle('service provision') || '';
+      // Project name — confirmed ID: text__1
+      const projectName = byId('text__1') || '';
 
-      // Deliverables
-      const deliverables = byTitle('deliverables') || '';
+      // Client contact — confirmed ID: text8__1
+      const clientContact = byId('text8__1') || '';
 
-      // SharePoint link
-      const spCol = item.column_values.find(c =>
-        (c.title || '').toLowerCase().includes('sharepoint') ||
-        (c.title || '').toLowerCase().includes('link to relevant') ||
-        c.type === 'link'
+      // Client email — confirmed ID: client_contact_email__1
+      const clientEmail = byId('client_contact_email__1') || byType('email') || '';
+
+      // Summary of service provision — type: long_text (first long_text column)
+      const longTexts = item.column_values.filter(c => c.type === 'long_text' && c.text);
+      const summary = longTexts.length > 0 ? longTexts[0].text : '';
+
+      // Deliverables — look for column with id containing 'deliverable'
+      const delCol = item.column_values.find(c =>
+        c.id?.toLowerCase().includes('deliverable') ||
+        c.id?.toLowerCase().includes('deliver')
       );
+      const deliverables = delCol?.text || '';
+
+      // SharePoint link — type: link
+      const spCol = item.column_values.find(c => c.type === 'link');
       let sharepointUrl = '';
-      if (spCol) {
-        if (spCol.value) {
-          try {
-            const v = JSON.parse(spCol.value);
-            sharepointUrl = v.url || v.text || spCol.text || '';
-          } catch (e) { sharepointUrl = spCol.text || ''; }
-        } else {
-          sharepointUrl = spCol.text || '';
-        }
+      if (spCol && spCol.value) {
+        try {
+          const v = JSON.parse(spCol.value);
+          sharepointUrl = v.url || v.text || spCol.text || '';
+        } catch (e) { sharepointUrl = spCol.text || ''; }
       }
 
-      // Contract start and end dates
-      const contractStart = byTitle('contract start') || '';
-      const contractEnd   = byTitle('completion due') || byTitle('contract end') || '';
+      // Dates — type: date (contract start = first date, end = second date)
+      const dateCols = item.column_values.filter(c => c.type === 'date' && c.text);
+      const contractStart = dateCols.length > 0 ? dateCols[0].text : '';
+      const contractEnd   = dateCols.length > 1 ? dateCols[1].text : '';
 
-      // Notes on invoicing
-      const invoicingNotes = byTitle('notes on invoicing') || byTitle('invoicing frequency') || '';
+      // Invoicing frequency — type: dropdown or text containing 'invoic'
+      const invoiceCol = item.column_values.find(c =>
+        c.id?.toLowerCase().includes('invoic') ||
+        c.id?.toLowerCase().includes('billing')
+      );
+      const invoicingNotes = invoiceCol?.text || '';
 
       // Required trainer/consultant
-      const consultant = byTitle('required trainer') || byTitle('consultant') || '';
+      const consultantCol = item.column_values.find(c =>
+        c.id?.toLowerCase().includes('trainer') ||
+        c.id?.toLowerCase().includes('consultant')
+      );
+      const consultant = consultantCol?.text || '';
 
-      // Past challenges / notes
-      const notes = byTitle('past challenges') || byTitle('notes re') || '';
+      // Notes
+      const notes = longTexts.length > 1 ? longTexts[1].text : '';
 
       return {
         id:             item.id,
@@ -394,16 +408,6 @@ function saveDraft(draft) {
 
 // Health
 app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Aurora R2S' }));
-app.get('/api/debug', async (req, res) => {
-  try {
-    const apiKey = process.env.MONDAY_API_KEY;
-    const boardId = process.env.MONDAY_BOARD_ID;
-    const query = `query { boards(ids:[${boardId}]) { id name groups { id title } items_page(limit:3) { items { id name } } } }`;
-    const r = await require('axios').post('https://api.monday.com/v2', { query },
-      { headers: { Authorization: apiKey, 'Content-Type': 'application/json', 'API-Version': '2024-01' }, timeout: 10000 });
-    res.json(r.data);
-  } catch(e) { res.json({ error: e.message }); }
-});
 
 // Projects
 app.get('/api/projects', async (req, res) => {
