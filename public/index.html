@@ -467,7 +467,21 @@ function nav(id, el) {
 }
 
 async function api(path, opts = {}) {
-  return _baseApi(path, opts);
+  const token = sessionStorage.getItem('aurora_token') || '';
+  const res = await fetch(path, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + token,
+      ...(opts.headers || {}),
+    },
+  });
+  if (res.status === 401) {
+    sessionStorage.removeItem('aurora_token');
+    document.getElementById('login-screen').style.display = 'flex';
+    throw new Error('Session expired — please log in again');
+  }
+  return res.json();
 }
 
 // ── Projects ──────────────────────────────────────────────────────────────────
@@ -861,7 +875,7 @@ async function uploadContract(file) {
   const fd = new FormData();
   fd.append('file', file);
   try {
-    const res = await fetch('/api/contracts/upload', { method: 'POST', body: fd, headers: { 'Authorization': 'Bearer ' + AUTH_TOKEN } });
+    const res = await fetch('/api/contracts/upload', { method: 'POST', body: fd, headers: { 'Authorization': 'Bearer ' + (sessionStorage.getItem('aurora_token') || '') } });
     const data = await res.json();
     if (data.project) {
       projects.push(data.project);
@@ -1153,7 +1167,7 @@ async function handleDocFiles(files) {
     const fd = new FormData();
     fd.append('file', file);
     fd.append('projectId', projectId);
-    await fetch('/api/contracts/upload', { method: 'POST', body: fd, headers: { 'Authorization': 'Bearer ' + AUTH_TOKEN } });
+    await fetch('/api/contracts/upload', { method: 'POST', body: fd, headers: { 'Authorization': 'Bearer ' + (sessionStorage.getItem('aurora_token') || '') } });
   }
   renderDocs();
 }
@@ -1268,21 +1282,7 @@ async function doLogin() {
   }
 }
 
-// Override api() to include auth token
-const _baseApi = async (path, opts = {}) => {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH_TOKEN },
-    ...opts,
-    headers: { ...(opts.headers || {}), 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH_TOKEN },
-  });
-  if (res.status === 401) {
-    sessionStorage.removeItem('aurora_token');
-    AUTH_TOKEN = '';
-    document.getElementById('login-screen').style.display = 'flex';
-    throw new Error('Session expired');
-  }
-  return res.json();
-};
+// Auth handled inline in api()
 
 // Check if already logged in
 if (AUTH_TOKEN) {
