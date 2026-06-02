@@ -761,6 +761,9 @@ function openProject(id) {
           <option value="">— Select consultant or trainer —</option>
           ${['Mick Harran','Paul Johnston','Dave Cohen','Ross Mackenzie','Lawrence Phillips','Marina Toailoa','Gavriel Schneider','Pierre Andipatin','Daniel Du Plessis','Gavriel Guriel'].map(c => `<option value="${c}" ${p.consultant===c?'selected':''}>${c}</option>`).join('')}
         </select>
+        <div id="briefing-status-${p.id}" style="font-size:11px;color:var(--text3);margin-top:5px">
+          ${p.consultant ? `Briefing previously sent to ${p.consultant}. Selecting a new name will generate a new briefing.` : 'Select a consultant or trainer to automatically generate a briefing email for them.'}
+        </div>
       </div>
       <!-- Travel -->
       ${(p.flightsRequired&&p.flightsRequired.toLowerCase()!=='no'&&p.flightsRequired!=='')||
@@ -825,6 +828,7 @@ async function updateField(id, field, value) {
 }
 
 async function updateConsultant(id, consultantName) {
+  if (!consultantName) return;
   const emailMap = {
     'Mick Harran':'info@risk2solution.com','Paul Johnston':'info@risk2solution.com',
     'Dave Cohen':'dave.c@risk2solution.com','Ross Mackenzie':'info@risk2solution.com',
@@ -833,9 +837,28 @@ async function updateConsultant(id, consultantName) {
     'Daniel Du Plessis':'info@risk2solution.com','Gavriel Guriel':'info@risk2solution.com',
   };
   const consultantEmail = emailMap[consultantName] || 'info@risk2solution.com';
+
+  // Save consultant to project
   await api(`/api/projects/${id}`, { method: 'PUT', body: JSON.stringify({ consultant: consultantName, consultantEmail }) });
   const p = projects.find(x => x.id === id);
   if (p) { p.consultant = consultantName; p.consultantEmail = consultantEmail; }
+
+  // Trigger briefing draft automatically
+  const btn = document.querySelector(`select[onchange*="updateConsultant('${id}"]`);
+  const confirmEl = document.getElementById(`briefing-status-${id}`);
+  if (confirmEl) confirmEl.textContent = 'Generating briefing email…';
+
+  try {
+    const res = await api(`/api/projects/${id}/briefing`, { method: 'POST' });
+    if (res.success) {
+      if (confirmEl) confirmEl.textContent = '✓ Briefing email drafted — review in Comms Drafts';
+      if (confirmEl) confirmEl.style.color = 'var(--teal)';
+      // Reload drafts if comms tab is open
+      loadDrafts();
+    }
+  } catch (e) {
+    if (confirmEl) { confirmEl.textContent = 'Briefing failed — try again'; confirmEl.style.color = 'var(--rose)'; }
+  }
 }
 
 function closeModal() { document.getElementById('modal-bg').classList.remove('open'); }
