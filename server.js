@@ -289,63 +289,38 @@ ${truncated}`,
 }
 
 // ── Consultant / trainer briefing email ──────────────────────────────────────
-async function sendConsultantBriefing(project, extracted) {
+async function sendConsultantBriefing(project, extracted, prebuiltContext) {
   const DIANE = 'diane.k@risk2solution.com';
 
   // Consultant email — use extracted email if available, otherwise fall back to info@ for now
   const consultantEmail = extracted.consultantEmail || process.env.CONSULTANT_DEFAULT_EMAIL || 'info@risk2solution.com';
   const consultantName  = extracted.consultant || project.consultant || 'Team';
 
-  const context = buildContext(project);
+  const context = prebuiltContext || buildContext(project);
 
+  const firstName = consultantName.split(' ')[0];
   const briefingBody = await aurora(
     'consultant_briefing',
-    `Write a project briefing email to ${consultantName}, who has been assigned to this project.
+    `Write a short project assignment email. Plain text only — no asterisks, no bold, no markdown formatting at all.
 
-CRITICAL FORMATTING RULES — follow exactly:
-- Plain text only. No asterisks, no bold markdown, no ** anywhere.
-- No TO/CC/Subject header block in the body.
-- Use plain section headings followed by a colon, e.g. "CLIENT:" on its own line.
-- Deliverables must be a numbered list, one per line.
-- Phases/timeline must be a numbered list, one per line, include the week range if available.
-- Do NOT cut off — include every phase, every deliverable fully.
-- Sign off exactly as shown at the bottom of this prompt.
+Start exactly with:
+Hi ${firstName},
 
-Write the email body only, starting with "Hi ${consultantName.split(' ')[0]}," and covering:
+You've been assigned to a new project for ${project.clientName} — ${project.projectName || project.clientName}. Commencing ${project.contractStart || 'TBC'} and due ${project.dueDate || 'TBC'}.
 
-CLIENT:
-Full organisation name, location, primary contact name, email and phone.
+Then write these four short sections with no section headings — just plain paragraphs and dot points:
 
-PROJECT:
-Project name and a 2-3 sentence description of what we are doing for them.
+1. SCOPE (1-2 sentences only): What R2S is doing for this client. Be concise.
 
-SCOPE OF SERVICE:
-Brief paragraph on the overall approach.
+2. KEY DELIVERABLES (3-5 dot points maximum, starting with •): The most important deliverables only. Not the full list.
 
-DELIVERABLES:
-Numbered list — one deliverable per line. Extract every deliverable from the contract.
+3. TIMELINE (one sentence only): Just the total duration e.g. "The engagement runs for approximately 6 weeks from commencement." Do not list individual phases.
 
-TIMELINE AND PHASES:
-Numbered list — one phase per line with week range and what happens in that phase.
-Example format:
-1. Phase 1 (Wk 1-2): Description of what happens
-2. Phase 2 (Wk 3-4): Description of what happens
+4. TRAVEL (one line only if flights or accommodation are needed): State simply e.g. "Flights and accommodation are required for this engagement." Skip this section entirely if not required.
 
-KEY DATES:
-Contract start: [date or TBC]
-Completion date: [date or TBC]
+Then end with exactly:
 
-TRAVEL:
-Flights required: [yes/no]
-Accommodation required: [yes/no]
-
-INVOICING:
-[Invoicing terms]
-
-IMPORTANT NOTES:
-[Any special conditions or requirements. If none, write "None."]
-
-Please confirm receipt of this briefing and that you are clear on all requirements. If you have any questions, contact Diane directly.
+Please confirm you have received this briefing and are clear on the requirements. Contact Diane if you have any questions.
 
 Kind regards,
 
@@ -691,6 +666,33 @@ app.put('/api/projects/:id', express.json(), async (req, res) => {
 app.delete('/api/projects/:id', async (req, res) => {
   try { await db.deleteProject(req.params.id); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Trigger consultant briefing for a project
+app.post('/api/projects/:id/briefing', async (req, res) => {
+  try {
+    const project = await db.getProject(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    if (!project.consultant) return res.status(400).json({ error: 'No consultant assigned to this project' });
+
+    const docs    = await db.getDocuments(req.params.id);
+    const context = buildContext(project, docs);
+
+    // Use extracted data from db as the "extracted" object
+    const extracted = {
+      consultant:           project.consultant,
+      consultantEmail:      project.consultantEmail,
+      flightsRequired:      project.flightsRequired,
+      accommodationRequired:project.accommodationRequired,
+    };
+
+    const draft = await sendConsultantBriefing(project, extracted, context);
+    res.json({ success: true, draft });
+  } catch (err) {
+    if (err.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
+    console.error('[Briefing endpoint]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Monday sync (backup)
