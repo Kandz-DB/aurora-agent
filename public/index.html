@@ -695,7 +695,7 @@ function openProject(id) {
 
   const val = p.value ? (p.value.startsWith('$') ? p.value : '$'+p.value) : '—';
 
-  const CONSULTANT_LIST = ${str(CONSULTANTS).replace("'",'"').replace("'",'"')};
+  const CONSULTANT_LIST = ['Mick Harran','Paul Johnston','Dave Cohen','Ross Mackenzie','Lawrence Phillips','Marina Toailoa','Gavriel Schneider','Pierre Andipatin','Daniel Du Plessis','Gavriel Guriel'];
 
   document.getElementById('modal-body').innerHTML = `
     <div class="phase-cards">${phasecards}</div>
@@ -1253,8 +1253,6 @@ function askAbout(id) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 // Auth
-let AUTH_TOKEN = sessionStorage.getItem('aurora_token') || '';
-
 async function doLogin() {
   const pwd = document.getElementById('login-pwd').value;
   const err = document.getElementById('login-error');
@@ -1268,8 +1266,7 @@ async function doLogin() {
     });
     const data = await res.json();
     if (data.success) {
-      AUTH_TOKEN = data.token;
-      sessionStorage.setItem('aurora_token', AUTH_TOKEN);
+      sessionStorage.setItem('aurora_token', data.token);
       document.getElementById('login-screen').style.display = 'none';
       loadProjects();
     } else {
@@ -1284,13 +1281,6 @@ async function doLogin() {
 
 // Auth handled inline in api()
 
-// Check if already logged in
-if (AUTH_TOKEN) {
-  document.getElementById('login-screen').style.display = 'none';
-  loadProjects();
-} else {
-  setTimeout(() => document.getElementById('login-pwd').focus(), 100);
-}
 </script>
 
 <!-- LOGIN SCREEN -->
@@ -1305,5 +1295,21 @@ if (AUTH_TOKEN) {
   </div>
   <div class="login-brand">Risk 2 Solution · Confidential</div>
 </div>
+
+<script>
+// Init — runs after DOM is fully loaded
+(function() {
+  const token = sessionStorage.getItem('aurora_token') || '';
+  if (token) {
+    document.getElementById('login-screen').style.display = 'none';
+    loadProjects();
+  } else {
+    setTimeout(() => {
+      const el = document.getElementById('login-pwd');
+      if (el) el.focus();
+    }, 100);
+  }
+})();
+</script>
 </body>
 </html>
