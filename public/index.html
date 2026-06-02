@@ -565,29 +565,35 @@ function bulletList(text) {
 function tileHTML(p) {
   const phase = p.phase || 0;
   const alert = alertLabel(p);
-  const bars  = PHASES.map((_,i) => `<div class="tile-ph ${i<phase?'done':i===phase?'now':''}"></div>`).join('');
-
-  // Clean summary — max 3 bullet points on the tile
-  const summaryText = p.summary || p.deliverables || '';
-  const bullets = summaryText
-    .split(/\n|(?<=\.)\s+(?=[A-Z0-9•\-])|[;]/)
-    .map(l => l.trim().replace(/^[•\-\*\d\.]+\s*/, ''))
-    .filter(l => l.length > 4)
-    .slice(0, 3);
-  const summaryHTML = bullets.length
-    ? bullets.map(b => `<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:3px"><span style="color:var(--teal);flex-shrink:0;font-size:10px;margin-top:1px">•</span><span style="font-size:11px;color:var(--text2);line-height:1.4">${b}</span></div>`).join('')
+  // Summary — first sentence only, strip all markdown, max 120 chars
+  const summaryRaw = (p.summary || p.deliverables || '').replace(/\*\*?|__|\#/g, '').trim();
+  const summaryFirst = summaryRaw.split(/\.\s+/)[0].trim().slice(0, 120);
+  const summaryHTML = summaryFirst
+    ? `<div style="font-size:11px;color:var(--text2);line-height:1.5;margin-bottom:10px">${summaryFirst}${summaryFirst.length >= 120 ? '…' : '.'}</div>`
     : '';
 
-  const val = p.value ? (p.value.startsWith('$') ? p.value : '$'+p.value) : '';
+  // Value — first $ amount only (e.g. "$15,000 ex GST"), strip everything after the first amount
+  const rawVal = (p.value || '').replace(/\*\*?/g, '').trim();
+  const amtMatch = rawVal.match(/\$[\d,]+(?:\.\d+)?(?:\s*(?:ex|inc)\.?\s*GST)?/i);
+  const val = amtMatch ? amtMatch[0] : (rawVal ? rawVal.split(/[—\-–]/)[0].trim().slice(0, 25) : '');
+
+  // Phase bar with labels
+  const phaseBars = PHASES.map((_,i) =>
+    `<div style="flex:1;height:4px;border-radius:2px;background:${i<phase?'rgba(0,232,187,.5)':i===phase?'var(--pink)':'var(--border2)'}"></div>`
+  ).join('');
+  const phaseLabels = PHASES.map((ph,i) =>
+    `<div style="flex:1;font-size:8px;text-align:center;color:${i===phase?'var(--pink-light)':i<phase?'rgba(0,232,187,.7)':'var(--text3)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--fm)">${ph.split(' ')[0]}</div>`
+  ).join('');
 
   return `<div class="tile" onclick="openProject('${p.id}')">
     ${alert ? `<div class="tile-alert ${alert.cls}">${alert.label}</div>` : ''}
     <div class="tile-client">${p.clientName}</div>
-    <div class="tile-project" style="margin-bottom:10px">${p.projectName || ''}</div>
-    ${summaryHTML ? `<div style="margin-bottom:10px">${summaryHTML}</div>` : ''}
-    <div class="tile-phases" style="margin-bottom:6px">${bars}</div>
+    <div class="tile-project" style="margin-bottom:8px">${p.projectName || ''}</div>
+    ${summaryHTML}
+    <div style="display:flex;gap:2px;margin-bottom:3px">${phaseBars}</div>
+    <div style="display:flex;gap:2px;margin-bottom:10px">${phaseLabels}</div>
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px">
-      ${val ? `<span style="font-size:12px;font-weight:600;font-family:var(--fs);color:var(--teal)">${val}</span>` : '<span></span>'}
+      ${val ? `<span style="font-size:13px;font-weight:600;font-family:var(--fs);color:var(--teal)">${val}</span>` : '<span></span>'}
       <div style="display:flex;gap:5px;align-items:center">
         ${p.dueDate ? `<span class="badge bg" style="font-size:10px">📅 ${p.dueDate}</span>` : ''}
         ${isCompleted(p) ? '<span class="badge bt">✓ Complete</span>' : ''}
@@ -693,7 +699,10 @@ function openProject(id) {
     return lines.map((l,i) => numbered ? `${i+1}. ${l}` : `• ${l}`).join('<br>');
   }
 
-  const val = p.value ? (p.value.startsWith('$') ? p.value : '$'+p.value) : '—';
+  // Extract just the first dollar amount for display — no breakdown
+  const rawValModal = (p.value || '').replace(/\*\*?/g, '').trim();
+  const firstAmtModal = rawValModal.match(/\$[\d,]+(?:\.\d+)?(?:\s*(?:ex|inc)\.?\s*GST)?/i);
+  const val = firstAmtModal ? firstAmtModal[0] : (rawValModal ? rawValModal.split(/[—\-–]/)[0].trim().slice(0,30) : '—');
 
   const CONSULTANT_LIST = ['Mick Harran','Paul Johnston','Dave Cohen','Ross Mackenzie','Lawrence Phillips','Marina Toailoa','Gavriel Schneider','Pierre Andipatin','Daniel Du Plessis','Gavriel Guriel'];
 
