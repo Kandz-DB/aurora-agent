@@ -72,8 +72,8 @@ const upload = multer({
 const CAP_USD = parseFloat(process.env.MONTHLY_SPEND_CAP_USD || '20');
 
 const TASK_MODELS = {
-  chat:              'claude-sonnet-4-6',
-  document_analysis: 'claude-sonnet-4-6',
+  chat:              'claude-haiku-4-5-20251001', // Haiku for chat to save credits
+  document_analysis: 'claude-haiku-4-5-20251001',
   contract_extract:  'claude-sonnet-4-6', // Sonnet for accuracy with tables and financials
   status_email:      'claude-haiku-4-5-20251001',
   checkin_email:     'claude-haiku-4-5-20251001',
@@ -1016,25 +1016,37 @@ app.delete('/api/projects/:id', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Trigger consultant briefing for a project
-app.post('/api/projects/:id/briefing', async (req, res) => {
+// Trigger consultant briefing for a specific consultant on a project
+app.post('/api/projects/:id/briefing', express.json(), async (req, res) => {
   try {
     const project = await db.getProject(req.params.id);
     if (!project) return res.status(404).json({ error: 'Project not found' });
-    if (!project.consultant) return res.status(400).json({ error: 'No consultant assigned to this project' });
+
+    // Allow specifying a single consultant name (for multi-consultant support)
+    const consultantName  = req.body?.consultantName || project.consultant;
+    if (!consultantName) return res.status(400).json({ error: 'No consultant assigned to this project' });
+
+    const CONSULTANT_EMAILS = {
+      'Mick Harran':'info@risk2solution.com','Paul Johnston':'info@risk2solution.com',
+      'Dave Cohen':'dave.c@risk2solution.com','Ross Mackenzie':'info@risk2solution.com',
+      'Lawrence Phillips':'info@risk2solution.com','Marina Toailoa':'info@risk2solution.com',
+      'Gavriel Schneider':'info@risk2solution.com','Pierre Andipatin':'info@risk2solution.com',
+      'Daniel Du Plessis':'info@risk2solution.com','Gavriel Guriel':'info@risk2solution.com',
+    };
 
     const docs    = await db.getDocuments(req.params.id);
     const context = buildContext(project, docs);
 
-    // Use extracted data from db as the "extracted" object
+    // Build a single-consultant version of the project for the briefing
+    const briefProject = { ...project, consultant: consultantName, consultantEmail: CONSULTANT_EMAILS[consultantName] || project.consultantEmail || 'info@risk2solution.com' };
     const extracted = {
-      consultant:           project.consultant,
-      consultantEmail:      project.consultantEmail,
-      flightsRequired:      project.flightsRequired,
-      accommodationRequired:project.accommodationRequired,
+      consultant: consultantName,
+      consultantEmail: briefProject.consultantEmail,
+      flightsRequired: project.flightsRequired,
+      accommodationRequired: project.accommodationRequired,
     };
 
-    const draft = await sendConsultantBriefing(project, extracted, context);
+    const draft = await sendConsultantBriefing(briefProject, extracted, context);
     res.json({ success: true, draft });
   } catch (err) {
     if (err.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
@@ -1115,18 +1127,9 @@ app.post('/api/contracts/upload', upload.single('file'), async (req, res) => {
       extract: rawText.slice(0, 8000),
     });
 
-    // Send consultant briefing if a consultant/trainer is named
-    let briefingDraft = null;
-    if (extracted.consultant && extracted.consultant.trim()) {
-      try {
-        briefingDraft = await sendConsultantBriefing(project, extracted);
-        console.log(`[Contract] ✓ Consultant briefing prepared for ${extracted.consultant}`);
-      } catch (briefErr) {
-        console.error('[Contract] Briefing failed:', briefErr.message);
-      }
-    }
-
-    res.json({ project, extracted, briefingPrepared: !!briefingDraft });
+    // Don't auto-send briefing on upload — consultant is pre-filled but Diane confirms via dropdown
+    // The briefingPrepared flag tells the UI which consultants were found so Diane can confirm
+    res.json({ project, extracted, briefingPrepared: false, suggestedConsultants: extracted.consultant ? extracted.consultant.split(/[,;&]+/).map(s => s.trim()).filter(Boolean) : [] });
   } catch (e) {
     if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
     console.error('[Contract] Error:', e.message);
@@ -1230,7 +1233,7 @@ app.get('/api/documents', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Reports
+// Reports — generate and stream as downloadable files
 app.post('/api/reports', express.json(), async (req, res) => {
   try {
     const { reportType, projectId } = req.body;
@@ -1245,18 +1248,84 @@ app.post('/api/reports', express.json(), async (req, res) => {
       return buildContext(p, docs);
     }))).filter(Boolean).join('\n\n---\n\n');
 
+    // Determine format
+    const excelTypes = ['milestones','risks','invoices'];
+    const isExcel = excelTypes.includes(reportType);
+
     const prompts = {
-      status:    'Write a concise project status report. For each project: current phase, status, what has been delivered so far, what is outstanding, any risks or blockers. Keep it factual and easy to read.',
-      milestones:'List deliverables and milestones for each project. Format clearly with project name, deliverable, and status (complete/in progress/outstanding).',
-      risks:     'Summarise risks across all projects. Format: project | risk | level | recommended action. Keep it brief and factual.',
-      closeout:  'Write a project close-out report. What was delivered, outcomes achieved, and 2-3 forward recommendations for the client.',
-      invoices:  'Summarise invoice and payment status. Format: client | project | contract value | invoicing terms | status.',
-      portfolio: 'Write a one-page portfolio overview for R2S leadership. Status per project, anything needing immediate attention at the top, key dates ahead.',
+      status:    `Write a clear project status report. Use bullet points and numbered lists. No asterisks, no long dashes, no markdown symbols.
+For each project write:
+Project name and client
+Current phase (one of: Kick-off, Deployment, Monitoring & Review, Reporting, Close-out)
+Status: On Track / At Risk / On Hold
+Delivered so far (bullet points)
+Outstanding (bullet points)
+Risks or blockers (bullet points if any)
+Next steps (bullet points)`,
+
+      milestones:`Generate a deliverables tracker. Return as tab-separated values with these exact columns:
+Client\tProject\tDeliverable\tPhase\tDue Date\tStatus\tNotes
+One row per deliverable. Status must be one of: Complete, In Progress, Outstanding, Overdue.
+No extra text, no asterisks, no dashes. Just the data rows after the header.`,
+
+      risks:     `Generate a risk register. Return as tab-separated values with these exact columns:
+Client\tProject\tRisk Description\tLikelihood\tImpact\tRisk Level\tMitigation Action\tOwner
+Likelihood and Impact: High/Medium/Low. Risk Level: High/Medium/Low.
+No extra text, no asterisks, no dashes. Just data rows after the header.`,
+
+      closeout:  `Write a project close-out report. Use bullet points and numbered lists. No asterisks, no markdown.
+Include: Project summary, Deliverables completed (numbered list), Key outcomes, Invoicing summary, Lessons learned (bullet points), Recommendations for the client (numbered list).`,
+
+      invoices:  `Generate an invoice summary. Return as tab-separated values with these exact columns:
+Client\tProject\tContract Value\tInvoicing Terms\tInvoiced To Date\tOutstanding\tNext Invoice Due\tNotes
+No extra text, no asterisks, no dashes. Just data rows after the header.`,
+
+      portfolio: `Write a portfolio overview for R2S leadership. Use bullet points and numbered lists. No asterisks, no markdown.
+Lead with anything needing immediate attention. Then list each active project: client, project name, phase, status, contract value, key date.
+End with a 3-month revenue forecast based on contract values.`,
     };
 
-    const taskType = reportType === 'portfolio' ? 'portfolio_report' : reportType === 'closeout' ? 'closeout_report' : 'status_report';
-    const content  = await aurora(taskType, prompts[reportType] || prompts.status, contextBlock);
-    res.json({ content, reportType, generatedAt: new Date().toISOString() });
+    const taskType = ['portfolio','closeout'].includes(reportType) ? 'portfolio_report' : 'status_report';
+    const reportContent = await aurora(taskType, prompts[reportType] || prompts.status, contextBlock);
+
+    const now = new Date().toISOString().slice(0,10);
+    const safeName = reportType.replace(/[^a-z0-9]/gi,'_');
+
+    if (isExcel) {
+      // Return as CSV (opens in Excel when saved as .csv)
+      const lines = reportContent.split('\n').filter(l => l.trim());
+      const csv = lines.map(line =>
+        line.split('\t').map(cell => {
+          const c = (cell || '').replace(/"/g, '""').trim();
+          return c.includes(',') || c.includes('"') || c.includes('\n') ? `"${c}"` : c;
+        }).join(',')
+      ).join('\r\n');
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="R2S_${safeName}_${now}.csv"`);
+      res.send('\uFEFF' + csv); // UTF-8 BOM so Excel opens correctly
+    } else {
+      // Return as plain text formatted for Word (.txt that Word can open)
+      const wordContent = reportContent
+        .replace(/\*\*?/g, '')       // remove asterisks
+        .replace(/^-{3,}$/gm, '')    // remove horizontal rules
+        .replace(/\u2014|\u2013/g, '-') // replace em/en dashes with hyphen
+        .replace(/_{2,}/g, '')        // remove underscores used as dividers
+        .trim();
+
+      const header = `R2S PROJECT MANAGEMENT
+${reportType.toUpperCase().replace(/_/g,' ')} REPORT
+Generated: ${new Date().toLocaleDateString('en-AU')}
+${targets.length > 1 ? 'Portfolio — All projects' : targets[0]?.clientName || ''}
+
+${'='.repeat(60)}
+
+`;
+      res.setHeader('Content-Type', 'application/msword');
+      res.setHeader('Content-Disposition', `attachment; filename="R2S_${safeName}_${now}.doc"`);
+      res.send(header + wordContent);
+    }
+
   } catch (e) {
     if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
     res.status(500).json({ error: e.message });
