@@ -1028,6 +1028,141 @@ R2S Project Management Intelligence`
   }
 }
 
+
+// ── Parse risk register from tab-separated AI output ────────────────────────
+function parseRiskRegister(tsvText, projectId) {
+  const lines = tsvText.split('\n').filter(l => l.trim() && !l.toLowerCase().startsWith('client'));
+  return lines.map((line, i) => {
+    const cols = line.split('\t').map(c => c.trim().replace(/"/g,''));
+    return {
+      id: `risk_${projectId}_${i+1}`,
+      projectId,
+      number: i + 1,
+      description: cols[2] || cols[1] || 'Risk ' + (i+1),
+      likelihood: cols[3] || 'Medium',
+      impact: cols[4] || 'Medium',
+      level: cols[5] || 'Medium',
+      mitigation: cols[6] || '',
+      owner: cols[7] || 'Diane Kruger',
+      status: 'Open',
+      triggered: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }).filter(r => r.description.length > 2);
+}
+
+// ── Parse deliverables tracker from AI output ────────────────────────────────
+function parseDeliverables(tsvText, projectId) {
+  const lines = tsvText.split('\n').filter(l => l.trim() && !l.toLowerCase().startsWith('client'));
+  return lines.map((line, i) => {
+    const cols = line.split('\t').map(c => c.trim().replace(/"/g,''));
+    return {
+      id: `del_${projectId}_${i+1}`,
+      projectId,
+      number: i + 1,
+      name: cols[2] || cols[1] || 'Deliverable ' + (i+1),
+      phase: cols[3] || '',
+      dueDate: cols[4] || '',
+      status: cols[5] || 'Outstanding',
+      notes: cols[7] || '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }).filter(d => d.name.length > 2);
+}
+
+// ── Monitor risks daily ───────────────────────────────────────────────────────
+async function monitorRisks(projects) {
+  for (const p of projects) {
+    if (p.type !== 'standard' || isCompleted(p)) continue;
+    const risks = await db.getRiskRegister(p.id);
+    if (!risks.length) continue;
+
+    const days = p.dueDate ? Math.round((new Date(p.dueDate) - new Date()) / (1000*60*60*24)) : null;
+    const phase = p.phase || 0;
+    const status = (p.status||'').toLowerCase();
+
+    for (const risk of risks) {
+      if (risk.triggered || risk.status === 'Closed') continue;
+
+      let triggered = false;
+      let triggerReason = '';
+
+      const desc = (risk.description||'').toLowerCase();
+
+      // Check if risk conditions are met
+      if (desc.includes('delay') || desc.includes('overdue') || desc.includes('timeline')) {
+        if (days !== null && days < 0) { triggered = true; triggerReason = 'Project is now overdue.'; }
+        else if (days !== null && days <= 7) { triggered = true; triggerReason = `Project due in ${days} days.`; }
+      }
+      if ((desc.includes('hold') || desc.includes('stall') || desc.includes('block')) && status.includes('hold')) {
+        triggered = true; triggerReason = 'Project is currently On Hold.';
+      }
+      if (desc.includes('consultant') || desc.includes('trainer') || desc.includes('resource')) {
+        if (!p.consultant) { triggered = true; triggerReason = 'No consultant assigned to this project.'; }
+      }
+      if (desc.includes('phase') && phase === 0 && days !== null && days <= 14) {
+        triggered = true; triggerReason = `Project still in Kick-off with ${days} days remaining.`;
+      }
+
+      if (triggered) {
+        await db.updateRisk(p.id, risk.id, { triggered: true, triggeredAt: new Date().toISOString(), triggerReason });
+
+        // Email Diane
+        await sendEmail('diane.k@risk2solution.com',
+          `[Aurora] Risk triggered: ${p.clientName} — ${risk.description.slice(0,60)}`,
+          `Hi Diane,
+
+Aurora has detected that a documented risk has been triggered on the ${p.clientName} project.
+
+Project: ${p.projectName || p.clientName}
+Current phase: ${PHASES[phase]}
+
+RISK #${risk.number}: ${risk.description}
+Likelihood: ${risk.likelihood} | Impact: ${risk.impact} | Level: ${risk.level}
+
+Trigger reason: ${triggerReason}
+
+DOCUMENTED MITIGATION:
+${risk.mitigation || 'No mitigation documented — please review.'}
+
+Risk owner: ${risk.owner || 'Diane Kruger'}
+
+Please review the mitigation plan and take appropriate action. You can view and update the full risk register in Aurora under the project record.
+
+${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}
+
+Aurora
+R2S Project Management Intelligence`,
+          true
+        );
+        console.log(`[Risks] Risk triggered for ${p.clientName}: ${risk.description.slice(0,50)}`);
+      }
+    }
+  }
+}
+
+// ── Update deliverable status from calendar/emails ────────────────────────────
+async function updateDeliverableFromCalendar(projectId, deliverableName, calendarEvent) {
+  const items = await db.getDeliverables(projectId);
+  const match = items.find(d =>
+    d.name.toLowerCase().includes(deliverableName.toLowerCase()) ||
+    deliverableName.toLowerCase().includes(d.name.toLowerCase().slice(0,15))
+  );
+  if (match) {
+    const now = new Date();
+    const eventDate = new Date(calendarEvent.start);
+    const status = eventDate < now ? 'Complete' : 'In Progress';
+    await db.updateDeliverable(projectId, match.id, { status, calendarEvent: calendarEvent.subject });
+    console.log(`[Deliverables] Updated ${match.name} → ${status}`);
+  }
+}
+
+function isCompleted(p) {
+  return ['Completed','Terminated','Closed'].includes(p.status);
+}
+
 // ── Daily batch (6am AEST = 8pm UTC) ─────────────────────────────────────────
 async function runBatch() {
   const now = new Date();
@@ -1076,6 +1211,8 @@ R2S Project Management Intelligence`,
   // ── 2. Due date reminders ─────────────────────────────────────────────────
   await checkDueDateReminders();
 
+  // ── 3. Check for stuck phases + monitor risks ───────────────────────────────
+  try { await monitorRisks(standard); } catch(e) { console.error('[Risks]', e.message); }
   // ── 3. Check for stuck phases ─────────────────────────────────────────────
   await checkStuckPhases(standard);
 
@@ -1703,12 +1840,21 @@ app.post('/api/contracts/upload', upload.single('file'), async (req, res) => {
       });
     }
 
-    // Save document extract
+    // Save document extract (text only — delete the original file to save space)
     await db.saveDocument({
       id: `doc_${Date.now()}`,
       projectId, name: req.file.originalname,
       extract: rawText.slice(0, 8000),
+      type: 'contract_extract',
     });
+
+    // Delete the uploaded file immediately — we only need the extracted text
+    try {
+      fs.unlinkSync(req.file.path);
+      console.log(`[Upload] Contract file deleted after extraction: ${req.file.originalname}`);
+    } catch (unlinkErr) {
+      console.error('[Upload] Could not delete file:', unlinkErr.message);
+    }
 
     // Don't auto-send briefing on upload — consultant is pre-filled but Diane confirms via dropdown
     // The briefingPrepared flag tells the UI which consultants were found so Diane can confirm
@@ -1879,6 +2025,21 @@ End with a 3-month revenue forecast based on contract values.`,
     const now = new Date().toISOString().slice(0,10);
     const safeName = reportType.replace(/[^a-z0-9]/gi,'_');
 
+    // If this was a risk or deliverable report for a specific project, save it
+    if (projectId) {
+      try {
+        if (reportType === 'risks') {
+          const risks = parseRiskRegister(reportContent, projectId);
+          if (risks.length > 0) await db.saveRiskRegister(projectId, risks);
+        } else if (reportType === 'milestones') {
+          const deliverables = parseDeliverables(reportContent, projectId);
+          if (deliverables.length > 0) await db.saveDeliverables(projectId, deliverables);
+        }
+      } catch (saveErr) {
+        console.error('[Reports] Save to project failed:', saveErr.message);
+      }
+    }
+
     if (isExcel) {
       // Return as CSV (opens in Excel when saved as .csv)
       const lines = reportContent.split('\n').filter(l => l.trim());
@@ -1956,6 +2117,87 @@ app.post('/api/suggestions/:id/dismiss', async (req, res) => {
   try {
     await db.updateSuggestion(req.params.id, 'dismissed');
     res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Risk Register routes ─────────────────────────────────────────────────────
+app.get('/api/projects/:id/risks', async (req, res) => {
+  try { res.json({ risks: await db.getRiskRegister(req.params.id) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/projects/:id/risks/generate', async (req, res) => {
+  try {
+    const project = await db.getProject(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const docs = await db.getDocuments(req.params.id);
+    const context = buildContext(project, docs);
+
+    const tsvContent = await aurora('status_report',
+      `Generate a risk register for this project. Return as tab-separated values with these exact columns:
+Client\tProject\tRisk Description\tLikelihood\tImpact\tRisk Level\tMitigation Action\tOwner
+Likelihood and Impact: High/Medium/Low. Risk Level: High/Medium/Low.
+Owner should be Diane Kruger unless a consultant is clearly responsible.
+Include 5-8 realistic risks for this type of engagement.
+No extra text, no asterisks, no dashes. Just data rows after the header.`,
+      context
+    );
+
+    const risks = parseRiskRegister(tsvContent, req.params.id);
+    await db.saveRiskRegister(req.params.id, risks);
+    res.json({ risks });
+  } catch (e) {
+    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/projects/:id/risks/:riskId', express.json(), async (req, res) => {
+  try {
+    const risk = await db.updateRisk(req.params.id, req.params.riskId, req.body);
+    res.json({ risk });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Also generate and save risk register when report is downloaded
+// (handled by hooking into the reports endpoint — see reports endpoint update below)
+
+// ── Deliverables Tracker routes ───────────────────────────────────────────────
+app.get('/api/projects/:id/deliverables', async (req, res) => {
+  try { res.json({ deliverables: await db.getDeliverables(req.params.id) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/projects/:id/deliverables/generate', async (req, res) => {
+  try {
+    const project = await db.getProject(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const docs = await db.getDocuments(req.params.id);
+    const context = buildContext(project, docs);
+
+    const tsvContent = await aurora('status_report',
+      `Generate a deliverables tracker for this project. Return as tab-separated values with these exact columns:
+Client\tProject\tDeliverable\tPhase\tDue Date\tStatus\tAssigned To\tNotes
+Status must be one of: Complete, In Progress, Outstanding, Overdue.
+Extract specific deliverables from the project scope and contract details.
+Assigned To should be the consultant/trainer if known, otherwise Diane Kruger.
+No extra text, no asterisks, no dashes. Just data rows after the header.`,
+      context
+    );
+
+    const deliverables = parseDeliverables(tsvContent, req.params.id);
+    await db.saveDeliverables(req.params.id, deliverables);
+    res.json({ deliverables });
+  } catch (e) {
+    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/projects/:id/deliverables/:delId', express.json(), async (req, res) => {
+  try {
+    const del = await db.updateDeliverable(req.params.id, req.params.delId, req.body);
+    res.json({ deliverable: del });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
