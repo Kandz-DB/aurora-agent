@@ -212,3 +212,40 @@ module.exports = {
   getSpend, recordSpend,
   DATA, readJSON, writeJSON,
 };
+
+// ── Suggestions CRUD ──────────────────────────────────────────────────────────
+async function getSuggestions() {
+  const all = await read('suggestions.json', []);
+  return all.filter(s => s.status === 'pending');
+}
+
+async function saveSuggestion(suggestion) {
+  const all = await read('suggestions.json', []);
+  // Avoid duplicates — same project + same type within 24hrs
+  const recent = all.find(s =>
+    s.projectId === suggestion.projectId &&
+    s.type === suggestion.type &&
+    s.status === 'pending' &&
+    (Date.now() - new Date(s.createdAt).getTime()) < 24 * 60 * 60 * 1000
+  );
+  if (recent) return recent;
+  const full = { ...suggestion, createdAt: new Date().toISOString(), status: 'pending' };
+  all.push(full);
+  await write('suggestions.json', all);
+  return full;
+}
+
+async function updateSuggestion(id, status) {
+  const all = await read('suggestions.json', []);
+  const idx = all.findIndex(s => s.id === id);
+  if (idx >= 0) {
+    all[idx].status = status;
+    all[idx].resolvedAt = new Date().toISOString();
+    await write('suggestions.json', all);
+  }
+  return all[idx];
+}
+
+module.exports.getSuggestions  = getSuggestions;
+module.exports.saveSuggestion  = saveSuggestion;
+module.exports.updateSuggestion = updateSuggestion;
