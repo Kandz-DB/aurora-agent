@@ -99,16 +99,31 @@ async function aurora(taskType, userMessage, context) {
 
   const model     = TASK_MODELS[taskType] || 'claude-haiku-4-5-20251001';
   const maxTokens = TASK_TOKENS[taskType] || 500;
-  const system    = context ? `${AURORA_PROMPT}\n\nPROJECT CONTEXT:\n${context}` : AURORA_PROMPT;
+
+  // Prompt caching — system prompt is cached after first use, cutting re-send cost by ~90%.
+  // Context block is appended uncached (it changes per project).
+  const systemBlocks = [
+    { type: 'text', text: AURORA_PROMPT, cache_control: { type: 'ephemeral' } },
+    ...(context ? [{ type: 'text', text: `PROJECT CONTEXT:\n${context}` }] : []),
+  ];
 
   const response = await client.messages.create({
     model, max_tokens: maxTokens,
-    system,
+    system: systemBlocks,
     messages: [{ role: 'user', content: userMessage }],
   });
 
-  const rates = model.includes('haiku') ? { in: 0.80, out: 4.00 } : { in: 3.00, out: 15.00 };
-  const cost  = (response.usage.input_tokens / 1e6) * rates.in + (response.usage.output_tokens / 1e6) * rates.out;
+  // Cost calculation: cached tokens billed at 10% of normal input rate.
+  const isHaiku = model.includes('haiku');
+  const rates = isHaiku ? { in: 0.80, out: 4.00, cache_read: 0.08, cache_write: 1.00 }
+                        : { in: 3.00, out: 15.00, cache_read: 0.30, cache_write: 3.75 };
+  const u = response.usage;
+  const cost = (
+    ((u.input_tokens           || 0) / 1e6) * rates.in         +
+    ((u.output_tokens          || 0) / 1e6) * rates.out        +
+    ((u.cache_read_input_tokens  || 0) / 1e6) * rates.cache_read  +
+    ((u.cache_creation_input_tokens || 0) / 1e6) * rates.cache_write
+  );
   await db.recordSpend(cost);
 
   if (spend.total + cost >= CAP_USD * 0.8 && spend.total < CAP_USD * 0.8) {
@@ -244,11 +259,11 @@ async function extractTextFromFile(filePath, mimeType) {
 }
 
 async function analyseContract(rawText, filename) {
-  // Use up to 28000 chars to capture full proposals including cost summaries at end
-  const fullText = rawText.slice(0, 28000);
+  // Use up to 15000 chars — sufficient for most proposals. Tail section catches cost tables near the end.
+  const fullText = rawText.slice(0, 15000);
 
-  // Also extract a "tail" section — the last 5000 chars often has cost totals
-  const tailText = rawText.length > 15000 ? rawText.slice(-5000) : '';
+  // Also extract a "tail" section — the last 3000 chars often has cost totals
+  const tailText = rawText.length > 10000 ? rawText.slice(-3000) : '';
 
   const combinedText = fullText + (tailText ? '\n\n[END OF DOCUMENT — KEY TOTALS SECTION:]\n' + tailText : '');
 
@@ -414,7 +429,7 @@ const PHASES = ['Kick-off', 'Deployment', 'Monitoring & Review', 'Reporting', 'C
 
 function buildContext(p, docs = []) {
   if (!p || p.type === 'ongoing') return null;
-  const docText = docs.map(d => d.extract ? `Contract: ${d.name}\n${d.extract.slice(0, 2000)}` : '').filter(Boolean).join('\n\n');
+  const docText = docs.map(d => d.extract ? `Contract: ${d.name}\n${d.extract.slice(0, 1500)}` : '').filter(Boolean).join('\n\n');
   return [
     `Organisation: ${p.clientName}`,
     `Project: ${p.projectName || p.clientName}`,
@@ -722,6 +737,17 @@ Corporate Operations Lead | Risk 2 Solution Group`,
 }
 
 // ── Phase stuck too long detection ────────────────────────────────────────────
+// In-memory fallback for flag store — survives restarts via db.getFlag/setFlag if available.
+const _flagCache = new Map();
+async function getFlag(key) {
+  if (typeof db.getFlag === 'function') return db.getFlag(key).catch(() => null);
+  return _flagCache.get(key) || null;
+}
+async function setFlag(key, value) {
+  _flagCache.set(key, value);
+  if (typeof db.setFlag === 'function') return db.setFlag(key, value).catch(() => {});
+}
+
 async function checkStuckPhases(projects) {
   const MAX_PHASE_DAYS = { 0: 7, 1: 60, 2: 60, 3: 21, 4: 14 }; // days per phase before flagging
   const active = projects.filter(p => p.type === 'standard' && !['Completed','Terminated'].includes(p.status));
@@ -731,18 +757,27 @@ async function checkStuckPhases(projects) {
     if (!updatedAt) continue;
     const daysSinceUpdate = Math.round((new Date() - updatedAt) / (1000 * 60 * 60 * 24));
     const maxDays = MAX_PHASE_DAYS[p.phase || 0];
-    if (daysSinceUpdate >= maxDays) {
-      await sendEmail('diane.k@risk2solution.com',
-        `[Aurora] Project phase check: ${p.clientName} — ${PHASES[p.phase||0]}`,
-        `The ${p.clientName} project (${p.projectName || ''}) has been in the ${PHASES[p.phase||0]} phase for ${daysSinceUpdate} days without a recorded update in Aurora.
+    if (daysSinceUpdate < maxDays) continue;
+
+    // Only alert once per week — check if we sent this alert in the last 7 days.
+    const alertKey = `stuck_alert_${p.id}_${p.phase}`;
+    const lastAlert = await getFlag(alertKey);
+    if (lastAlert) {
+      const daysSinceAlert = Math.round((new Date() - new Date(lastAlert)) / (1000 * 60 * 60 * 24));
+      if (daysSinceAlert < 7) continue;
+    }
+
+    await sendEmail('diane.k@risk2solution.com',
+      `[Aurora] Project phase check: ${p.clientName} — ${PHASES[p.phase||0]}`,
+      `The ${p.clientName} project (${p.projectName || ''}) has been in the ${PHASES[p.phase||0]} phase for ${daysSinceUpdate} days without a recorded update in Aurora.
 
 Please log into Aurora and update the project status or phase as appropriate.
 
 Aurora
 R2S Project Management Intelligence`,
-        true
-      );
-    }
+      true
+    );
+    await setFlag(alertKey, new Date().toISOString());
   }
 }
 
@@ -878,6 +913,15 @@ R2S Project Management Intelligence`,
     // 5a. Weekly client status email drafts
     for (const p of standard) {
       if (['Completed','Terminated','On Hold'].includes(p.status)) continue;
+
+      // Skip if no project activity in the last 7 days — nothing meaningful to report.
+      const lastUpdate = p.updatedAt ? new Date(p.updatedAt) : null;
+      const daysSinceUpdate = lastUpdate ? Math.round((new Date() - lastUpdate) / (1000 * 60 * 60 * 24)) : 999;
+      if (daysSinceUpdate > 7) {
+        console.log(`[Batch] Skipping status email for ${p.clientName} — no activity in ${daysSinceUpdate} days`);
+        continue;
+      }
+
       try {
         const context = buildContext(p);
         const text = await aurora('status_email',
