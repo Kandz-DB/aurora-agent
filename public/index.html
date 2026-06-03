@@ -174,6 +174,37 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
 .rep-card{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:12px 14px;cursor:pointer;transition:border-color .12s}
 .rep-card:hover{border-color:var(--border2)}
 
+/* Project detail tabs */
+.proj-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:16px}
+.proj-tab{padding:8px 16px;font-size:12px;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent;transition:all .12s;font-family:var(--fb)}
+.proj-tab:hover{color:var(--text)}
+.proj-tab.on{color:var(--teal);border-bottom-color:var(--teal);font-weight:500}
+.proj-tab-content{display:none}.proj-tab-content.on{display:block}
+
+/* Deliverable tiles */
+.del-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-top:10px}
+.del-tile{background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:12px;border-left:3px solid var(--border2)}
+.del-tile.complete{border-left-color:var(--teal)}
+.del-tile.inprogress{border-left-color:var(--blue)}
+.del-tile.duesoon{border-left-color:var(--amber)}
+.del-tile.overdue{border-left-color:var(--rose)}
+.del-tile.outstanding{border-left-color:var(--border2)}
+.del-num{font-size:9px;font-family:var(--fm);color:var(--text3);margin-bottom:4px}
+.del-name{font-size:12px;font-weight:500;color:var(--text);margin-bottom:6px;line-height:1.4}
+.del-due{font-size:10px;color:var(--text3);margin-bottom:6px}
+.del-badge{font-size:10px;padding:2px 8px;border-radius:8px;font-family:var(--fm);display:inline-block}
+
+/* Risk cards */
+.risk-card{background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:12px;margin-bottom:6px;border-left:3px solid var(--border2)}
+.risk-card.high{border-left-color:var(--rose)}
+.risk-card.medium{border-left-color:var(--amber)}
+.risk-card.low{border-left-color:var(--teal)}
+.risk-card.triggered{border-left-color:var(--rose);background:rgba(255,96,128,.05)}
+.risk-header{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.risk-num{font-size:10px;font-family:var(--fm);color:var(--text3)}
+.risk-desc{font-size:12px;font-weight:500;color:var(--text);flex:1}
+.risk-mitigation{font-size:11px;color:var(--text2);line-height:1.55;margin-top:4px;padding-left:8px;border-left:2px solid var(--border2)}
+
 /* Suggestion cards */
 .sug-card{background:var(--card);border:1px solid var(--border);border-radius:11px;padding:14px;margin-bottom:8px;border-left:3px solid var(--violet)}
 .sug-card.urgent{border-left-color:var(--rose)}
@@ -811,9 +842,28 @@ function openProject(id) {
     <div style="display:flex;gap:4px;margin-bottom:14px;flex-wrap:wrap">
       ${PHASES.map((ph,i) => `<button class="phase-btn ${i===phase?'selected':''}" onclick="updatePhase('${p.id}',${i})" style="flex:1;min-width:80px">${ph}</button>`).join('')}
     </div>
-    <div class="arow">
-      <button class="btn btn-p" onclick="closeModal();generateDraft('${p.id}','status_email','')">Draft status email ↗</button>
-      <button class="btn btn-g" onclick="closeModal();askAbout('${p.id}')">Ask Aurora ↗</button>
+    <div class="proj-tabs">
+      <div class="proj-tab on" onclick="switchProjTab(this,'tab-overview-${p.id}')">Overview</div>
+      <div class="proj-tab" onclick="switchProjTab(this,'tab-deliverables-${p.id}');loadDeliverables('${p.id}')">Deliverables</div>
+      <div class="proj-tab" onclick="switchProjTab(this,'tab-risks-${p.id}');loadRisks('${p.id}')">Risk Register</div>
+    </div>
+
+    <!-- Overview tab -->
+    <div id="tab-overview-${p.id}" class="proj-tab-content on">
+      <div class="arow">
+        <button class="btn btn-p btn-sm" onclick="closeModal();generateDraft('${p.id}','status_email','')">Draft status email ↗</button>
+        <button class="btn btn-g btn-sm" onclick="closeModal();askAbout('${p.id}')">Ask Aurora ↗</button>
+      </div>
+    </div>
+
+    <!-- Deliverables tab -->
+    <div id="tab-deliverables-${p.id}" class="proj-tab-content">
+      <div id="del-content-${p.id}"><div style="color:var(--text3);font-size:12px">Loading deliverables…</div></div>
+    </div>
+
+    <!-- Risk register tab -->
+    <div id="tab-risks-${p.id}" class="proj-tab-content">
+      <div id="risk-content-${p.id}"><div style="color:var(--text3);font-size:12px">Loading risk register…</div></div>
     </div>`;
 
   document.getElementById('modal-bg').classList.add('open');
@@ -1527,6 +1577,197 @@ async function dismissSuggestion(id) {
   if (card) card.remove();
   renderSuggestions();
   updateSuggestionBanner();
+}
+
+// ── Project tabs ─────────────────────────────────────────────────────────────
+function switchProjTab(el, contentId) {
+  const modal = document.getElementById('modal-body') || el.closest('.modal');
+  modal.querySelectorAll('.proj-tab').forEach(t => t.classList.remove('on'));
+  modal.querySelectorAll('.proj-tab-content').forEach(c => c.classList.remove('on'));
+  el.classList.add('on');
+  const target = document.getElementById(contentId);
+  if (target) target.classList.add('on');
+}
+
+// ── Deliverables tracker ──────────────────────────────────────────────────────
+function delStatusClass(status) {
+  const s = (status||'').toLowerCase();
+  if (s === 'complete') return 'complete';
+  if (s === 'in progress') return 'inprogress';
+  if (s === 'overdue') return 'overdue';
+  if (s.includes('due soon')) return 'duesoon';
+  return 'outstanding';
+}
+
+function delBadgeStyle(status) {
+  const s = (status||'').toLowerCase();
+  if (s === 'complete')    return 'background:rgba(0,232,187,.15);color:var(--teal)';
+  if (s === 'in progress') return 'background:rgba(106,163,255,.15);color:var(--blue)';
+  if (s === 'overdue')     return 'background:rgba(255,96,128,.15);color:var(--rose)';
+  if (s.includes('due soon')) return 'background:rgba(255,179,64,.15);color:var(--amber)';
+  return 'background:var(--card);color:var(--text3)';
+}
+
+async function loadDeliverables(projectId) {
+  const el = document.getElementById('del-content-' + projectId);
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading…</div>';
+
+  try {
+    const data = await api('/api/projects/' + projectId + '/deliverables');
+    let items = data.deliverables || [];
+
+    if (!items.length) {
+      // Auto-generate if none exist
+      el.innerHTML = '<div style="color:var(--text3);font-size:12px;margin-bottom:10px">Generating deliverables tracker from project data…</div>';
+      const gen = await api('/api/projects/' + projectId + '/deliverables/generate', { method: 'POST' });
+      items = gen.deliverables || [];
+    }
+
+    if (!items.length) {
+      el.innerHTML = '<div style="color:var(--text3);font-size:12px">No deliverables found. Add project scope via contract upload.</div>';
+      return;
+    }
+
+    const complete  = items.filter(d => d.status === 'Complete').length;
+    const overdue   = items.filter(d => d.status === 'Overdue').length;
+    const inprog    = items.filter(d => d.status === 'In Progress').length;
+
+    let html = `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <span style="font-size:12px;color:var(--text2)">${items.length} deliverables</span>
+      ${complete ? `<span class="badge bt">${complete} complete</span>` : ''}
+      ${inprog   ? `<span class="badge bb">${inprog} in progress</span>` : ''}
+      ${overdue  ? `<span class="badge br">${overdue} overdue</span>` : ''}
+    </div>
+    <div class="del-grid">`;
+
+    items.forEach(d => {
+      const cls = delStatusClass(d.status);
+      html += `<div class="del-tile ${cls}">
+        <div class="del-num">Deliverable ${d.number}</div>
+        <div class="del-name">${d.name}</div>
+        ${d.dueDate ? `<div class="del-due">📅 ${d.dueDate}</div>` : ''}
+        ${d.calendarEvent ? `<div style="font-size:10px;color:var(--teal);margin-bottom:4px">📆 ${d.calendarEvent}</div>` : ''}
+        <span class="del-badge" style="${delBadgeStyle(d.status)}">${d.status}</span>
+        ${d.notes ? `<div style="font-size:10px;color:var(--text3);margin-top:6px">${d.notes}</div>` : ''}
+        <div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap">
+          ${['Complete','In Progress','Outstanding','Overdue'].map(s =>
+            `<button class="btn btn-g" style="font-size:9px;padding:2px 6px;${d.status===s?'background:var(--teal);color:#07090f':''}" onclick="setDelStatus('${projectId}','${d.id}','${s}',this)">${s}</button>`
+          ).join('')}
+        </div>
+      </div>`;
+    });
+
+    html += `</div><div class="arow" style="margin-top:10px">
+      <button class="btn btn-g btn-sm" onclick="loadDeliverables('${projectId}')">↻ Refresh</button>
+    </div>`;
+    el.innerHTML = html;
+  } catch (e) {
+    el.innerHTML = '<div style="color:var(--rose);font-size:12px">Error: ' + e.message + '</div>';
+  }
+}
+
+async function setDelStatus(projectId, delId, status, btn) {
+  btn.textContent = '…';
+  await api('/api/projects/' + projectId + '/deliverables/' + delId, {
+    method: 'PUT', body: JSON.stringify({ status })
+  });
+  await loadDeliverables(projectId);
+}
+
+// ── Risk register ─────────────────────────────────────────────────────────────
+function riskLevelClass(level) {
+  const l = (level||'').toLowerCase();
+  if (l === 'high') return 'high';
+  if (l === 'low')  return 'low';
+  return 'medium';
+}
+
+async function loadRisks(projectId) {
+  const el = document.getElementById('risk-content-' + projectId);
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading…</div>';
+
+  try {
+    const data = await api('/api/projects/' + projectId + '/risks');
+    let risks = data.risks || [];
+
+    if (!risks.length) {
+      el.innerHTML = '<div style="color:var(--text3);font-size:12px;margin-bottom:10px">Generating risk register from project data…</div>';
+      const gen = await api('/api/projects/' + projectId + '/risks/generate', { method: 'POST' });
+      risks = gen.risks || [];
+    }
+
+    if (!risks.length) {
+      el.innerHTML = '<div style="color:var(--text3);font-size:12px">No risks found. Upload contract to generate risk register.</div>';
+      return;
+    }
+
+    const triggered = risks.filter(r => r.triggered).length;
+    const high = risks.filter(r => (r.level||'').toLowerCase() === 'high').length;
+
+    let html = `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:12px;color:var(--text2)">${risks.length} risks documented</span>
+      ${high ? `<span class="badge br">${high} high</span>` : ''}
+      ${triggered ? `<span class="badge br">${triggered} triggered</span>` : ''}
+      <div style="flex:1"></div>
+      <button class="btn btn-g btn-sm" onclick="regenerateRisks('${projectId}')">↻ Regenerate</button>
+    </div>`;
+
+    risks.forEach(r => {
+      const cls = r.triggered ? 'triggered' : riskLevelClass(r.level);
+      html += `<div class="risk-card ${cls}">
+        <div class="risk-header">
+          <span class="risk-num">Risk ${r.number}</span>
+          <span class="risk-desc">${r.description}</span>
+          <span class="badge ${r.level?.toLowerCase()==='high'?'br':r.level?.toLowerCase()==='low'?'bt':'ba'}">${r.level||'Medium'}</span>
+          ${r.triggered ? '<span class="badge br">Triggered</span>' : ''}
+        </div>
+        <div style="display:flex;gap:10px;font-size:10px;color:var(--text3);margin-bottom:6px">
+          <span>Likelihood: ${r.likelihood||'Medium'}</span>
+          <span>Impact: ${r.impact||'Medium'}</span>
+          <span>Owner: ${r.owner||'Diane Kruger'}</span>
+        </div>
+        ${r.mitigation ? `<div class="risk-mitigation">Mitigation: ${r.mitigation}</div>` : ''}
+        ${r.triggeredAt ? `<div style="font-size:10px;color:var(--rose);margin-top:6px">Triggered: ${new Date(r.triggeredAt).toLocaleDateString('en-AU')} — ${r.triggerReason||''}</div>` : ''}
+        <div style="margin-top:8px;display:flex;gap:4px">
+          <button class="btn btn-g btn-sm" style="font-size:10px" onclick="setRiskStatus('${projectId}','${r.id}','Closed',this)">Mark resolved</button>
+          ${r.triggered ? `<button class="btn btn-r btn-sm" style="font-size:10px" onclick="setRiskStatus('${projectId}','${r.id}','Monitoring',this)">Monitoring</button>` : ''}
+        </div>
+      </div>`;
+    });
+
+    html += `<div class="arow" style="margin-top:10px">
+      <button class="btn btn-t btn-sm" onclick="downloadRiskRegister('${projectId}')">⬇ Download risk register</button>
+    </div>`;
+    el.innerHTML = html;
+  } catch (e) {
+    el.innerHTML = '<div style="color:var(--rose);font-size:12px">Error: ' + e.message + '</div>';
+  }
+}
+
+async function setRiskStatus(projectId, riskId, status, btn) {
+  btn.textContent = '…';
+  await api('/api/projects/' + projectId + '/risks/' + riskId, {
+    method: 'PUT', body: JSON.stringify({ status, triggered: false })
+  });
+  await loadRisks(projectId);
+}
+
+async function regenerateRisks(projectId) {
+  const el = document.getElementById('risk-content-' + projectId);
+  if (el) el.innerHTML = '<div style="color:var(--text3);font-size:12px">Regenerating…</div>';
+  const gen = await api('/api/projects/' + projectId + '/risks/generate', { method: 'POST' });
+  await loadRisks(projectId);
+}
+
+async function downloadRiskRegister(projectId) {
+  const p = projects.find(x => x.id === projectId);
+  const projectName = document.getElementById('rep-project');
+  if (projectName) projectName.value = projectId;
+  const clientSel = document.getElementById('rep-client');
+  if (clientSel && p) clientSel.value = p.clientName;
+  generateReport('risks');
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
