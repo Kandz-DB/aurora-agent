@@ -249,3 +249,52 @@ async function updateSuggestion(id, status) {
 module.exports.getSuggestions  = getSuggestions;
 module.exports.saveSuggestion  = saveSuggestion;
 module.exports.updateSuggestion = updateSuggestion;
+
+// ── Risk Register CRUD ────────────────────────────────────────────────────────
+async function getRiskRegister(projectId) {
+  return read(`risks_${projectId}.json`, []);
+}
+
+async function saveRiskRegister(projectId, risks) {
+  await write(`risks_${projectId}.json`, risks);
+  return risks;
+}
+
+async function updateRisk(projectId, riskId, fields) {
+  const risks = await getRiskRegister(projectId);
+  const idx = risks.findIndex(r => r.id === riskId);
+  if (idx >= 0) {
+    Object.assign(risks[idx], fields, { updatedAt: new Date().toISOString() });
+    await saveRiskRegister(projectId, risks);
+    return risks[idx];
+  }
+  return null;
+}
+
+// ── Deliverables Tracker CRUD ─────────────────────────────────────────────────
+async function getDeliverables(projectId) {
+  return read(`deliverables_${projectId}.json`, []);
+}
+
+async function saveDeliverables(projectId, deliverables) {
+  await write(`deliverables_${projectId}.json`, deliverables);
+  return deliverables;
+}
+
+async function updateDeliverable(projectId, deliverableId, fields) {
+  const items = await getDeliverables(projectId);
+  const idx = items.findIndex(d => d.id === deliverableId);
+  if (idx >= 0) {
+    Object.assign(items[idx], fields, { updatedAt: new Date().toISOString() });
+    await saveDeliverables(projectId, items);
+    return items[idx];
+  }
+  return null;
+}
+
+module.exports.getRiskRegister    = getRiskRegister;
+module.exports.saveRiskRegister   = saveRiskRegister;
+module.exports.updateRisk         = updateRisk;
+module.exports.getDeliverables    = getDeliverables;
+module.exports.saveDeliverables   = saveDeliverables;
+module.exports.updateDeliverable  = updateDeliverable;
