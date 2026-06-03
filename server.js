@@ -74,7 +74,7 @@ const CAP_USD = parseFloat(process.env.MONTHLY_SPEND_CAP_USD || '20');
 const TASK_MODELS = {
   chat:              'claude-sonnet-4-6',
   document_analysis: 'claude-sonnet-4-6',
-  contract_extract:  'claude-sonnet-4-6',
+  contract_extract:  'claude-sonnet-4-6', // Sonnet for accuracy with tables and financials
   status_email:      'claude-haiku-4-5-20251001',
   checkin_email:     'claude-haiku-4-5-20251001',
   escalation_email:  'claude-haiku-4-5-20251001',
@@ -244,10 +244,19 @@ async function extractTextFromFile(filePath, mimeType) {
 }
 
 async function analyseContract(rawText, filename) {
-  const truncated = rawText.slice(0, 15000);
+  // Use up to 28000 chars to capture full proposals including cost summaries at end
+  const fullText = rawText.slice(0, 28000);
+
+  // Also extract a "tail" section — the last 5000 chars often has cost totals
+  const tailText = rawText.length > 15000 ? rawText.slice(-5000) : '';
+
+  const combinedText = fullText + (tailText ? '\n\n[END OF DOCUMENT — KEY TOTALS SECTION:]\n' + tailText : '');
+
   const text = await aurora(
     'contract_extract',
-    `You are reading a client contract or proposal for Risk 2 Solution (R2S). Extract ALL of the following information and return it as a valid JSON object with exactly these keys. Be thorough — read the entire document carefully before responding.
+    `You are reading a client contract or proposal for Risk 2 Solution (R2S). Extract ALL of the following information and return it as a valid JSON object with exactly these keys. Be thorough — read the ENTIRE document including the costs summary and commercial offer sections which are often near the end.
+
+IMPORTANT FOR VALUE FIELD: Look for a TOTAL or GRAND TOTAL line in the costs summary table. This is usually the single largest dollar figure in the document. Do NOT use a per-session rate or sub-total. Find the overall total project cost (e.g. TOTAL $63,000).
 
 {
   "organisationName": "full legal organisation/company name of the client",
@@ -256,11 +265,11 @@ async function analyseContract(rawText, filename) {
   "clientContact": "primary client contact person full name",
   "clientEmail": "primary client contact email address",
   "clientPhone": "primary client contact phone number",
-  "value": "total contract value as written e.g. $25,000 — include any per-session rates if relevant",
+  "value": "TOTAL project cost only — the grand total from the costs summary e.g. $63,000. Do NOT list individual line items.",
   "contractStart": "contract start date or engagement commencement date",
   "dueDate": "project completion date, contract end date, or due date",
-  "summary": "full description of services R2S is providing — extract the key paragraphs word for word describing what R2S will do for the client",
-  "deliverables": "all specific deliverables listed — e.g. reports, training sessions (with numbers and dates if given), assessments, presentations, workshops",
+  "summary": "full description of services R2S is providing — extract the key paragraphs describing what R2S will do for the client",
+  "deliverables": "all specific deliverables and stages listed — include phase names and what is delivered in each",
   "milestones": "any key milestones, phases, or stages mentioned with dates or conditions",
   "timeline": "overall project timeline description — start to finish with any phasing or scheduling mentioned",
   "invoicingNotes": "full payment terms, invoicing schedule, milestone payment triggers, and invoicing frequency",
@@ -268,14 +277,14 @@ async function analyseContract(rawText, filename) {
   "consultantEmail": "email address of the assigned consultant or trainer if mentioned",
   "flightsRequired": "yes or no — are flights required for this engagement",
   "accommodationRequired": "yes or no — is accommodation required for this engagement",
-  "notes": "any special conditions, exclusions, important requirements, or things the team should be aware of"
+  "notes": "any special conditions, exclusions, cancellation terms, or important requirements"
 }
 
 Return ONLY the JSON object. No markdown, no explanation, no other text. If a field is not found in the document, use an empty string "".
 
 Document: ${filename}
 ---
-${truncated}`,
+${combinedText}`,
     null
   );
 
