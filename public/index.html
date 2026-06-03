@@ -173,6 +173,15 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
 .rep-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .rep-card{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:12px 14px;cursor:pointer;transition:border-color .12s}
 .rep-card:hover{border-color:var(--border2)}
+
+/* Suggestion cards */
+.sug-card{background:var(--card);border:1px solid var(--border);border-radius:11px;padding:14px;margin-bottom:8px;border-left:3px solid var(--violet)}
+.sug-card.urgent{border-left-color:var(--rose)}
+.sug-card.phase{border-left-color:var(--teal)}
+.sug-card.closeout{border-left-color:var(--pink)}
+.sug-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;font-family:var(--fs)}
+.sug-reason{font-size:12px;color:var(--text2);line-height:1.55;margin-bottom:10px}
+.sug-meta{font-size:10px;color:var(--text3);font-family:var(--fm);margin-bottom:8px}
 </style>
 </head>
 <body>
@@ -194,6 +203,7 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
   <div class="nav">
     <div class="nlbl">Command</div>
     <div class="ni on" onclick="nav('overview',this)">⬜ Overview</div>
+    <div class="ni" onclick="nav('suggestions',this)" id="nav-suggestions">◈ Aurora's suggestions</div>
     <div class="ni" onclick="nav('projects',this)">💼 Projects</div>
     <div class="ni" onclick="nav('new',this)">＋ New project</div>
     <div class="ni" onclick="nav('ask',this)">✦ Ask Aurora</div>
@@ -224,12 +234,24 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
       </div>
       <div class="ibanner">ℹ <div><strong style="display:block;margin-bottom:2px">Automated reminders active</strong>Aurora sends internal alerts to diane.k@risk2solution.com and info@risk2solution.com at 14, 7, and 3 days before each project due date. Client emails always require your approval.</div></div>
       <div class="sec">Quick actions</div>
+      <div id="suggestions-banner" style="display:none;margin-bottom:12px"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <div class="card" style="cursor:pointer" onclick="nav('new',document.querySelector('[onclick*=new]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--pink-light)">＋</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">New project</div><div style="font-size:11px;color:var(--text2)">Upload a contract or create manually. Aurora reads the contract and sets up the project.</div></div>
         <div class="card" style="cursor:pointer" onclick="nav('comms',document.querySelector('[onclick*=comms]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--teal)">✉</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Comms drafts</div><div style="font-size:11px;color:var(--text2)">Review and approve Aurora's drafted emails.</div></div>
         <div class="card" style="cursor:pointer" onclick="nav('projects',document.querySelector('[onclick*=projects]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--blue)">💼</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">View projects</div><div style="font-size:11px;color:var(--text2)">See all projects, update phases, and manage status.</div></div>
         <div class="card" style="cursor:pointer" onclick="nav('ask',document.querySelector('[onclick*=ask]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--violet)">✦</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Ask Aurora</div><div style="font-size:11px;color:var(--text2)">Get a briefing, draft a report, or ask anything.</div></div>
       </div>
+    </div>
+
+    <!-- SUGGESTIONS -->
+    <div id="pg-suggestions" class="pg">
+      <div class="ph-title">Aurora's suggestions</div>
+      <div class="ph-sub">Aurora has identified these actions. Approve to execute, dismiss to skip.</div>
+      <div style="display:flex;gap:6px;margin-bottom:14px">
+        <button class="btn btn-g btn-sm" onclick="loadSuggestions()">↻ Refresh</button>
+        <button class="btn btn-p btn-sm" onclick="generateSuggestions()">✦ Generate new suggestions</button>
+      </div>
+      <div id="suggestions-list"><div style="color:var(--text3);font-size:12px">Loading…</div></div>
     </div>
 
     <!-- PROJECTS -->
@@ -450,6 +472,7 @@ function nav(id, el) {
   document.querySelectorAll('.ni').forEach(n => n.classList.remove('on'));
   document.getElementById('pg-' + id).classList.add('on');
   if (el) el.classList.add('on');
+  if (id === 'suggestions')  loadSuggestions();
   if (id === 'projects')    renderProjects();
   if (id === 'comms')       loadDrafts();
   if (id === 'milestones')  renderMilestones();
@@ -1382,6 +1405,128 @@ function askAbout(id) {
   document.getElementById('cin').value = `Give me a full briefing on the ${p.projectName||p.clientName} project for ${p.clientName} — current phase, deliverables, what Aurora should be doing right now, and any risks.`;
   nav('ask', document.querySelector('[onclick*="ask"]'));
   sendChat();
+}
+
+// ── Suggestions ──────────────────────────────────────────────────────────────
+let suggestions = [];
+
+async function loadSuggestions() {
+  const data = await api('/api/suggestions');
+  suggestions = data.suggestions || [];
+  renderSuggestions();
+  updateSuggestionBanner();
+}
+
+async function generateSuggestions() {
+  document.getElementById('suggestions-list').innerHTML = '<div style="color:var(--text3);font-size:12px">Aurora is analysing your projects…</div>';
+  const data = await api('/api/suggestions/generate', { method: 'POST' });
+  suggestions = data.suggestions || [];
+  renderSuggestions();
+  updateSuggestionBanner();
+}
+
+function sugCardClass(type) {
+  if (type === 'escalate' || type === 'status_change') return 'urgent';
+  if (type === 'close_out') return 'closeout';
+  if (type === 'phase_advance') return 'phase';
+  return '';
+}
+
+function sugIcon(type) {
+  const icons = {
+    phase_advance: '→',
+    phase_regress: '←',
+    status_change: '⚠',
+    escalate: '🔴',
+    close_out: '🏁',
+    schedule_kickoff: '📅',
+    send_client_update: '✉',
+    request_report: '📄',
+  };
+  return icons[type] || '◈';
+}
+
+function renderSuggestions() {
+  const el = document.getElementById('suggestions-list');
+  if (!el) return;
+  if (!suggestions.length) {
+    el.innerHTML = `<div class="card" style="text-align:center;padding:24px;color:var(--text2)">
+      <div style="font-size:24px;margin-bottom:8px">✓</div>
+      <div style="font-size:13px;font-weight:500;margin-bottom:4px">All clear</div>
+      <div style="font-size:12px;color:var(--text3)">Aurora has no pending suggestions. Check back tomorrow or click Generate to analyse now.</div>
+    </div>`;
+    return;
+  }
+
+  const byType = { urgent: [], phase: [], closeout: [], other: [] };
+  suggestions.forEach(s => {
+    const cls = sugCardClass(s.type);
+    if (byType[cls]) byType[cls].push(s);
+    else byType.other.push(s);
+  });
+
+  let html = '';
+  [...byType.urgent, ...byType.closeout, ...byType.phase, ...byType.other].forEach(s => {
+    const cls = sugCardClass(s.type);
+    html += `<div class="sug-card ${cls}" id="sug-${s.id}">
+      <div class="sug-title">${sugIcon(s.type)} ${s.title}</div>
+      <div class="sug-reason">${s.reason}</div>
+      <div class="sug-meta">Project: ${s.projectName || s.clientName} · Generated by Aurora</div>
+      <div class="arow">
+        <button class="btn btn-p btn-sm" onclick="approveSuggestion('${s.id}')">${s.confirmLabel || 'Approve'}</button>
+        <button class="btn btn-g btn-sm" onclick="dismissSuggestion('${s.id}')">${s.dismissLabel || 'Dismiss'}</button>
+        <button class="btn btn-b btn-sm" onclick="openProject('${s.projectId}')">View project ↗</button>
+      </div>
+    </div>`;
+  });
+  el.innerHTML = html;
+}
+
+function updateSuggestionBanner() {
+  const banner = document.getElementById('suggestions-banner');
+  if (!banner) return;
+  if (!suggestions.length) { banner.style.display = 'none'; return; }
+
+  const urgent = suggestions.filter(s => sugCardClass(s.type) === 'urgent').length;
+  const cls = urgent > 0 ? 'br' : 'ba';
+  const color = urgent > 0 ? 'var(--rose)' : 'var(--amber)';
+
+  banner.style.display = 'block';
+  banner.innerHTML = `<div style="background:rgba(196,168,255,.08);border:1px solid rgba(196,168,255,.25);border-radius:9px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer" onclick="nav('suggestions',document.querySelector('[onclick*=suggestions]'))">
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="font-size:18px">◈</span>
+      <div>
+        <div style="font-size:12px;font-weight:500;color:var(--text)">Aurora has ${suggestions.length} suggestion${suggestions.length!==1?'s':''} for you</div>
+        <div style="font-size:11px;color:var(--text2)">Click to review — approve or dismiss each one</div>
+      </div>
+    </div>
+    <span class="badge ${cls}">${suggestions.length} pending</span>
+  </div>`;
+}
+
+async function approveSuggestion(id) {
+  const card = document.getElementById('sug-' + id);
+  if (card) { card.style.opacity = '0.5'; card.querySelectorAll('button').forEach(b => b.disabled = true); }
+  try {
+    await api('/api/suggestions/' + id + '/approve', { method: 'POST' });
+    suggestions = suggestions.filter(s => s.id !== id);
+    if (card) card.remove();
+    renderSuggestions();
+    updateSuggestionBanner();
+    await loadProjects(); // refresh project list in case phase changed
+  } catch (e) {
+    if (card) { card.style.opacity = '1'; card.querySelectorAll('button').forEach(b => b.disabled = false); }
+    alert('Error: ' + e.message);
+  }
+}
+
+async function dismissSuggestion(id) {
+  await api('/api/suggestions/' + id + '/dismiss', { method: 'POST' });
+  suggestions = suggestions.filter(s => s.id !== id);
+  const card = document.getElementById('sug-' + id);
+  if (card) card.remove();
+  renderSuggestions();
+  updateSuggestionBanner();
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
