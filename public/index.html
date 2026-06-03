@@ -415,14 +415,7 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
         <div class="rep-card" onclick="generateReport('invoices')"><div style="font-size:18px;margin-bottom:7px;color:var(--rose)">🧾</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Invoice summary</div><div style="font-size:11px;color:var(--text2)">Contract values and payment status.</div><div style="margin-top:8px"><span class="badge bt">Excel</span></div></div>
         <div class="rep-card" onclick="generateReport('portfolio')"><div style="font-size:18px;margin-bottom:7px;color:var(--violet)">⬜</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Portfolio overview</div><div style="font-size:11px;color:var(--text2)">All active projects — status and dates.</div><div style="margin-top:8px"><span class="badge bb">Word</span></div></div>
       </div>
-      <div id="report-output" style="display:none;margin-top:14px">
-        <div class="sec">Generated report</div>
-        <div class="card" style="white-space:pre-line;font-size:12px;line-height:1.7;color:var(--text2)" id="report-content"></div>
-        <div class="arow" style="margin-top:10px">
-          <button class="btn btn-t" onclick="downloadReport()">⬇ Download</button>
-          <button class="btn btn-g" onclick="document.getElementById('report-output').style.display='none'">Close</button>
-        </div>
-      </div>
+      <!-- Reports download directly — no preview panel needed -->
     </div>
 
   </div>
@@ -754,15 +747,22 @@ function openProject(id) {
         <div class="info-label">Client phone</div>
         <div class="info-val" style="font-size:12px">${p.clientPhone||'—'}</div>
       </div>
-      <!-- Consultant dropdown -->
+      <!-- Consultant multi-select -->
       <div class="info-item" style="grid-column:1/-1">
-        <div class="info-label">Consultant / Trainer assigned</div>
-        <select onchange="updateConsultant('${p.id}',this.value)" style="width:100%;margin-top:4px;font-size:12px;padding:5px 8px;border-radius:6px;background:var(--card2);border:1px solid var(--border2);color:var(--text)">
-          <option value="">— Select consultant or trainer —</option>
-          ${['Mick Harran','Paul Johnston','Dave Cohen','Ross Mackenzie','Lawrence Phillips','Marina Toailoa','Gavriel Schneider','Pierre Andipatin','Daniel Du Plessis','Gavriel Guriel'].map(c => `<option value="${c}" ${p.consultant===c?'selected':''}>${c}</option>`).join('')}
+        <div class="info-label">Consultant(s) / Trainer(s) assigned</div>
+        <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px" id="assigned-tags-${p.id}">
+          ${(p.consultant||'').split(',').map(c=>c.trim()).filter(Boolean).map(c =>
+            `<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(0,232,187,.12);border:1px solid rgba(0,232,187,.3);color:var(--teal);border-radius:20px;padding:2px 8px;font-size:11px">
+              ${c}<button onclick="removeConsultant('${p.id}','${c}')" style="background:none;border:none;color:var(--teal);cursor:pointer;font-size:12px;line-height:1;padding:0">×</button>
+            </span>`
+          ).join('')}
+        </div>
+        <select onchange="addConsultant('${p.id}',this)" style="width:100%;font-size:12px;padding:5px 8px;border-radius:6px;background:var(--card2);border:1px solid var(--border2);color:var(--text)">
+          <option value="">+ Add consultant or trainer</option>
+          ${['Mick Harran','Paul Johnston','Dave Cohen','Ross Mackenzie','Lawrence Phillips','Marina Toailoa','Gavriel Schneider','Pierre Andipatin','Daniel Du Plessis','Gavriel Guriel'].map(c => `<option value="${c}">${c}</option>`).join('')}
         </select>
         <div id="briefing-status-${p.id}" style="font-size:11px;color:var(--text3);margin-top:5px">
-          ${p.consultant ? `Briefing previously sent to ${p.consultant}. Selecting a new name will generate a new briefing.` : 'Select a consultant or trainer to automatically generate a briefing email for them.'}
+          ${p.consultant ? `${p.consultant} assigned. Add more from the dropdown. Each new addition triggers a briefing email.` : 'Select a consultant or trainer — Aurora will draft a briefing email for Diane to review and send.'}
         </div>
       </div>
       <!-- Travel -->
@@ -827,38 +827,63 @@ async function updateField(id, field, value) {
   if (p) p[field] = value;
 }
 
-async function updateConsultant(id, consultantName) {
-  if (!consultantName) return;
-  const emailMap = {
-    'Mick Harran':'info@risk2solution.com','Paul Johnston':'info@risk2solution.com',
-    'Dave Cohen':'dave.c@risk2solution.com','Ross Mackenzie':'info@risk2solution.com',
-    'Lawrence Phillips':'info@risk2solution.com','Marina Toailoa':'info@risk2solution.com',
-    'Gavriel Schneider':'info@risk2solution.com','Pierre Andipatin':'info@risk2solution.com',
-    'Daniel Du Plessis':'info@risk2solution.com','Gavriel Guriel':'info@risk2solution.com',
-  };
-  const consultantEmail = emailMap[consultantName] || 'info@risk2solution.com';
+const CONSULTANT_EMAIL_MAP = {
+  'Mick Harran':'info@risk2solution.com','Paul Johnston':'info@risk2solution.com',
+  'Dave Cohen':'dave.c@risk2solution.com','Ross Mackenzie':'info@risk2solution.com',
+  'Lawrence Phillips':'info@risk2solution.com','Marina Toailoa':'info@risk2solution.com',
+  'Gavriel Schneider':'info@risk2solution.com','Pierre Andipatin':'info@risk2solution.com',
+  'Daniel Du Plessis':'info@risk2solution.com','Gavriel Guriel':'info@risk2solution.com',
+};
 
-  // Save consultant to project
-  await api(`/api/projects/${id}`, { method: 'PUT', body: JSON.stringify({ consultant: consultantName, consultantEmail }) });
+async function addConsultant(id, selectEl) {
+  const name = selectEl.value;
+  selectEl.value = '';
+  if (!name) return;
+
   const p = projects.find(x => x.id === id);
-  if (p) { p.consultant = consultantName; p.consultantEmail = consultantEmail; }
+  if (!p) return;
 
-  // Trigger briefing draft automatically
-  const btn = document.querySelector(`select[onchange*="updateConsultant('${id}"]`);
-  const confirmEl = document.getElementById(`briefing-status-${id}`);
-  if (confirmEl) confirmEl.textContent = 'Generating briefing email…';
+  // Build updated consultant list
+  const existing = (p.consultant||'').split(',').map(c=>c.trim()).filter(Boolean);
+  if (existing.includes(name)) return; // already assigned
+  existing.push(name);
+  const consultantStr = existing.join(', ');
 
-  try {
-    const res = await api(`/api/projects/${id}/briefing`, { method: 'POST' });
-    if (res.success) {
-      if (confirmEl) confirmEl.textContent = '✓ Briefing email drafted — review in Comms Drafts';
-      if (confirmEl) confirmEl.style.color = 'var(--teal)';
-      // Reload drafts if comms tab is open
-      loadDrafts();
-    }
-  } catch (e) {
-    if (confirmEl) { confirmEl.textContent = 'Briefing failed — try again'; confirmEl.style.color = 'var(--rose)'; }
+  // Save to project
+  await api(`/api/projects/${id}`, { method: 'PUT', body: JSON.stringify({ consultant: consultantStr, consultantEmail: CONSULTANT_EMAIL_MAP[name]||'info@risk2solution.com' }) });
+  p.consultant = consultantStr;
+
+  // Update tags UI
+  const tagsEl = document.getElementById(`briefing-status-${id}`);
+  if (tagsEl) { tagsEl.textContent = 'Generating briefing email for ' + name + '…'; tagsEl.style.color = 'var(--text3)'; }
+
+  // Refresh tags display
+  const tagsContainer = document.getElementById(`assigned-tags-${id}`);
+  if (tagsContainer) {
+    tagsContainer.innerHTML = existing.map(c =>
+      `<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(0,232,187,.12);border:1px solid rgba(0,232,187,.3);color:var(--teal);border-radius:20px;padding:2px 8px;font-size:11px">
+        ${c}<button onclick="removeConsultant('${id}','${c}')" style="background:none;border:none;color:var(--teal);cursor:pointer;font-size:12px;line-height:1;padding:0">×</button>
+      </span>`
+    ).join('');
   }
+
+  // Trigger briefing for the newly added consultant only
+  try {
+    const res = await api(`/api/projects/${id}/briefing`, { method: 'POST', body: JSON.stringify({ consultantName: name }) });
+    if (res.success && tagsEl) { tagsEl.textContent = '✓ Briefing drafted for ' + name + ' — review in Comms Drafts'; tagsEl.style.color = 'var(--teal)'; }
+    loadDrafts();
+  } catch (e) {
+    if (tagsEl) { tagsEl.textContent = 'Briefing failed — try again'; tagsEl.style.color = 'var(--rose)'; }
+  }
+}
+
+async function removeConsultant(id, name) {
+  const p = projects.find(x => x.id === id);
+  if (!p) return;
+  const updated = (p.consultant||'').split(',').map(c=>c.trim()).filter(c => c && c !== name).join(', ');
+  await api(`/api/projects/${id}`, { method: 'PUT', body: JSON.stringify({ consultant: updated }) });
+  p.consultant = updated;
+  openProject(id); // refresh modal
 }
 
 function closeModal() { document.getElementById('modal-bg').classList.remove('open'); }
@@ -924,7 +949,7 @@ async function uploadContract(file) {
           <span style="color:var(--text3)">Contact</span><span style="color:var(--text)">${p.clientContact||'—'}</span>
         </div>
         ${p.deliverables ? `<div style="margin-top:8px;font-size:11px;color:var(--text2)"><span style="color:var(--pink-light)">Deliverables:</span> ${p.deliverables.slice(0,200)}${p.deliverables.length>200?'…':''}</div>` : ''}
-        ${p.consultant ? `<div style="margin-top:8px;font-size:11px;color:var(--text2)"><span style="color:var(--teal)">Consultant:</span> ${p.consultant}</div>` : ''}
+        ${p.consultant ? `<div style="margin-top:8px;padding:8px 10px;background:rgba(0,232,187,.08);border:1px solid rgba(0,232,187,.25);border-radius:6px;font-size:11px;color:var(--teal)">✓ Aurora found: <strong>${p.consultant}</strong> — open the project to confirm assignment and trigger briefing email</div>` : ''}
         ${(p.flightsRequired&&p.flightsRequired.toLowerCase()!=='no'&&p.flightsRequired!=='')||
           (p.accommodationRequired&&p.accommodationRequired.toLowerCase()!=='no'&&p.accommodationRequired!=='') ?
           `<div style="margin-top:8px;font-size:11px;color:var(--amber)">⚠ Flights: ${p.flightsRequired||'N/A'} · Accommodation: ${p.accommodationRequired||'N/A'}</div>` : ''}
@@ -1073,21 +1098,61 @@ function renderStakeholders() {
 }
 
 // ── Invoicing ─────────────────────────────────────────────────────────────────
+function parseValue(valStr) {
+  if (!valStr) return 0;
+  const match = (valStr+'').replace(/[$,AUD]/gi,'').match(/[\d.]+/);
+  return match ? parseFloat(match[0]) : 0;
+}
+
 function renderInvoicing() {
   const withVal = projects.filter(p => p.type === 'standard' && p.value);
   if (!withVal.length) { document.getElementById('invoicing-list').innerHTML = '<div style="color:var(--text3);font-size:12px">No contract values found. Upload contracts to populate.</div>'; return; }
-  let html = '';
+
+  // ── Projection calculation ──────────────────────────────────────────────────
+  const active    = withVal.filter(p => !isCompleted(p));
+  const completed = withVal.filter(p => isCompleted(p));
+  const totalActive    = active.reduce((s, p) => s + parseValue(p.value), 0);
+  const totalCompleted = completed.reduce((s, p) => s + parseValue(p.value), 0);
+  const totalPortfolio = totalActive + totalCompleted;
+
+  // Rough monthly projection — spread active contracts across remaining months this year
+  const now = new Date();
+  const monthsLeft = 12 - now.getMonth();
+  const monthlyProjection = monthsLeft > 0 ? totalActive / monthsLeft : totalActive;
+  const annualProjection  = totalActive + totalCompleted;
+
+  const fmt = n => '$' + Math.round(n).toLocaleString('en-AU');
+
+  let html = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
+    <div class="card" style="padding:10px 12px">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Active portfolio</div>
+      <div style="font-size:18px;font-family:var(--fs);font-weight:600;color:var(--teal)">${fmt(totalActive)}</div>
+      <div style="font-size:10px;color:var(--text3);margin-top:2px">${active.length} active project${active.length!==1?'s':''}</div>
+    </div>
+    <div class="card" style="padding:10px 12px">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Monthly projection</div>
+      <div style="font-size:18px;font-family:var(--fs);font-weight:600;color:var(--pink-light)">${fmt(monthlyProjection)}</div>
+      <div style="font-size:10px;color:var(--text3);margin-top:2px">Avg over ${monthsLeft} remaining months</div>
+    </div>
+    <div class="card" style="padding:10px 12px">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Annual projection</div>
+      <div style="font-size:18px;font-family:var(--fs);font-weight:600;color:var(--blue)">${fmt(annualProjection)}</div>
+      <div style="font-size:10px;color:var(--text3);margin-top:2px">Active + completed ${now.getFullYear()}</div>
+    </div>
+  </div>`;
+
   withVal.forEach(p => {
-    const completed = isCompleted(p);
+    const comp = isCompleted(p);
+    const val = parseValue(p.value);
     html += `<div style="margin-bottom:10px">
       <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:6px">
         <div style="width:26px;height:26px;border-radius:6px;background:rgba(255,96,128,.12);color:var(--rose);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${ini(p.clientName)}</div>
         <div style="flex:1;font-size:12px;font-weight:500">${p.clientName} · ${p.projectName||''}</div>
-        ${completed?'<span class="badge bt">Completed</span>':'<span class="badge bg">Active</span>'}
+        ${comp?'<span class="badge bt">Completed</span>':'<span class="badge bg">Active</span>'}
       </div>
       <div style="padding-left:6px"><div class="card">
-        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
-          <span style="font-size:14px;font-weight:600;font-family:var(--fs);color:var(--teal)">${p.value.startsWith('$')?p.value:'$'+p.value}</span>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-size:15px;font-weight:600;font-family:var(--fs);color:var(--teal)">${val ? '$'+Math.round(val).toLocaleString('en-AU') : p.value}</span>
           ${p.dueDate?`<span class="badge bg">Due ${p.dueDate}</span>`:''}
         </div>
         ${p.invoicingNotes?`<div style="font-size:11px;color:var(--text2);margin-bottom:8px">${p.invoicingNotes}</div>`:''}
@@ -1095,6 +1160,7 @@ function renderInvoicing() {
       </div></div>
     </div>`;
   });
+
   document.getElementById('invoicing-list').innerHTML = html;
 }
 
@@ -1228,22 +1294,58 @@ function updateRepProjects() {
 
 async function generateReport(type) {
   const projectId = document.getElementById('rep-project').value || undefined;
-  const out = document.getElementById('report-output');
-  const content = document.getElementById('report-content');
-  content.textContent = 'Aurora is generating your report…';
-  out.style.display = 'block';
-  out.scrollIntoView({ behavior: 'smooth' });
-  const data = await api('/api/reports', { method: 'POST', body: JSON.stringify({ reportType: type, projectId }) });
-  lastReport = data.content || 'Error generating report.';
-  content.textContent = lastReport;
-}
+  const excelTypes = ['milestones','risks','invoices'];
+  const ext = excelTypes.includes(type) ? 'csv' : 'doc';
+  const label = excelTypes.includes(type) ? 'Excel spreadsheet' : 'Word document';
 
-function downloadReport() {
-  const blob = new Blob([lastReport], { type: 'text/plain' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `aurora-report-${new Date().toISOString().slice(0,10)}.txt`;
-  a.click();
+  // Show loading state on the card
+  const cards = document.querySelectorAll('.rep-card');
+  cards.forEach(c => c.style.opacity = '0.5');
+
+  // Show status
+  const existing = document.getElementById('report-status');
+  if (existing) existing.remove();
+  const status = document.createElement('div');
+  status.id = 'report-status';
+  status.style.cssText = 'margin-top:12px;font-size:12px;color:var(--text2);text-align:center';
+  status.textContent = 'Aurora is generating your ' + label + '…';
+  document.getElementById('pg-reports').appendChild(status);
+
+  try {
+    const token = sessionStorage.getItem('aurora_token') || '';
+    const res = await fetch('/api/reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ reportType: type, projectId }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      status.textContent = 'Error: ' + (err.error || 'Failed to generate report');
+      status.style.color = 'var(--rose)';
+      return;
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const now = new Date().toISOString().slice(0,10);
+    a.href = url;
+    a.download = `R2S_${type}_${now}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    status.textContent = '✓ ' + label + ' downloaded — check your Downloads folder';
+    status.style.color = 'var(--teal)';
+  } catch(e) {
+    status.textContent = 'Error generating report: ' + e.message;
+    status.style.color = 'var(--rose)';
+  } finally {
+    cards.forEach(c => c.style.opacity = '1');
+    setTimeout(() => { const s = document.getElementById('report-status'); if(s) s.remove(); }, 5000);
+  }
 }
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
