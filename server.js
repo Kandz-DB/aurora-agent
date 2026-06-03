@@ -320,6 +320,10 @@ Then write these four short sections with no section headings — just plain par
 
 Then end with exactly:
 
+Here is the link to the client SharePoint folder: [Diane to insert SP link]
+
+Please ensure all working notes, materials, and deliverables are saved to this folder throughout the engagement in accordance with our File Management SOP.
+
 Please confirm you have received this briefing and are clear on the requirements. Contact Diane if you have any questions.
 
 Kind regards,
@@ -552,25 +556,323 @@ Ask the team to review the phase completion status, confirm all deliverables are
   }
 }
 
+// ── Read consultant reply emails from info@ inbox ─────────────────────────────
+async function readConsultantReplies() {
+  const token = await getOutlookToken();
+  if (!token) return;
+  const mailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+
+  try {
+    // Get unread emails from last 7 days in inbox
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const res = await axios.get(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/inbox/messages?$filter=receivedDateTime ge ${since} and isRead eq false&$select=id,subject,from,body,receivedDateTime&$top=20`,
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
+    );
+
+    const messages = res.data?.value || [];
+    const projects = await db.getProjects();
+    const CONSULTANT_EMAILS = ['dave.c@risk2solution.com','info@risk2solution.com'];
+    // All known consultant/trainer email domains (expand as needed)
+    const isFromConsultant = (email) => email && (
+      email.endsWith('@risk2solution.com') ||
+      CONSULTANT_EMAILS.includes(email.toLowerCase())
+    );
+
+    for (const msg of messages) {
+      const fromEmail = msg.from?.emailAddress?.address || '';
+      if (!isFromConsultant(fromEmail)) continue;
+
+      const subject = msg.subject || '';
+      const bodyText = msg.body?.content?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 3000) || '';
+
+      // Find matching project by subject line
+      const matchedProject = projects.find(p =>
+        p.type === 'standard' &&
+        (subject.toLowerCase().includes((p.clientName || '').toLowerCase()) ||
+         subject.toLowerCase().includes((p.projectName || '').toLowerCase().slice(0, 15)))
+      );
+      if (!matchedProject) continue;
+
+      // Ask Aurora to analyse the reply and determine if phase should change
+      try {
+        const analysis = await aurora('status_email',
+          `You are analysing a reply email from a consultant/trainer to determine if it indicates a project phase change or status update.
+
+Project: ${matchedProject.projectName || matchedProject.clientName}
+Current phase: ${PHASES[matchedProject.phase || 0]}
+Current status: ${matchedProject.status}
+
+Email from: ${fromEmail}
+Subject: ${subject}
+Content: ${bodyText.slice(0, 1500)}
+
+Respond in JSON only with exactly this structure:
+{
+  "phaseChange": true or false,
+  "newPhase": 0-4 (only if phaseChange is true, use: 0=Kick-off, 1=Deployment, 2=Monitoring & Review, 3=Reporting, 4=Close-out),
+  "statusUpdate": "brief summary of what the consultant reported (1-2 sentences)",
+  "requiresAttention": true or false,
+  "attentionReason": "reason if requiresAttention is true, else empty string"
+}`,
+          buildContext(matchedProject)
+        );
+
+        let parsed;
+        try { parsed = JSON.parse(analysis.replace(/\`\`\`json|\`\`\`/g, '').trim()); } catch { continue; }
+
+        // Auto-update phase if clearly indicated
+        if (parsed.phaseChange && typeof parsed.newPhase === 'number' && parsed.newPhase !== matchedProject.phase) {
+          await db.updateProjectField(matchedProject.id, { phase: parsed.newPhase });
+          console.log(`[Replies] Phase updated for ${matchedProject.clientName}: ${PHASES[matchedProject.phase]} → ${PHASES[parsed.newPhase]}`);
+        }
+
+        // Always notify Diane of the reply and any updates
+        await sendEmail('diane.k@risk2solution.com',
+          `[Aurora] Consultant reply received: ${matchedProject.clientName}`,
+          `Aurora has received a reply from ${fromEmail} regarding the ${matchedProject.projectName || matchedProject.clientName} project.
+
+Status update: ${parsed.statusUpdate}
+
+${parsed.phaseChange ? `Phase automatically updated to: ${PHASES[parsed.newPhase]}
+
+` : ''}${parsed.requiresAttention ? `ACTION REQUIRED: ${parsed.attentionReason}
+
+` : ''}Please log into Aurora to review and update the project record if needed.
+
+Aurora
+R2S Project Management Intelligence`,
+          true
+        );
+
+        // Mark email as read
+        await axios.patch(
+          `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
+          { isRead: true },
+          { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+        );
+
+      } catch (err) {
+        if (err.message === 'MONTHLY_CAP_REACHED') break;
+        console.error('[Replies] Analysis failed:', err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[Replies] Read failed:', err.message);
+  }
+}
+
+// ── Weekly consultant check-in draft ─────────────────────────────────────────
+async function generateWeeklyConsultantCheckins(projects) {
+  const active = projects.filter(p =>
+    p.type === 'standard' &&
+    p.consultant &&
+    !['Completed','Terminated','Closed'].includes(p.status) &&
+    [1, 2, 3].includes(p.phase) // Deployment, Monitoring, Reporting phases only
+  );
+
+  for (const p of active) {
+    try {
+      const context = buildContext(p);
+      const firstName = (p.consultant || '').split(' ')[0];
+      const text = await aurora('checkin_email',
+        `Draft a short weekly check-in email from Diane (R2S Project Manager) to ${p.consultant}, the assigned consultant/trainer on the ${p.projectName || p.clientName} project.
+
+The email should:
+- Be brief and friendly — 3-4 sentences max
+- Ask for a quick update on progress against deliverables and timeline
+- Ask if there are any issues, blockers, or anything they need from the PM
+- Reference the specific project and any relevant deliverables or milestones if known
+- Not repeat information they already know
+
+Start with: Hi ${firstName},
+
+Sign off as:
+Kind regards,
+Diane Kruger
+Corporate Operations Lead | Risk 2 Solution Group`,
+        context
+      );
+
+      const draft = {
+        id: `d_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: 'consultant_checkin', urgency: 'routine',
+        toName: p.consultant, toEmail: p.consultantEmail || 'info@risk2solution.com',
+        subject: `${p.projectName || p.clientName} — Weekly check-in`,
+        body: text, source: 'batch',
+      };
+      await db.saveDraft(draft);
+      await saveDraftEmail(draft);
+    } catch (err) {
+      if (err.message === 'MONTHLY_CAP_REACHED') break;
+      console.error(`[Checkins] Error on ${p.clientName}:`, err.message);
+    }
+  }
+  return active.length;
+}
+
+// ── Phase stuck too long detection ────────────────────────────────────────────
+async function checkStuckPhases(projects) {
+  const MAX_PHASE_DAYS = { 0: 7, 1: 60, 2: 60, 3: 21, 4: 14 }; // days per phase before flagging
+  const active = projects.filter(p => p.type === 'standard' && !['Completed','Terminated'].includes(p.status));
+
+  for (const p of active) {
+    const updatedAt = p.updatedAt ? new Date(p.updatedAt) : null;
+    if (!updatedAt) continue;
+    const daysSinceUpdate = Math.round((new Date() - updatedAt) / (1000 * 60 * 60 * 24));
+    const maxDays = MAX_PHASE_DAYS[p.phase || 0];
+    if (daysSinceUpdate >= maxDays) {
+      await sendEmail('diane.k@risk2solution.com',
+        `[Aurora] Project phase check: ${p.clientName} — ${PHASES[p.phase||0]}`,
+        `The ${p.clientName} project (${p.projectName || ''}) has been in the ${PHASES[p.phase||0]} phase for ${daysSinceUpdate} days without a recorded update in Aurora.
+
+Please log into Aurora and update the project status or phase as appropriate.
+
+Aurora
+R2S Project Management Intelligence`,
+        true
+      );
+    }
+  }
+}
+
+// ── SOP-TRN-001: Materials submission reminder ────────────────────────────────
+async function checkMaterialsSubmissionReminders(projects) {
+  const active = projects.filter(p =>
+    p.type === 'standard' && p.consultant && p.dueDate &&
+    p.phase === 1 && // Deployment phase
+    !['Completed','Terminated'].includes(p.status)
+  );
+
+  for (const p of active) {
+    const dueDate = new Date(p.dueDate);
+    const days = Math.round((dueDate - new Date()) / (1000 * 60 * 60 * 24));
+    // Remind at 4 days before due date (allows 2 days for COO review + 2 buffer)
+    if (days === 4) {
+      const consultantFirst = (p.consultant || '').split(' ')[0];
+      await sendEmail(p.consultantEmail || 'info@risk2solution.com',
+        `[Aurora] Materials submission reminder: ${p.clientName}`,
+        `Hi ${consultantFirst},
+
+This is a reminder that all training and consulting materials for the ${p.projectName || p.clientName} project must be submitted to the COO for approval no later than 2 business days before delivery.
+
+Project due date: ${p.dueDate}
+Deadline for materials submission: Please ensure materials are submitted immediately to allow time for COO review.
+
+Please ensure all materials are:
+• Fully customised to ${p.clientName}
+• Client-ready (not draft)
+• Submitted via the SharePoint project folder
+
+Contact Diane if you have any questions.
+
+Kind regards,
+Diane Kruger
+Corporate Operations Lead | Risk 2 Solution Group`,
+        false,
+        'diane.k@risk2solution.com'
+      );
+
+      // Also prompt COO (Diane) to expect materials
+      await sendEmail('diane.k@risk2solution.com',
+        `[Aurora] COO approval needed soon: ${p.clientName}`,
+        `Materials for the ${p.clientName} project (${p.projectName || ''}) should be submitted by ${p.consultant} for your approval within the next 1-2 days.
+
+Project due date: ${p.dueDate}
+
+Please allow time in your schedule to review and approve before delivery.
+
+Aurora
+R2S Project Management Intelligence`,
+        true
+      );
+    }
+
+    // Session report reminder — 2 days after due date (post-delivery)
+    if (days === -2 && p.consultant) {
+      const consultantFirst = (p.consultant || '').split(' ')[0];
+      await sendEmail(p.consultantEmail || 'info@risk2solution.com',
+        `[Aurora] Session report due: ${p.clientName}`,
+        `Hi ${consultantFirst},
+
+This is a reminder that your session report for the ${p.projectName || p.clientName} engagement is due today (within 2 business days of delivery).
+
+Your session report should include:
+• Session overview
+• Key observations
+• Identified gaps
+• Recommendations
+• Any follow-up actions
+• Any off-scope items raised
+• Any incidents or issues
+
+Please submit your completed report to Diane and save it to the SharePoint project folder: 07 Session Reports
+
+Kind regards,
+Diane Kruger
+Corporate Operations Lead | Risk 2 Solution Group`,
+        false,
+        'diane.k@risk2solution.com'
+      );
+    }
+  }
+}
+
 // ── Daily batch (6am AEST = 8pm UTC) ─────────────────────────────────────────
 async function runBatch() {
+  const now = new Date();
+  const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon ... 5=Fri, 6=Sat
+  const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
+  const isMonday  = dayOfWeek === 1;
+
   console.log('\n[Batch] ═══ Aurora daily batch starting ═══');
   const projects = await db.getProjects();
   const standard = projects.filter(p => p.type === 'standard');
   const ongoing  = projects.filter(p => p.type === 'ongoing');
   console.log(`[Batch] ${standard.length} standard | ${ongoing.length} ongoing (skipped)`);
 
-  // 1. Check due date reminders
+  // ── 1. Daily portal prompt to Diane (weekdays only) ───────────────────────
+  if (isWeekday) {
+    const activeCount = standard.filter(p => !['Completed','Terminated'].includes(p.status)).length;
+    const draftCount  = (await db.getDrafts()).length;
+    await sendEmail('diane.k@risk2solution.com',
+      '[Aurora] Good morning — daily project check',
+      `Good morning Diane,
+
+Aurora here with your daily project summary.
+
+Active projects: ${activeCount}
+Drafts awaiting your review: ${draftCount}
+
+Please log into Aurora to review any pending drafts and check project status.
+
+${process.env.FRONTEND_URL ? `Aurora portal: ${process.env.FRONTEND_URL}` : ''}
+
+Aurora
+R2S Project Management Intelligence`,
+      true
+    );
+  }
+
+  // ── 2. Due date reminders ─────────────────────────────────────────────────
   await checkDueDateReminders();
 
-  // 2. Monday status emails (Mondays only)
-  if (new Date().getDay() === 1) {
+  // ── 3. Check for stuck phases ─────────────────────────────────────────────
+  await checkStuckPhases(standard);
+
+  // ── 4. SOP-TRN-001: Materials submission & session report reminders ────────
+  await checkMaterialsSubmissionReminders(standard);
+
+  // ── 5. Weekly actions (Mondays only) ─────────────────────────────────────
+  if (isMonday) {
+    // 5a. Weekly client status email drafts
     for (const p of standard) {
       if (['Completed','Terminated','On Hold'].includes(p.status)) continue;
       try {
         const context = buildContext(p);
         const text = await aurora('status_email',
-          `Draft a short weekly status update email to ${p.clientContact || 'the client'} at ${p.clientName} for the ${p.projectName || p.clientName} project. Current phase: ${PHASES[p.phase||0]}. Keep it to 3-4 sentences covering what happened this week, what's next, and anything needed from the client.`,
+          `Draft a short weekly status update email to ${p.clientContact || 'the client'} at ${p.clientName} for the ${p.projectName || p.clientName} project. Current phase: ${PHASES[p.phase||0]}. 3-4 sentences: what happened this week, what is next, anything needed from the client. Professional and concise.`,
           context
         );
         const draft = {
@@ -584,17 +886,45 @@ async function runBatch() {
         await db.saveDraft(draft);
         await saveDraftEmail(draft);
       } catch (err) {
-        if (err.message === 'MONTHLY_CAP_REACHED') { console.error('[Batch] Cap reached'); break; }
-        console.error(`[Batch] Error on ${p.clientName}:`, err.message);
+        if (err.message === 'MONTHLY_CAP_REACHED') break;
+        console.error(`[Batch] Status email error on ${p.clientName}:`, err.message);
       }
     }
+
+    // 5b. Weekly consultant check-in drafts
+    const checkinCount = await generateWeeklyConsultantCheckins(standard);
+
+    // 5c. Monday reminder to Diane to review and send check-in drafts
+    await sendEmail('diane.k@risk2solution.com',
+      '[Aurora] Weekly action — please review and send check-in emails',
+      `Good morning Diane,
+
+Aurora has prepared your weekly emails for review. Please log into Aurora to review and send:
+
+• ${standard.filter(p => !['Completed','Terminated'].includes(p.status)).length} client status update emails
+• ${checkinCount} consultant/trainer check-in emails
+
+All drafts are in the info@risk2solution.com Outlook shared mailbox Drafts folder and visible in the Aurora portal under Comms Drafts.
+
+Please review each one for accuracy before sending.
+
+${process.env.FRONTEND_URL ? `Aurora portal: ${process.env.FRONTEND_URL}` : ''}
+
+Aurora
+R2S Project Management Intelligence`,
+      true
+    );
+
+    // 5d. Read and analyse consultant reply emails
+    await readConsultantReplies();
   }
 
-  // 3. Send internal summary to team
-  const atRisk = standard.filter(p => p.dueDate && (() => {
+  // ── 6. At-risk project summary ────────────────────────────────────────────
+  const atRisk = standard.filter(p => {
+    if (!p.dueDate) return false;
     const days = Math.round((new Date(p.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
     return days <= 14 && days >= 0;
-  })());
+  });
 
   if (atRisk.length > 0) {
     const summary = atRisk.map(p => {
@@ -608,6 +938,15 @@ async function runBatch() {
   }
 
   console.log('[Batch] ═══ Complete ═══\n');
+}
+
+// ── Kick-off meeting prompt (triggered after consultant brief is approved) ────
+async function sendKickoffPrompt(project) {
+  await sendEmail('diane.k@risk2solution.com',
+    `[Aurora] Action required: Schedule kick-off meeting — ${project.clientName}`,
+    `Hi Diane,\n\nThe consultant briefing for the ${project.projectName || project.clientName} project has been sent. The next step per the R2S Project Management SOP (SOP-PM-001) is to schedule a kick-off meeting.\n\nKick-off agenda to cover:\n• Project scope and objectives\n• Roles and responsibilities\n• Key milestones and delivery schedule\n• Communication preferences and reporting cadence\n• Risk and issue escalation process\n\nClient contact: ${project.clientContact || 'See project record'} (${project.clientEmail || ''})\nConsultant assigned: ${project.consultant || 'See project record'}\n\nPlease schedule this at your earliest convenience and update the project record in Aurora once confirmed.\n\n${process.env.FRONTEND_URL ? `Aurora portal: ${process.env.FRONTEND_URL}` : ''}\n\nAurora\nR2S Project Management Intelligence`,
+    true
+  );
 }
 
 // Schedule: 6am AEST (UTC+10) = 8pm UTC
@@ -824,9 +1163,21 @@ app.post('/api/drafts/:id/approve', async (req, res) => {
     const drafts = db.readJSON('drafts.json');
     const draft  = drafts.find(d => d.id === req.params.id);
     if (!draft) return res.status(404).json({ error: 'Not found' });
+
     // Send via Outlook
-    await sendEmail(draft.toEmail || INTERNAL_EMAILS[1], draft.subject, draft.body);
+    const cc = draft.ccEmail ? [draft.ccEmail] : [];
+    await sendEmail(draft.toEmail || INTERNAL_EMAILS[1], draft.subject, draft.body, false, cc);
     await db.updateDraft(req.params.id, { approved: true });
+
+    // If this was a consultant briefing, send kick-off meeting prompt to Diane
+    if (draft.type === 'consultant_briefing' && draft.projectId) {
+      const project = await db.getProject(draft.projectId);
+      if (project) {
+        await sendKickoffPrompt(project);
+        console.log(`[Approve] Kick-off prompt sent for ${project.clientName}`);
+      }
+    }
+
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
