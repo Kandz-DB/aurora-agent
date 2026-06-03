@@ -99,31 +99,16 @@ async function aurora(taskType, userMessage, context) {
 
   const model     = TASK_MODELS[taskType] || 'claude-haiku-4-5-20251001';
   const maxTokens = TASK_TOKENS[taskType] || 500;
-
-  // Prompt caching — system prompt is cached after first use, cutting re-send cost by ~90%.
-  // Context block is appended uncached (it changes per project).
-  const systemBlocks = [
-    { type: 'text', text: AURORA_PROMPT, cache_control: { type: 'ephemeral' } },
-    ...(context ? [{ type: 'text', text: `PROJECT CONTEXT:\n${context}` }] : []),
-  ];
+  const system    = context ? `${AURORA_PROMPT}\n\nPROJECT CONTEXT:\n${context}` : AURORA_PROMPT;
 
   const response = await client.messages.create({
     model, max_tokens: maxTokens,
-    system: systemBlocks,
+    system,
     messages: [{ role: 'user', content: userMessage }],
   });
 
-  // Cost calculation: cached tokens billed at 10% of normal input rate.
-  const isHaiku = model.includes('haiku');
-  const rates = isHaiku ? { in: 0.80, out: 4.00, cache_read: 0.08, cache_write: 1.00 }
-                        : { in: 3.00, out: 15.00, cache_read: 0.30, cache_write: 3.75 };
-  const u = response.usage;
-  const cost = (
-    ((u.input_tokens           || 0) / 1e6) * rates.in         +
-    ((u.output_tokens          || 0) / 1e6) * rates.out        +
-    ((u.cache_read_input_tokens  || 0) / 1e6) * rates.cache_read  +
-    ((u.cache_creation_input_tokens || 0) / 1e6) * rates.cache_write
-  );
+  const rates = model.includes('haiku') ? { in: 0.80, out: 4.00 } : { in: 3.00, out: 15.00 };
+  const cost  = (response.usage.input_tokens / 1e6) * rates.in + (response.usage.output_tokens / 1e6) * rates.out;
   await db.recordSpend(cost);
 
   if (spend.total + cost >= CAP_USD * 0.8 && spend.total < CAP_USD * 0.8) {
@@ -259,11 +244,11 @@ async function extractTextFromFile(filePath, mimeType) {
 }
 
 async function analyseContract(rawText, filename) {
-  // Use up to 15000 chars — sufficient for most proposals. Tail section catches cost tables near the end.
-  const fullText = rawText.slice(0, 15000);
+  // Use up to 28000 chars to capture full proposals including cost summaries at end
+  const fullText = rawText.slice(0, 28000);
 
-  // Also extract a "tail" section — the last 3000 chars often has cost totals
-  const tailText = rawText.length > 10000 ? rawText.slice(-3000) : '';
+  // Also extract a "tail" section — the last 5000 chars often has cost totals
+  const tailText = rawText.length > 15000 ? rawText.slice(-5000) : '';
 
   const combinedText = fullText + (tailText ? '\n\n[END OF DOCUMENT — KEY TOTALS SECTION:]\n' + tailText : '');
 
@@ -429,7 +414,7 @@ const PHASES = ['Kick-off', 'Deployment', 'Monitoring & Review', 'Reporting', 'C
 
 function buildContext(p, docs = []) {
   if (!p || p.type === 'ongoing') return null;
-  const docText = docs.map(d => d.extract ? `Contract: ${d.name}\n${d.extract.slice(0, 1500)}` : '').filter(Boolean).join('\n\n');
+  const docText = docs.map(d => d.extract ? `Contract: ${d.name}\n${d.extract.slice(0, 2000)}` : '').filter(Boolean).join('\n\n');
   return [
     `Organisation: ${p.clientName}`,
     `Project: ${p.projectName || p.clientName}`,
@@ -737,17 +722,6 @@ Corporate Operations Lead | Risk 2 Solution Group`,
 }
 
 // ── Phase stuck too long detection ────────────────────────────────────────────
-// In-memory fallback for flag store — survives restarts via db.getFlag/setFlag if available.
-const _flagCache = new Map();
-async function getFlag(key) {
-  if (typeof db.getFlag === 'function') return db.getFlag(key).catch(() => null);
-  return _flagCache.get(key) || null;
-}
-async function setFlag(key, value) {
-  _flagCache.set(key, value);
-  if (typeof db.setFlag === 'function') return db.setFlag(key, value).catch(() => {});
-}
-
 async function checkStuckPhases(projects) {
   const MAX_PHASE_DAYS = { 0: 7, 1: 60, 2: 60, 3: 21, 4: 14 }; // days per phase before flagging
   const active = projects.filter(p => p.type === 'standard' && !['Completed','Terminated'].includes(p.status));
@@ -757,27 +731,18 @@ async function checkStuckPhases(projects) {
     if (!updatedAt) continue;
     const daysSinceUpdate = Math.round((new Date() - updatedAt) / (1000 * 60 * 60 * 24));
     const maxDays = MAX_PHASE_DAYS[p.phase || 0];
-    if (daysSinceUpdate < maxDays) continue;
-
-    // Only alert once per week — check if we sent this alert in the last 7 days.
-    const alertKey = `stuck_alert_${p.id}_${p.phase}`;
-    const lastAlert = await getFlag(alertKey);
-    if (lastAlert) {
-      const daysSinceAlert = Math.round((new Date() - new Date(lastAlert)) / (1000 * 60 * 60 * 24));
-      if (daysSinceAlert < 7) continue;
-    }
-
-    await sendEmail('diane.k@risk2solution.com',
-      `[Aurora] Project phase check: ${p.clientName} — ${PHASES[p.phase||0]}`,
-      `The ${p.clientName} project (${p.projectName || ''}) has been in the ${PHASES[p.phase||0]} phase for ${daysSinceUpdate} days without a recorded update in Aurora.
+    if (daysSinceUpdate >= maxDays) {
+      await sendEmail('diane.k@risk2solution.com',
+        `[Aurora] Project phase check: ${p.clientName} — ${PHASES[p.phase||0]}`,
+        `The ${p.clientName} project (${p.projectName || ''}) has been in the ${PHASES[p.phase||0]} phase for ${daysSinceUpdate} days without a recorded update in Aurora.
 
 Please log into Aurora and update the project status or phase as appropriate.
 
 Aurora
 R2S Project Management Intelligence`,
-      true
-    );
-    await setFlag(alertKey, new Date().toISOString());
+        true
+      );
+    }
   }
 }
 
@@ -863,6 +828,206 @@ Corporate Operations Lead | Risk 2 Solution Group`,
   }
 }
 
+// ── Suggestion engine ────────────────────────────────────────────────────────
+// Aurora autonomously identifies actions and surfaces them for Diane to approve
+
+const SUGGESTION_TYPES = {
+  PHASE_ADVANCE:    'phase_advance',
+  PHASE_REGRESS:    'phase_regress',
+  STATUS_CHANGE:    'status_change',
+  SEND_CLIENT_UPDATE: 'send_client_update',
+  ESCALATE:         'escalate',
+  CLOSE_OUT:        'close_out',
+  SCHEDULE_KICKOFF: 'schedule_kickoff',
+  REQUEST_REPORT:   'request_report',
+};
+
+async function generateSuggestions() {
+  const projects = await db.getProjects();
+  const standard = projects.filter(p =>
+    p.type === 'standard' && !['Completed','Terminated','Closed'].includes(p.status)
+  );
+  const suggestions = [];
+
+  for (const p of standard) {
+    const phase = p.phase || 0;
+    const days  = p.dueDate ? Math.round((new Date(p.dueDate) - new Date()) / (1000*60*60*24)) : null;
+    const updatedDaysAgo = p.updatedAt ? Math.round((new Date() - new Date(p.updatedAt)) / (1000*60*60*24)) : 999;
+
+    // ── Phase 0 (Kick-off) ────────────────────────────────────────────────────
+    // If kick-off has been going on for 5+ days with a consultant assigned, suggest moving to Deployment
+    if (phase === 0 && updatedDaysAgo >= 5 && p.consultant) {
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_kickoff_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.PHASE_ADVANCE,
+        title: `Move ${p.clientName} to Deployment phase`,
+        reason: `This project has been in Kick-off for ${updatedDaysAgo} days. If the kick-off meeting has occurred and work has commenced, it should move to Deployment.`,
+        action: { phase: 1 },
+        confirmLabel: 'Move to Deployment',
+        dismissLabel: 'Keep in Kick-off',
+      }));
+    }
+
+    // ── Phase 1 (Deployment) → Phase 2 (Monitoring) ──────────────────────────
+    // If deployment has been going for 45+ days, suggest moving to Monitoring
+    if (phase === 1 && updatedDaysAgo >= 45) {
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_deploy_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.PHASE_ADVANCE,
+        title: `Move ${p.clientName} to Monitoring & Review`,
+        reason: `This project has been in Deployment for ${updatedDaysAgo} days. If the primary service delivery is complete, it should move to Monitoring & Review.`,
+        action: { phase: 2 },
+        confirmLabel: 'Move to Monitoring & Review',
+        dismissLabel: 'Keep in Deployment',
+      }));
+    }
+
+    // ── Phase 2 (Monitoring) → Phase 3 (Reporting) ───────────────────────────
+    if (phase === 2 && updatedDaysAgo >= 30) {
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_monitor_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.PHASE_ADVANCE,
+        title: `Move ${p.clientName} to Reporting phase`,
+        reason: `This project has been in Monitoring & Review for ${updatedDaysAgo} days. If monitoring is complete, move to Reporting to finalise deliverables.`,
+        action: { phase: 3 },
+        confirmLabel: 'Move to Reporting',
+        dismissLabel: 'Keep in Monitoring',
+      }));
+    }
+
+    // ── Phase 3 (Reporting) → Phase 4 (Close-out) ────────────────────────────
+    if (phase === 3 && updatedDaysAgo >= 14) {
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_report_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.CLOSE_OUT,
+        title: `Close out ${p.clientName} project`,
+        reason: `This project has been in Reporting for ${updatedDaysAgo} days. If all reports and deliverables are complete, it is ready for Close-out.`,
+        action: { phase: 4, status: 'Completed' },
+        confirmLabel: 'Mark as Complete & Close out',
+        dismissLabel: 'Not ready yet',
+      }));
+    }
+
+    // ── Due within 7 days and not in Reporting/Close-out ─────────────────────
+    if (days !== null && days <= 7 && days >= 0 && phase < 3) {
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_due_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.ESCALATE,
+        title: `${p.clientName} due in ${days} day${days!==1?'s':''}`,
+        reason: `This project is due in ${days} days but is still in ${PHASES[phase]} phase. Aurora will draft an escalation email for Diane to review and send.`,
+        action: { draftEscalation: true, riskDescription: `Project due in ${days} days but currently in ${PHASES[phase]} phase with deliverables potentially outstanding.` },
+        confirmLabel: 'Draft escalation email',
+        dismissLabel: 'Acknowledged',
+      }));
+    }
+
+    // ── On Hold for 14+ days ──────────────────────────────────────────────────
+    if (p.status === 'On Hold' && updatedDaysAgo >= 14) {
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_hold_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.STATUS_CHANGE,
+        title: `${p.clientName} has been On Hold for ${updatedDaysAgo} days`,
+        reason: `This project has been on hold for ${updatedDaysAgo} days. Consider following up with the client or updating the status.`,
+        action: null,
+        confirmLabel: 'Draft client follow-up',
+        dismissLabel: 'Acknowledged',
+        confirmTaskType: 'checkin_email',
+      }));
+    }
+
+    // ── No consultant assigned and in Deployment/Monitoring ──────────────────
+    if (!p.consultant && phase >= 1 && phase <= 3) {
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_noconsult_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.STATUS_CHANGE,
+        title: `No consultant assigned to ${p.clientName}`,
+        reason: `This project is in ${PHASES[phase]} phase but has no consultant or trainer assigned. Please assign one in the project record.`,
+        action: null,
+        confirmLabel: 'Open project to assign',
+        dismissLabel: 'Acknowledged',
+      }));
+    }
+  }
+
+  // Filter out null suggestions (duplicates that returned existing)
+  return suggestions.filter(Boolean);
+}
+
+// ── Apply a suggestion action ─────────────────────────────────────────────────
+async function applySuggestion(suggestion) {
+  const project = await db.getProject(suggestion.projectId);
+  if (!project) return;
+
+  if (suggestion.action?.phase !== undefined) {
+    await db.updateProjectField(suggestion.projectId, {
+      phase: suggestion.action.phase,
+      ...(suggestion.action.status ? { status: suggestion.action.status } : {}),
+    });
+
+    // If moving to Close-out, trigger close-out actions
+    if (suggestion.action.phase === 4 || suggestion.action.status === 'Completed') {
+      // Draft client feedback email
+      try { await draftClientFeedback(project); } catch(e) { console.error('[Feedback]', e.message); }
+      const yr1 = new Date(); yr1.setFullYear(yr1.getFullYear() + 1);
+      const yr2 = new Date(); yr2.setFullYear(yr2.getFullYear() + 2);
+      await createCalendarReminder(
+        `1-year follow-up: ${project.clientName}`,
+        `Check in with ${project.clientName} — explore new opportunities for R2S.`,
+        yr1.toISOString().slice(0,10)
+      );
+      await createCalendarReminder(
+        `2-year follow-up: ${project.clientName}`,
+        `2-year relationship check-in with ${project.clientName}.`,
+        yr2.toISOString().slice(0,10)
+      );
+      await sendInternalEmail(
+        `[Aurora] Project closed: ${project.clientName}`,
+        `The ${project.projectName||project.clientName} project has been marked complete.
+
+Aurora has set 1-year and 2-year follow-up reminders in the Outlook calendar.
+
+Aurora
+R2S Project Management Intelligence`
+      );
+    }
+
+    console.log(`[Suggestions] Phase updated for ${project.clientName}: ${PHASES[project.phase||0]} → ${PHASES[suggestion.action.phase]}`);
+  }
+
+  // If suggestion was to draft an escalation
+  if (suggestion.action?.draftEscalation) {
+    await draftRiskEscalation(project, suggestion.action.riskDescription || 'Risk identified by Aurora');
+  }
+
+  // If suggestion was to draft an email
+  if (suggestion.confirmTaskType) {
+    const docs    = await db.getDocuments(suggestion.projectId);
+    const context = buildContext(project, docs);
+    const text    = await aurora(suggestion.confirmTaskType,
+      `Draft a ${suggestion.confirmTaskType.replace(/_/g,' ')} for ${project.projectName||project.clientName} at ${project.clientName}.`,
+      context
+    );
+    const draft = {
+      id: `d_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+      projectId: suggestion.projectId, clientName: project.clientName,
+      projectName: project.projectName, type: suggestion.confirmTaskType,
+      urgency: suggestion.type === SUGGESTION_TYPES.ESCALATE ? 'urgent' : 'routine',
+      toName: project.clientContact, toEmail: project.clientEmail,
+      subject: `${project.projectName||project.clientName}`,
+      body: text, source: 'suggestion',
+    };
+    await db.saveDraft(draft);
+    await saveDraftEmail(draft);
+  }
+}
+
 // ── Daily batch (6am AEST = 8pm UTC) ─────────────────────────────────────────
 async function runBatch() {
   const now = new Date();
@@ -875,6 +1040,15 @@ async function runBatch() {
   const standard = projects.filter(p => p.type === 'standard');
   const ongoing  = projects.filter(p => p.type === 'ongoing');
   console.log(`[Batch] ${standard.length} standard | ${ongoing.length} ongoing (skipped)`);
+
+  // ── 0. Generate Aurora suggestions ──────────────────────────────────────────
+  try {
+    const newSuggestions = await generateSuggestions();
+    const pending = newSuggestions.filter(s => s.status === 'pending');
+    if (pending.length > 0) {
+      console.log(`[Suggestions] ${pending.length} suggestion(s) generated`);
+    }
+  } catch (err) { console.error('[Suggestions] Error:', err.message); }
 
   // ── 1. Daily portal prompt to Diane (weekdays only) ───────────────────────
   if (isWeekday) {
@@ -913,15 +1087,6 @@ R2S Project Management Intelligence`,
     // 5a. Weekly client status email drafts
     for (const p of standard) {
       if (['Completed','Terminated','On Hold'].includes(p.status)) continue;
-
-      // Skip if no project activity in the last 7 days — nothing meaningful to report.
-      const lastUpdate = p.updatedAt ? new Date(p.updatedAt) : null;
-      const daysSinceUpdate = lastUpdate ? Math.round((new Date() - lastUpdate) / (1000 * 60 * 60 * 24)) : 999;
-      if (daysSinceUpdate > 7) {
-        console.log(`[Batch] Skipping status email for ${p.clientName} — no activity in ${daysSinceUpdate} days`);
-        continue;
-      }
-
       try {
         const context = buildContext(p);
         const text = await aurora('status_email',
@@ -993,13 +1158,385 @@ R2S Project Management Intelligence`,
   console.log('[Batch] ═══ Complete ═══\n');
 }
 
-// ── Kick-off meeting prompt (triggered after consultant brief is approved) ────
+// ── Read consultant calendar availability ────────────────────────────────────
+async function getConsultantAvailability() {
+  const token = await getOutlookToken();
+  if (!token) return null;
+  const calendarName = 'R2S Training & Education';
+  const mailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+
+  try {
+    // Get events in the next 30 days from the training calendar
+    const start = new Date();
+    const end   = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+    // First find the calendar ID
+    const calsRes = await axios.get(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/calendars`,
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
+    );
+    const cal = calsRes.data?.value?.find(c =>
+      c.name?.toLowerCase().includes('training') ||
+      c.name?.toLowerCase().includes('education') ||
+      c.name === calendarName
+    );
+
+    if (!cal) return null;
+
+    // Get events from that calendar
+    const eventsRes = await axios.get(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/calendars/${cal.id}/events?$filter=start/dateTime ge '${start.toISOString()}' and start/dateTime le '${end.toISOString()}'&$select=subject,start,end&$top=50`,
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
+    );
+
+    const busySlots = (eventsRes.data?.value || []).map(e => ({
+      subject: e.subject,
+      start: new Date(e.start.dateTime),
+      end: new Date(e.end.dateTime),
+    }));
+
+    // Find 3 available weekday morning slots in next 30 days
+    const available = [];
+    const checkDate = new Date();
+    checkDate.setDate(checkDate.getDate() + 3); // start 3 days from now
+
+    while (available.length < 3 && checkDate < end) {
+      const dow = checkDate.getDay();
+      if (dow >= 1 && dow <= 5) { // weekdays only
+        // Check 9am and 10am slots
+        for (const hour of [9, 10, 14]) {
+          const slotStart = new Date(checkDate);
+          slotStart.setHours(hour, 0, 0, 0);
+          const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
+
+          const isBusy = busySlots.some(b =>
+            slotStart < b.end && slotEnd > b.start
+          );
+
+          if (!isBusy && available.length < 3) {
+            available.push(slotStart);
+          }
+        }
+      }
+      checkDate.setDate(checkDate.getDate() + 1);
+    }
+
+    return available;
+  } catch (err) {
+    console.error('[Calendar] Availability check failed:', err.message);
+    return null;
+  }
+}
+
+// ── Kick-off meeting agenda generation ────────────────────────────────────────
+async function generateKickoffAgenda(project) {
+  const context = buildContext(project);
+  const agenda = await aurora('consultant_briefing',
+    `Write a professional kick-off meeting agenda for the ${project.projectName || project.clientName} project.
+
+FORMAT RULES:
+- Plain text only. No asterisks, no bold markdown, no long dashes, no lines.
+- Use numbered sections and bullet points (use the bullet character •).
+- R2S branding: professional, clear, human-centred tone.
+- This is a formal agenda document.
+
+Write the agenda with these sections:
+
+RISK 2 SOLUTION GROUP
+Kick-off Meeting Agenda
+${project.clientName} — ${project.projectName || 'Project Engagement'}
+Date: [To be confirmed]
+Location: [To be confirmed — virtual or on-site]
+Attendees: ${project.clientContact || '[Client contact]'} (${project.clientName}), ${project.consultant || '[R2S Consultant]'} (R2S), Diane Kruger (R2S)
+Duration: 60-90 minutes
+
+1. Welcome and Introductions (10 minutes)
+• Purpose and format of meeting
+• Attendee introductions
+
+2. Project Overview (15 minutes)
+• Scope of engagement as per proposal
+• Objectives and expected outcomes
+• What success looks like for ${project.clientName}
+
+3. Deliverables and Timeline (20 minutes)
+• Confirmed deliverables (list each one from the project scope)
+• Proposed timeline and key milestones
+• Phasing and scheduling
+
+4. Roles and Responsibilities (10 minutes)
+• R2S team responsibilities
+• ${project.clientName} team responsibilities
+• Key contacts and escalation points
+
+5. Communication and Reporting (10 minutes)
+• Reporting frequency and format
+• Primary communication channels
+• How updates will be shared
+
+6. Risk and Issue Management (10 minutes)
+• How risks will be identified and managed
+• Escalation process if issues arise
+• Change request process
+
+7. Next Steps and Close (10 minutes)
+• Confirm immediate next steps
+• Confirm dates for next check-in
+• Any questions
+
+Prepared by Aurora, R2S Project Management Intelligence
+For review by Diane Kruger before distribution`,
+    context
+  );
+  return agenda;
+}
+
+// ── Full kick-off system ───────────────────────────────────────────────────────
 async function sendKickoffPrompt(project) {
-  await sendEmail('diane.k@risk2solution.com',
-    `[Aurora] Action required: Schedule kick-off meeting — ${project.clientName}`,
-    `Hi Diane,\n\nThe consultant briefing for the ${project.projectName || project.clientName} project has been sent. The next step per the R2S Project Management SOP (SOP-PM-001) is to schedule a kick-off meeting.\n\nKick-off agenda to cover:\n• Project scope and objectives\n• Roles and responsibilities\n• Key milestones and delivery schedule\n• Communication preferences and reporting cadence\n• Risk and issue escalation process\n\nClient contact: ${project.clientContact || 'See project record'} (${project.clientEmail || ''})\nConsultant assigned: ${project.consultant || 'See project record'}\n\nPlease schedule this at your earliest convenience and update the project record in Aurora once confirmed.\n\n${process.env.FRONTEND_URL ? `Aurora portal: ${process.env.FRONTEND_URL}` : ''}\n\nAurora\nR2S Project Management Intelligence`,
+  const DIANE = 'diane.k@risk2solution.com';
+
+  // 1. Get consultant availability from training calendar
+  let availabilityText = 'Aurora was unable to read the training calendar. Please check availability manually.';
+  let availableDates = null;
+  try {
+    availableDates = await getConsultantAvailability();
+    if (availableDates && availableDates.length > 0) {
+      const opts = availableDates.map((d, i) => {
+        const dateStr = d.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+        const timeStr = d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Australia/Brisbane' });
+        return `Option ${i+1}: ${dateStr} at ${timeStr} AEST`;
+      }).join('\n');
+      availabilityText = 'Based on the R2S Training and Education calendar, the following slots appear available:\n\n' + opts + '\n\nPlease confirm with ' + (project.consultant || 'the consultant') + ' that these work before sending to the client.';
+    }
+  } catch (err) {
+    console.error('[Kickoff] Calendar check failed:', err.message);
+  }
+
+  // 2. Generate kick-off agenda
+  let agendaText = '';
+  try {
+    agendaText = await generateKickoffAgenda(project);
+  } catch (err) {
+    console.error('[Kickoff] Agenda generation failed:', err.message);
+  }
+
+  // 3. Save agenda as Outlook draft for Diane to review
+  if (agendaText) {
+    const agendaDraft = {
+      id: `d_${Date.now()}_agenda`,
+      projectId: project.id, clientName: project.clientName,
+      projectName: project.projectName, type: 'kickoff_agenda',
+      urgency: 'routine', toName: project.clientContact,
+      toEmail: project.clientEmail,
+      subject: `Kick-off Meeting Agenda — ${project.clientName} — ${project.projectName || 'Project'}`,
+      body: agendaText, source: 'auto',
+    };
+    await db.saveDraft(agendaDraft);
+    await saveDraftEmail(agendaDraft);
+  }
+
+  // 4. Draft client onboarding email
+  await draftClientOnboarding(project);
+
+  // 5. Email Diane with availability options and next steps
+  await sendEmail(DIANE,
+    `[Aurora] Schedule kick-off meeting: ${project.clientName}`,
+    `Hi Diane,
+
+The consultant briefing for ${project.projectName || project.clientName} has been sent to ${project.consultant || 'the consultant'}.
+
+The next step is to schedule the kick-off meeting with the client and consultant.
+
+${availabilityText}
+
+To schedule:
+• Confirm the date with ${project.consultant || 'the consultant'}
+• Send the meeting invite to ${project.clientContact || 'the client'} (${project.clientEmail || ''})
+• The kick-off agenda has been saved to the info@risk2solution.com Outlook drafts for your review
+
+Client contact: ${project.clientContact || 'See project record'}
+Client email: ${project.clientEmail || 'See project record'}
+Consultant: ${project.consultant || 'See project record'}
+
+Once the kick-off meeting is confirmed, update the project phase to Deployment in Aurora.
+
+${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}
+
+Aurora
+R2S Project Management Intelligence`,
     true
   );
+
+  console.log('[Kickoff] Prompt sent to Diane with availability and agenda');
+}
+
+// ── Client onboarding email ───────────────────────────────────────────────────
+async function draftClientOnboarding(project) {
+  try {
+    const context = buildContext(project);
+    const onboardingBody = await aurora('consultant_briefing',
+      `Write a professional client welcome and onboarding email from R2S to ${project.clientContact || 'the client'} at ${project.clientName}.
+
+FORMAT RULES:
+- Plain text only. No asterisks, no bold markdown, no long dashes.
+- Professional, warm, and human-centred tone.
+- Concise — this is a welcome email, not a report.
+
+Write the email starting with "Hi ${(project.clientContact || 'there').split(' ')[0]}," and covering:
+
+1. A warm welcome to the R2S engagement (1-2 sentences)
+
+2. Brief confirmation of what R2S will be delivering (1-2 sentences referencing the project scope)
+
+3. Your key R2S contacts:
+   Project managed by: Diane Kruger, Corporate Operations Lead
+   Email: diane.k@risk2solution.com | Phone: 1300 459 970
+   ${project.consultant ? 'Assigned consultant/trainer: ' + project.consultant : ''}
+
+4. What happens next (3 bullet points covering: kick-off meeting to be scheduled, scope and timeline to be confirmed, regular updates throughout)
+
+5. A note that Diane is available for any questions
+
+Sign off as:
+Kind regards,
+
+Diane Kruger
+Corporate Operations Lead
+Risk 2 Solution Group
+P: 1300 459 970 | M: +61 415 748 747
+E: diane.k@risk2solution.com
+W: www.risk2solution.com
+Queensland, Australia`,
+      context
+    );
+
+    const draft = {
+      id: `d_${Date.now()}_onboard`,
+      projectId: project.id, clientName: project.clientName,
+      projectName: project.projectName, type: 'client_onboarding',
+      urgency: 'routine', toName: project.clientContact,
+      toEmail: project.clientEmail,
+      subject: `Welcome to R2S — ${project.projectName || project.clientName}`,
+      body: onboardingBody, source: 'auto',
+    };
+    await db.saveDraft(draft);
+    await saveDraftEmail(draft);
+    console.log(`[Onboarding] Client welcome email drafted for ${project.clientName}`);
+  } catch (err) {
+    if (err.message === 'MONTHLY_CAP_REACHED') throw err;
+    console.error('[Onboarding] Draft failed:', err.message);
+  }
+}
+
+// ── Risk escalation drafter ───────────────────────────────────────────────────
+async function draftRiskEscalation(project, riskDescription) {
+  const DIANE = 'diane.k@risk2solution.com';
+  try {
+    const context = buildContext(project);
+
+    // Draft escalation email to client (for Diane to review — NOT auto-sent)
+    const escalationBody = await aurora('escalation_email',
+      `Write a professional risk escalation email from R2S to ${project.clientContact || 'the client'} at ${project.clientName}.
+
+FORMAT RULES:
+- Plain text only. No asterisks, no bold markdown, no long dashes.
+- Professional and measured tone — serious but not alarming.
+- Keep it factual and solution-focused.
+
+Risk description: ${riskDescription}
+Project: ${project.projectName || project.clientName}
+Current phase: ${PHASES[project.phase || 0]}
+
+Write starting with "Hi ${(project.clientContact || 'there').split(' ')[0]},"
+
+Cover:
+1. Reason for the escalation (clear and factual, 2-3 sentences)
+2. Current impact or risk to the project
+3. Proposed actions or next steps (bullet points)
+4. Request for a brief call or response to agree on the path forward
+
+Sign off as Diane Kruger with full signature.`,
+      context
+    );
+
+    const draft = {
+      id: `d_${Date.now()}_escalation`,
+      projectId: project.id, clientName: project.clientName,
+      projectName: project.projectName, type: 'escalation_email',
+      urgency: 'urgent', toName: project.clientContact,
+      toEmail: project.clientEmail,
+      subject: `Project Update — ${project.projectName || project.clientName} — Action Required`,
+      body: escalationBody, source: 'auto',
+    };
+    await db.saveDraft(draft);
+    await saveDraftEmail(draft);
+
+    // Also notify Diane internally
+    await sendEmail(DIANE,
+      `[Aurora] Risk escalation draft ready: ${project.clientName}`,
+      `Aurora has identified a risk on the ${project.clientName} project and drafted an escalation email for your review.
+
+Risk: ${riskDescription}
+Project: ${project.projectName || project.clientName}
+Phase: ${PHASES[project.phase || 0]}
+Client contact: ${project.clientContact || 'See project record'}
+
+The draft escalation email is waiting in the Comms Drafts section of Aurora and in the info@risk2solution.com Outlook shared mailbox drafts folder.
+
+Please review before sending.
+
+${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}
+
+Aurora
+R2S Project Management Intelligence`,
+      true
+    );
+    console.log(`[Escalation] Draft created for ${project.clientName}`);
+  } catch (err) {
+    if (err.message === 'MONTHLY_CAP_REACHED') throw err;
+    console.error('[Escalation] Draft failed:', err.message);
+  }
+}
+
+// ── Client satisfaction / feedback email (triggered on close-out) ─────────────
+async function draftClientFeedback(project) {
+  try {
+    const context = buildContext(project);
+    const feedbackBody = await aurora('status_email',
+      `Write a professional post-project feedback request email from R2S to ${project.clientContact || 'the client'} at ${project.clientName}.
+
+FORMAT RULES:
+- Plain text only. No asterisks, no markdown, no long dashes.
+- Warm, genuine, and brief.
+
+Write starting with "Hi ${(project.clientContact || 'there').split(' ')[0]},"
+
+Cover:
+1. Thank the client for the engagement (1-2 sentences)
+2. Brief note on what was delivered
+3. A genuine request for feedback — how did R2S perform, what could be improved, would they recommend R2S
+4. Optional: mention R2S would welcome the opportunity to continue supporting them
+5. Offer to arrange a brief debrief call if they would find it useful
+
+Sign off as Diane Kruger with full signature.`,
+      context
+    );
+
+    const draft = {
+      id: `d_${Date.now()}_feedback`,
+      projectId: project.id, clientName: project.clientName,
+      projectName: project.projectName, type: 'feedback_request',
+      urgency: 'routine', toName: project.clientContact,
+      toEmail: project.clientEmail,
+      subject: `Thank you — ${project.projectName || project.clientName} — Your feedback`,
+      body: feedbackBody, source: 'auto',
+    };
+    await db.saveDraft(draft);
+    await saveDraftEmail(draft);
+    console.log(`[Feedback] Draft created for ${project.clientName}`);
+  } catch (err) {
+    console.error('[Feedback] Draft failed:', err.message);
+  }
 }
 
 // Schedule: 6am AEST (UTC+10) = 8pm UTC
@@ -1049,6 +1586,8 @@ app.put('/api/projects/:id', express.json(), async (req, res) => {
           `[Aurora] Project closed: ${p.clientName}`,
           `The ${p.projectName || p.clientName} project has been marked complete.\n\nAurora has set 1-year and 2-year follow-up reminders in the Outlook calendar.\n\nAurora\nR2S Project Management Intelligence`
         );
+        // Draft client feedback email
+        try { await draftClientFeedback(p); } catch(e) { console.error('[Feedback]', e.message); }
       }
     }
     res.json({ project: updated });
@@ -1173,6 +1712,11 @@ app.post('/api/contracts/upload', upload.single('file'), async (req, res) => {
 
     // Don't auto-send briefing on upload — consultant is pre-filled but Diane confirms via dropdown
     // The briefingPrepared flag tells the UI which consultants were found so Diane can confirm
+    // Draft client onboarding email when project is first created
+    if (!req.body.projectId) {
+      try { await draftClientOnboarding(project); } catch(e) { console.error('[Onboarding]', e.message); }
+    }
+
     res.json({ project, extracted, briefingPrepared: false, suggestedConsultants: extracted.consultant ? extracted.consultant.split(/[,;&]+/).map(s => s.trim()).filter(Boolean) : [] });
   } catch (e) {
     if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
@@ -1374,6 +1918,45 @@ ${'='.repeat(60)}
     if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
     res.status(500).json({ error: e.message });
   }
+});
+
+// Suggestions
+app.get('/api/suggestions', async (req, res) => {
+  try {
+    const suggestions = await db.getSuggestions();
+    res.json({ suggestions });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/suggestions/generate', async (req, res) => {
+  try {
+    await generateSuggestions();
+    const suggestions = await db.getSuggestions();
+    res.json({ suggestions });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/suggestions/:id/approve', express.json(), async (req, res) => {
+  try {
+    const allSuggestions = await db.getSuggestions();
+    const allWithDismissed = await (async () => { try { return JSON.parse(require('fs').readFileSync(require('path').join(db.DATA,'suggestions.json'),'utf8')); } catch { return []; } })();
+    const suggestions = allWithDismissed;
+    const suggestion = suggestions.find(s => s.id === req.params.id);
+    if (!suggestion) return res.status(404).json({ error: 'Not found' });
+    await applySuggestion(suggestion);
+    await db.updateSuggestion(req.params.id, 'approved');
+    res.json({ success: true });
+  } catch (e) {
+    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/suggestions/:id/dismiss', async (req, res) => {
+  try {
+    await db.updateSuggestion(req.params.id, 'dismissed');
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Cost
