@@ -263,7 +263,7 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
         <div class="card" style="padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Due soon</div><div style="font-size:20px;font-family:var(--fs);font-weight:600" id="k-due">—</div><div style="font-size:10px;color:var(--amber);margin-top:2px">Within 14 days</div></div>
         <div class="card" style="padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Ongoing</div><div style="font-size:20px;font-family:var(--fs);font-weight:600" id="k-ongoing">—</div><div style="font-size:10px;color:var(--text3);margin-top:2px">Training delivery</div></div>
       </div>
-      <div class="ibanner">ℹ <div><strong style="display:block;margin-bottom:2px">Automated reminders active</strong>Aurora sends internal alerts to diane.k@risk2solution.com and info@risk2solution.com at 14, 7, and 3 days before each project due date. Client emails always require your approval.</div></div>
+      <div class="ibanner">ℹ <div><strong style="display:block;margin-bottom:2px">Aurora is always watching</strong>Inbox polled every hour 7am–7pm weekdays. Daily batch runs at 6am. Client emails always require your approval before sending. Internal alerts to diane.k@ are automatic.</div></div>
       <div class="sec">Quick actions</div>
       <div id="suggestions-banner" style="display:none;margin-bottom:12px"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -271,6 +271,7 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
         <div class="card" style="cursor:pointer" onclick="nav('comms',document.querySelector('[onclick*=comms]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--teal)">✉</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Comms drafts</div><div style="font-size:11px;color:var(--text2)">Review and approve Aurora's drafted emails.</div></div>
         <div class="card" style="cursor:pointer" onclick="nav('projects',document.querySelector('[onclick*=projects]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--blue)">💼</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">View projects</div><div style="font-size:11px;color:var(--text2)">See all projects, update phases, and manage status.</div></div>
         <div class="card" style="cursor:pointer" onclick="nav('ask',document.querySelector('[onclick*=ask]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--violet)">✦</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Ask Aurora</div><div style="font-size:11px;color:var(--text2)">Get a briefing, draft a report, or ask anything.</div></div>
+        <div class="card" style="cursor:pointer" onclick="triggerInboxCheck(this)"><div style="font-size:16px;margin-bottom:6px;color:var(--blue)" id="inbox-icon">✉</div><div style="font-size:12px;font-weight:500;margin-bottom:3px" id="inbox-label">Check inbox</div><div style="font-size:11px;color:var(--text2)" id="inbox-sub">Aurora polls info@ every hour 7am–7pm. Click to check now.</div></div>
       </div>
     </div>
 
@@ -1305,7 +1306,23 @@ async function rejectDraft(id) {
 // ── Documents ─────────────────────────────────────────────────────────────────
 async function renderDocs() {
   const data = await api('/api/documents');
-  const docs = data.documents || [];
+  const allDocs = data.documents || [];
+
+  // Filter — only show documents worth keeping (not raw contract uploads)
+  const keepTypes = ['session_report','signed_agreement','closeout_report','feedback','risk_register','quality_checklist'];
+  const docs = allDocs.filter(d => {
+    if (d.type && keepTypes.includes(d.type)) return true;
+    // Keep if manually uploaded (not auto-generated from contract extraction)
+    if (d.type === 'contract_extract') return false;
+    // Keep anything that isn't a raw contract
+    const name = (d.name||'').toLowerCase();
+    if (name.endsWith('.pdf') || name.endsWith('.docx') || name.endsWith('.doc')) {
+      // If it was auto-extracted (source = 'contract'), filter it out
+      if (d.source === 'contract') return false;
+    }
+    return true;
+  });
+
   let html = '';
   if (docs.length) {
     const grouped = {};
@@ -1320,15 +1337,26 @@ async function renderDocs() {
         </div>
         <div style="background:var(--card2);border:1px solid var(--border);border-radius:9px;overflow:hidden;padding-left:6px">`;
       items.forEach((d,i) => {
+        const typeLabel = { session_report:'Session report', signed_agreement:'Signed agreement', closeout_report:'Close-out report', feedback:'Client feedback', risk_register:'Risk register' }[d.type] || 'Document';
         html += `<div style="display:flex;align-items:center;gap:9px;padding:9px 12px;border-bottom:${i<items.length-1?'1px solid var(--border)':'none'};font-size:11px">
           <span style="font-size:14px">📄</span>
-          <span style="flex:1;color:var(--text)">${d.name}</span>
-          ${d.extract?'<span class="badge bt">Analysed</span>':'<span class="badge bg">Uploaded</span>'}
+          <div style="flex:1"><div style="color:var(--text)">${d.name}</div><div style="font-size:10px;color:var(--text3);margin-top:1px">${typeLabel}</div></div>
+          <span class="badge bt">Saved</span>
         </div>`;
       });
       html += '</div></div>';
     });
   }
+
+  if (!docs.length) {
+    html = `<div class="card" style="text-align:center;padding:20px;color:var(--text2)">
+      <div style="font-size:20px;margin-bottom:8px">📁</div>
+      <div style="font-size:12px;font-weight:500;margin-bottom:4px">No documents saved</div>
+      <div style="font-size:11px;color:var(--text3)">Session reports, signed agreements, and close-out reports will appear here once uploaded or generated.</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">Contract data is extracted automatically and the original file is deleted.</div>
+    </div>`;
+  }
+
   document.getElementById('docs-list').innerHTML = html;
 }
 
@@ -1611,6 +1639,8 @@ function delBadgeStyle(status) {
 async function loadDeliverables(projectId) {
   const el = document.getElementById('del-content-' + projectId);
   if (!el) return;
+  const token = sessionStorage.getItem('aurora_token');
+  if (!token) { el.innerHTML = '<div style="color:var(--rose);font-size:12px">Session expired — please log in again.</div>'; document.getElementById('login-screen').style.display='flex'; return; }
   el.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading…</div>';
 
   try {
@@ -1686,6 +1716,8 @@ function riskLevelClass(level) {
 async function loadRisks(projectId) {
   const el = document.getElementById('risk-content-' + projectId);
   if (!el) return;
+  const token = sessionStorage.getItem('aurora_token');
+  if (!token) { el.innerHTML = '<div style="color:var(--rose);font-size:12px">Session expired — please log in again.</div>'; document.getElementById('login-screen').style.display='flex'; return; }
   el.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading…</div>';
 
   try {
@@ -1768,6 +1800,32 @@ async function downloadRiskRegister(projectId) {
   const clientSel = document.getElementById('rep-client');
   if (clientSel && p) clientSel.value = p.clientName;
   generateReport('risks');
+}
+
+async function triggerInboxCheck(el) {
+  const label = document.getElementById('inbox-label');
+  const sub   = document.getElementById('inbox-sub');
+  const icon  = document.getElementById('inbox-icon');
+  if (label) label.textContent = 'Checking inbox…';
+  if (icon)  icon.textContent = '⟳';
+  el.style.opacity = '0.7';
+  try {
+    await api('/api/emails/read', { method: 'POST' });
+    if (label) label.textContent = '✓ Inbox checked';
+    if (sub)   sub.textContent = 'All new emails processed. Check Comms Drafts and Suggestions.';
+    if (icon)  icon.textContent = '✓';
+    el.style.opacity = '1';
+    setTimeout(() => {
+      if (label) label.textContent = 'Check inbox';
+      if (sub)   sub.textContent = 'Aurora polls info@ every hour 7am–7pm. Click to check now.';
+      if (icon)  icon.textContent = '✉';
+    }, 5000);
+    await loadSuggestions();
+    loadDrafts();
+  } catch(e) {
+    if (label) label.textContent = 'Error — try again';
+    el.style.opacity = '1';
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
