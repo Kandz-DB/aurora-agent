@@ -568,6 +568,29 @@ Ask the team to review the phase completion status, confirm all deliverables are
   }
 }
 
+// ── Ensure Outlook category exists ───────────────────────────────────────────
+async function ensureOutlookCategory(token, mailbox) {
+  try {
+    // Check if category already exists
+    const res = await axios.get(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/outlook/masterCategories`,
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
+    );
+    const exists = (res.data?.value || []).some(c => c.displayName === 'Aurora Processed');
+    if (!exists) {
+      // Create it with green colour
+      await axios.post(
+        `https://graph.microsoft.com/v1.0/users/${mailbox}/outlook/masterCategories`,
+        { displayName: 'Aurora Processed', color: 'preset5' }, // preset5 = green
+        { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 10000 }
+      );
+      console.log('[Category] Created "Aurora Processed" category in Outlook');
+    }
+  } catch (err) {
+    console.error('[Category] Could not create category:', err.response?.data?.error?.message || err.message);
+  }
+}
+
 // ── Create tentative calendar booking ────────────────────────────────────────
 async function createCalendarBooking(booking, tentative = true) {
   const token = await getOutlookToken();
@@ -690,6 +713,9 @@ async function readConsultantReplies() {
   const mailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
 
   try {
+    // Ensure the Aurora Processed category exists in Outlook
+    await ensureOutlookCategory(token, mailbox);
+
     // Get unread emails from last 24 hours (polling catches them quickly)
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
@@ -699,14 +725,15 @@ async function readConsultantReplies() {
 
     for (const folder of folders) {
       try {
-        const res = await axios.get(
-          `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${folder}/messages?$filter=receivedDateTime ge '${since}' and isRead eq false&$select=id,subject,from,toRecipients,body,receivedDateTime&$top=25`,
-          { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
-        );
+        // sentitems uses sentDateTime, inbox uses receivedDateTime
+        const dateField = folder === 'sentitems' ? 'sentDateTime' : 'receivedDateTime';
+        const url = `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${folder}/messages?$filter=${dateField} ge '${since}' and isRead eq false&$select=id,subject,from,toRecipients,body,receivedDateTime,sentDateTime&$top=25&$orderby=${dateField} desc`;
+        const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 });
         const msgs = (res.data?.value || []).map(m => ({ ...m, folder }));
         allMessages = allMessages.concat(msgs);
+        console.log(`[Poll] ${folder}: ${msgs.length} new email(s)`);
       } catch(folderErr) {
-        console.error(`[Poll] Error reading ${folder}:`, folderErr.message);
+        console.error(`[Poll] Error reading ${folder}:`, folderErr.response?.data?.error?.message || folderErr.message);
       }
     }
 
@@ -759,14 +786,14 @@ R2S Project Management Intelligence`,
             true
           );
         }
-        // Mark as read and continue
+        // Mark as read and tag
         try {
           await axios.patch(
             `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
-            { isRead: true },
+            { isRead: true, categories: ['Aurora Processed'] },
             { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
           );
-        } catch(e) {}
+        } catch(e) { console.error('[Poll] Tag failed:', e.message); }
         continue;
       }
 
@@ -887,12 +914,16 @@ R2S Project Management Intelligence`,
           console.error('[Calendar] Event detection failed:', calErr.message);
         }
 
-        // Mark email as read
-        await axios.patch(
-          `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
-          { isRead: true },
-          { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
-        );
+        // Mark as read and tag with Aurora Processed category
+        try {
+          await axios.patch(
+            `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
+            { isRead: true, categories: ['Aurora Processed'] },
+            { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+          );
+        } catch(patchErr) {
+          console.error('[Poll] Mark read/tag failed:', patchErr.message);
+        }
 
       } catch (err) {
         if (err.message === 'MONTHLY_CAP_REACHED') break;
@@ -2558,6 +2589,14 @@ app.post('/api/emails/read', async (req, res) => {
   try {
     await readConsultantReplies();
     res.json({ success: true, message: 'Inbox checked and processed' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Delete a document from the library
+app.delete('/api/documents/:id', async (req, res) => {
+  try {
+    await db.deleteDocument(req.params.id);
+    res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
