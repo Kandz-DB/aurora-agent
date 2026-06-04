@@ -230,6 +230,7 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <button class="btn btn-b btn-sm" onclick="pollNow(this)" style="font-size:11px">▶ Poll inbox now</button>
+    <button class="btn btn-g btn-sm" onclick="downloadBackup()" style="font-size:11px" title="Download all Aurora data as a backup file">⬇ Backup data</button>
   </div>
   <div class="pills">
     <div class="pill"><div class="dot" style="background:var(--teal)"></div>Projects</div>
@@ -1886,6 +1887,18 @@ async function downloadRiskRegister(projectId) {
   const clientSel = document.getElementById('rep-client');
   if (clientSel && p) clientSel.value = p.clientName;
   generateReport('risks');
+}
+
+async function downloadBackup() {
+  const token = sessionStorage.getItem('aurora_token') || '';
+  const res = await fetch('/api/backup', { headers: { 'Authorization': 'Bearer ' + token } });
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'aurora-backup-' + new Date().toISOString().slice(0,10) + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 async function pollNow(btn) {
