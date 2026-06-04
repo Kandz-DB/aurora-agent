@@ -33,7 +33,7 @@ async function initDB() {
     blobContainer = serviceClient.getContainerClient(containerName);
 
     // Create container if it doesn't exist
-    await blobContainer.createIfNotExists({ access: 'private' });
+    await blobContainer.createIfNotExists(); // private access by default
     console.log(`[DB] Azure Blob Storage ready — container: ${containerName}`);
   } catch (err) {
     console.error('[DB] Azure Blob init failed:', err.message);
