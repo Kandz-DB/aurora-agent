@@ -152,7 +152,6 @@ async function sendEmail(to, subject, body, isInternal = false, cc = []) {
         subject,
         body: { contentType: 'Text', content: body },
         toRecipients: toArray.map(addr => ({ emailAddress: { address: addr } })),
-        saveToSentItems: true,
       };
       if (ccArray.length > 0) {
         message.ccRecipients = ccArray.map(addr => ({ emailAddress: { address: addr } }));
@@ -823,10 +822,22 @@ From: ${fromEmail}
 Subject: ${subject}
 Content: ${bodyText.slice(0, 2000)}
 
-Return this exact JSON structure (no other text):
-{"phaseChange":false,"newPhase":${matchedProject.phase || 0},"newStatus":"","statusSummary":"summary here","completedDeliverables":[],"inProgressDeliverables":[],"invoiceTriggered":false,"invoiceNote":"","needsKickoffScheduling":false,"kickoffNote":"","hasBookableEvent":false,"eventDate":"","eventTime":"","eventType":"","eventTitle":"","eventDuration":60,"requiresAttention":false,"attentionReason":"","activityLogEntry":"summary of what happened"}
+PHASE CHANGE RULES — be proactive, not conservative:
+- If email says work is "commencing", "starting", "about to begin", "wanting to start" → move to Deployment (phase 1)
+- If email says work is "underway", "in progress", "delivering", "on site" → move to Deployment (phase 1)  
+- If email says report is "submitted", "sent to client", "delivered", "complete", "finalised" → move to Reporting (phase 3)
+- If email says "final report sent", "all deliverables complete", "wrapping up" → move to Close-out (phase 4)
+- If email says "waiting", "delayed", "on hold", "postponed" → set newStatus to "On Hold"
+- Only keep current phase if email has no project progress information
 
-Fill in the values based on the email content. phaseChange should be true only if the email clearly indicates the project has moved to a new phase. newPhase: 0=Kick-off, 1=Deployment, 2=Monitoring and Review, 3=Reporting, 4=Close-out.`,
+INVOICE RULES — trigger if any of these are mentioned:
+- Delivery of any training session or workshop
+- Submission of any report or deliverable
+- Project commencement (first milestone)
+- Project completion
+
+Return this exact JSON (no other text):
+{"phaseChange":false,"newPhase":${matchedProject.phase || 0},"newStatus":"","statusSummary":"summary here","completedDeliverables":[],"inProgressDeliverables":[],"invoiceTriggered":false,"invoiceNote":"","needsKickoffScheduling":false,"kickoffNote":"","hasBookableEvent":false,"eventDate":"","eventTime":"","eventType":"","eventTitle":"","eventDuration":60,"requiresAttention":false,"attentionReason":"","activityLogEntry":"summary of what happened"}`,
           buildContext(matchedProject)
         );
 
@@ -864,6 +875,19 @@ Fill in the values based on the email content. phaseChange should be true only i
           matchedProject.phase = parsed.newPhase;
           actions.push(`Phase updated: ${PHASES[parsed.newPhase - 1] || 'Kick-off'} → ${PHASES[parsed.newPhase]}`);
           console.log(`[Replies] Phase updated: ${matchedProject.clientName} → ${PHASES[parsed.newPhase]}`);
+          // Add suggestion so Diane can revert if Aurora got it wrong
+          await db.saveSuggestion({
+            id: `sug_phase_${matchedProject.id}_${Date.now()}`,
+            projectId: matchedProject.id,
+            clientName: matchedProject.clientName,
+            projectName: matchedProject.projectName,
+            type: 'phase_advance',
+            title: `Aurora moved ${matchedProject.clientName} to ${PHASES[parsed.newPhase]}`,
+            reason: `Based on an email from ${fromEmail}, Aurora automatically updated this project to ${PHASES[parsed.newPhase]}. Please confirm this is correct, or dismiss to revert.`,
+            action: { phase: parsed.newPhase },
+            confirmLabel: 'Confirmed — keep this phase',
+            dismissLabel: 'Revert to previous phase',
+          });
         }
 
         // ── 2. Update project status ──────────────────────────────────────────
@@ -2107,6 +2131,12 @@ app.put('/api/projects/:id', express.json(), async (req, res) => {
     if (req.body.status !== undefined && before && req.body.status !== before.status) {
       await db.logActivity(req.params.id, { type: 'status_change', summary: `Status updated to ${req.body.status} by Diane` });
     }
+    if (req.body.consultant !== undefined && before && req.body.consultant !== before.consultant) {
+      await db.logActivity(req.params.id, { type: 'consultant_assigned', summary: `Consultant/trainer updated to: ${req.body.consultant}` });
+    }
+    if (req.body.dueDate !== undefined && before && req.body.dueDate !== before.dueDate) {
+      await db.logActivity(req.params.id, { type: 'manual_note', summary: `Due date updated to: ${req.body.dueDate}` });
+    }
     // If phase changed to Close-out (4), set 1yr and 2yr follow-up reminders
     if (req.body.phase === 4 || req.body.status === 'Completed') {
       const p = await db.getProject(req.params.id);
@@ -2319,6 +2349,10 @@ ${rawText.slice(0, 2000)}`,
     // Draft client onboarding email when project is first created
     if (!req.body.projectId) {
       try { await draftClientOnboarding(project); } catch(e) { console.error('[Onboarding]', e.message); }
+      // Log project creation
+      await db.logActivity(projectId, { type: 'project_created', summary: `Project created from contract upload — ${project.clientName} ${project.projectName || ''}` });
+      if (project.consultant) await db.logActivity(projectId, { type: 'consultant_assigned', summary: `${project.consultant} identified as consultant/trainer from proposal` });
+      if (project.value) await db.logActivity(projectId, { type: 'contract', summary: `Contract value extracted: ${project.value}` });
     }
 
     res.json({ project, extracted, briefingPrepared: false, suggestedConsultants: extracted.consultant ? extracted.consultant.split(/[,;&]+/).map(s => s.trim()).filter(Boolean) : [] });
@@ -2372,6 +2406,13 @@ app.post('/api/drafts/:id/approve', async (req, res) => {
     const cc = draft.ccEmail ? [draft.ccEmail] : [];
     await sendEmail(draft.toEmail || INTERNAL_EMAILS[1], draft.subject, draft.body, false, cc);
     await db.updateDraft(req.params.id, { approved: true });
+
+    // Log the approval
+    if (draft.projectId) {
+      const typeLabels = { consultant_briefing: 'Consultant briefing email sent', client_onboarding: 'Client onboarding email sent', status_email: 'Client status update email sent', kickoff_agenda: 'Kick-off agenda sent', invoice_reminder: 'Invoice reminder email sent', escalation_email: 'Escalation email sent to client', feedback_request: 'Client feedback email sent', consultant_checkin: 'Consultant check-in email sent' };
+      const label = typeLabels[draft.type] || `${draft.type} email approved and sent`;
+      await db.logActivity(draft.projectId, { type: 'draft_sent', summary: `${label} to ${draft.toName || draft.toEmail}` });
+    }
 
     // If this was a consultant briefing, send kick-off meeting prompt to Diane
     if (draft.type === 'consultant_briefing' && draft.projectId) {
@@ -2661,8 +2702,53 @@ app.put('/api/projects/:id/deliverables/:delId', express.json(), async (req, res
 
 // ── Activity log ─────────────────────────────────────────────────────────────
 app.get('/api/projects/:id/activity', async (req, res) => {
-  try { res.json({ activity: await db.getActivityLog(req.params.id) }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    let activity = await db.getActivityLog(req.params.id);
+
+    // If empty, auto-generate historical log from project data
+    if (!activity.length) {
+      const project = await db.getProject(req.params.id);
+      if (project) {
+        const entries = [];
+        const base = project.createdAt || project.updatedAt || new Date().toISOString();
+
+        // Project created
+        entries.push({ type: 'project_created', summary: `Project created for ${project.clientName} — ${project.projectName || ''}`, timestamp: base });
+
+        // Consultant assigned
+        if (project.consultant) {
+          entries.push({ type: 'consultant_assigned', summary: `${project.consultant} assigned as consultant/trainer`, timestamp: base });
+        }
+
+        // Contract value
+        if (project.value) {
+          entries.push({ type: 'contract', summary: `Contract value: ${project.value}`, timestamp: base });
+        }
+
+        // Current phase
+        if (project.phase !== undefined) {
+          entries.push({ type: 'phase_change', summary: `Current phase: ${PHASES[project.phase || 0]}`, timestamp: project.updatedAt || base });
+        }
+
+        // Due date
+        if (project.dueDate) {
+          entries.push({ type: 'contract', summary: `Project due date: ${project.dueDate}`, timestamp: base });
+        }
+
+        // Flights/accommodation
+        if (project.flightsRequired === 'yes') entries.push({ type: 'manual_note', summary: 'Flights required for this engagement', timestamp: base });
+        if (project.accommodationRequired === 'yes') entries.push({ type: 'manual_note', summary: 'Accommodation required for this engagement', timestamp: base });
+
+        // Save these as the initial log
+        for (const e of entries.reverse()) {
+          await db.logActivity(req.params.id, { ...e, id: `act_${Date.now()}_${Math.random().toString(36).slice(2,5)}` });
+        }
+        activity = await db.getActivityLog(req.params.id);
+      }
+    }
+
+    res.json({ activity });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/projects/:id/activity', express.json(), async (req, res) => {
