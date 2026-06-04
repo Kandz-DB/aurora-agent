@@ -1310,56 +1310,74 @@ async function rejectDraft(id) {
 }
 
 // ── Documents ─────────────────────────────────────────────────────────────────
+async function deleteDoc(id) {
+  if (!confirm('Remove this document from the library?')) return;
+  await api('/api/documents/' + id, { method: 'DELETE' });
+  renderDocs();
+}
+
 async function renderDocs() {
   const data = await api('/api/documents');
   const allDocs = data.documents || [];
 
-  // Filter — only show documents worth keeping (not raw contract uploads)
-  const keepTypes = ['session_report','signed_agreement','closeout_report','feedback','risk_register','quality_checklist'];
-  const docs = allDocs.filter(d => {
-    if (d.type && keepTypes.includes(d.type)) return true;
-    // Keep if manually uploaded (not auto-generated from contract extraction)
-    if (d.type === 'contract_extract') return false;
-    // Keep anything that isn't a raw contract
-    const name = (d.name||'').toLowerCase();
-    if (name.endsWith('.pdf') || name.endsWith('.docx') || name.endsWith('.doc')) {
-      // If it was auto-extracted (source = 'contract'), filter it out
-      if (d.source === 'contract') return false;
-    }
-    return true;
-  });
+  // Show ALL documents but mark contract extracts clearly so Diane can dismiss them
+  // Contracts have type='contract_extract' or no type but were auto-uploaded
+  const isContractExtract = (d) => {
+    if (d.type === 'contract_extract') return true;
+    if (d.source === 'contract') return true;
+    // Heuristic — if it has an extract field it was auto-processed from a contract
+    if (d.extract && d.extract.length > 100 && !d.type) return true;
+    return false;
+  };
+
+  const typeLabel = (d) => {
+    const labels = { session_report:'Session report', signed_agreement:'Signed agreement', closeout_report:'Close-out report', feedback:'Client feedback', risk_register:'Risk register', quality_checklist:'Quality checklist', contract_extract:'Contract extract (auto)' };
+    return labels[d.type] || (isContractExtract(d) ? 'Contract extract (auto)' : 'Document');
+  };
 
   let html = '';
-  if (docs.length) {
+
+  if (allDocs.length) {
     const grouped = {};
-    docs.forEach(d => { if (!grouped[d.project_id||d.projectId]) grouped[d.project_id||d.projectId] = []; grouped[d.project_id||d.projectId].push(d); });
+    allDocs.forEach(d => {
+      const key = d.project_id || d.projectId || 'general';
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(d);
+    });
+
     Object.entries(grouped).forEach(([pid, items]) => {
       const p = projects.find(x => x.id === pid);
-      const name = p ? `${p.clientName} · ${p.projectName||p.clientName}` : pid;
+      const name = p ? `${p.clientName} · ${p.projectName||p.clientName}` : (pid === 'general' ? 'General' : pid);
       html += `<div style="margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:6px">
           <div style="width:26px;height:26px;border-radius:6px;background:rgba(0,232,187,.12);color:var(--teal);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${ini(name)}</div>
           <div style="flex:1;font-size:12px;font-weight:500">${name}</div>
+          <span class="badge bg">${items.length} file${items.length!==1?'s':''}</span>
         </div>
-        <div style="background:var(--card2);border:1px solid var(--border);border-radius:9px;overflow:hidden;padding-left:6px">`;
+        <div style="background:var(--card2);border:1px solid var(--border);border-radius:9px;overflow:hidden">`;
       items.forEach((d,i) => {
-        const typeLabel = { session_report:'Session report', signed_agreement:'Signed agreement', closeout_report:'Close-out report', feedback:'Client feedback', risk_register:'Risk register' }[d.type] || 'Document';
-        html += `<div style="display:flex;align-items:center;gap:9px;padding:9px 12px;border-bottom:${i<items.length-1?'1px solid var(--border)':'none'};font-size:11px">
-          <span style="font-size:14px">📄</span>
-          <div style="flex:1"><div style="color:var(--text)">${d.name}</div><div style="font-size:10px;color:var(--text3);margin-top:1px">${typeLabel}</div></div>
-          <span class="badge bt">Saved</span>
+        const isContract = isContractExtract(d);
+        const lbl = typeLabel(d);
+        html += `<div style="display:flex;align-items:center;gap:9px;padding:9px 12px;border-bottom:${i<items.length-1?'1px solid var(--border)':'none'};font-size:11px;${isContract?'opacity:.75':''}">
+          <span style="font-size:14px">${isContract?'🗂':'📄'}</span>
+          <div style="flex:1">
+            <div style="color:var(--text)">${d.name}</div>
+            <div style="font-size:10px;color:${isContract?'var(--text3)':'var(--teal)'};margin-top:1px">${lbl}</div>
+          </div>
+          ${isContract ? '<span class="badge bg" style="font-size:9px">Extracted</span>' : '<span class="badge bt">Saved</span>'}
+          <button onclick="deleteDoc('${d.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:0 4px" title="Remove from library">✕</button>
         </div>`;
       });
       html += '</div></div>';
     });
   }
 
-  if (!docs.length) {
+  if (!allDocs.length) {
     html = `<div class="card" style="text-align:center;padding:20px;color:var(--text2)">
       <div style="font-size:20px;margin-bottom:8px">📁</div>
       <div style="font-size:12px;font-weight:500;margin-bottom:4px">No documents saved</div>
-      <div style="font-size:11px;color:var(--text3)">Session reports, signed agreements, and close-out reports will appear here once uploaded or generated.</div>
-      <div style="font-size:11px;color:var(--text3);margin-top:4px">Contract data is extracted automatically and the original file is deleted.</div>
+      <div style="font-size:11px;color:var(--text3)">Session reports, signed agreements, and close-out reports will appear here.</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">Contract data is extracted and stored — the original file is deleted to save space.</div>
     </div>`;
   }
 
