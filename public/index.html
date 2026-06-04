@@ -1916,51 +1916,76 @@ function activityIcon(type) {
   return map[type] || '•';
 }
 
+function buildActivityFromProject(p) {
+  // Build a starting activity log from project data already loaded in browser
+  const entries = [];
+  const base = p.createdAt || p.updatedAt || new Date().toISOString();
+  if (p.clientName) entries.push({ type:'project_created', summary:`Project created — ${p.clientName}${p.projectName?': '+p.projectName:''}`, timestamp: base });
+  if (p.consultant) entries.push({ type:'consultant_assigned', summary:`${p.consultant} assigned as consultant/trainer`, timestamp: base });
+  if (p.value) entries.push({ type:'contract', summary:`Contract value: ${p.value}`, timestamp: base });
+  if (p.contractStart) entries.push({ type:'contract', summary:`Contract start date: ${p.contractStart}`, timestamp: base });
+  if (p.dueDate) entries.push({ type:'contract', summary:`Project due date: ${p.dueDate}`, timestamp: base });
+  if (p.phase !== undefined) entries.push({ type:'phase_change', summary:`Current phase: ${PHASES[p.phase||0]}`, timestamp: p.updatedAt || base });
+  if (p.flightsRequired === 'yes') entries.push({ type:'manual_note', summary:'Flights required for this engagement', timestamp: base });
+  if (p.accommodationRequired === 'yes') entries.push({ type:'manual_note', summary:'Accommodation required for this engagement', timestamp: base });
+  if (p.invoicingNotes) entries.push({ type:'contract', summary:`Invoicing terms: ${p.invoicingNotes.slice(0,100)}${p.invoicingNotes.length>100?'…':''}`, timestamp: base });
+  return entries.reverse(); // chronological order
+}
+
 async function loadActivity(projectId) {
   const el = document.getElementById('activity-content-' + projectId);
   if (!el) return;
   el.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading activity log…</div>';
+
+  let items = [];
   try {
     const data = await api('/api/projects/' + projectId + '/activity');
-    const items = data.activity || [];
-
-    let html = '<div style="padding:4px 0">';
-
-    if (items.length) {
-      items.forEach(item => {
-        const date = new Date(item.timestamp);
-        const dateStr = date.toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' });
-        const timeStr = date.toLocaleTimeString('en-AU', { hour:'numeric', minute:'2-digit', hour12:true });
-        const actionsHtml = item.actions?.length
-          ? '<div class="activity-actions">' + item.actions.map(a => '• ' + a).join('<br>') + '</div>'
-          : '';
-        html += `<div class="activity-item">
-          <div><div class="activity-dot ${activityDotClass(item.type)}"></div></div>
-          <div class="activity-body">
-            <div class="activity-summary">${activityIcon(item.type)} ${item.summary || item.type}</div>
-            ${item.source && item.source !== 'Diane' ? `<div style="font-size:10px;color:var(--text3)">Source: ${item.source}</div>` : ''}
-            ${actionsHtml}
-            <div class="activity-time">${dateStr}${timeStr ? ' at ' + timeStr : ''}</div>
-          </div>
-        </div>`;
-      });
-    } else {
-      html += '<div style="color:var(--text3);font-size:12px;padding:12px 0">No activity recorded yet.</div>';
-    }
-
-    html += '</div>';
-    html += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-      <div style="font-size:11px;color:var(--text2);margin-bottom:6px">Add a note</div>
-      <div style="display:flex;gap:6px">
-        <input id="activity-note-${projectId}" placeholder="e.g. Spoke with client — confirmed delivery date" style="flex:1;font-size:12px"/>
-        <button class="btn btn-t btn-sm" onclick="addActivityNote('${projectId}')">+ Add</button>
-      </div>
-    </div>`;
-
-    el.innerHTML = html;
+    items = data.activity || [];
   } catch(e) {
-    el.innerHTML = '<div style="color:var(--rose);font-size:12px">Error loading activity log: ' + e.message + '</div>';
+    console.error('Activity API error:', e.message);
   }
+
+  // If server returned nothing, build from project data in browser
+  if (!items.length) {
+    const p = projects.find(x => x.id === projectId);
+    if (p) items = buildActivityFromProject(p);
+  }
+
+  let html = '<div style="padding:4px 0">';
+
+  if (items.length) {
+    items.forEach(item => {
+      const date = new Date(item.timestamp);
+      const isValidDate = !isNaN(date.getTime());
+      const dateStr = isValidDate ? date.toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' }) : '';
+      const timeStr = isValidDate ? date.toLocaleTimeString('en-AU', { hour:'numeric', minute:'2-digit', hour12:true }) : '';
+      const actionsHtml = item.actions?.length
+        ? '<div class="activity-actions">' + item.actions.map(a => '• ' + a).join('<br>') + '</div>'
+        : '';
+      html += `<div class="activity-item">
+        <div><div class="activity-dot ${activityDotClass(item.type)}"></div></div>
+        <div class="activity-body">
+          <div class="activity-summary">${activityIcon(item.type)} ${item.summary || item.type}</div>
+          ${item.source && item.source !== 'Diane' ? `<div style="font-size:10px;color:var(--text3)">Source: ${item.source}</div>` : ''}
+          ${actionsHtml}
+          ${dateStr ? `<div class="activity-time">${dateStr}${timeStr ? ' at ' + timeStr : ''}</div>` : ''}
+        </div>
+      </div>`;
+    });
+  } else {
+    html += '<div style="color:var(--text3);font-size:12px;padding:12px 0">No activity recorded yet. Add a note below or wait for Aurora to log an email or phase change.</div>';
+  }
+
+  html += '</div>';
+  html += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+    <div style="font-size:11px;color:var(--text2);margin-bottom:6px">Add a note</div>
+    <div style="display:flex;gap:6px">
+      <input id="activity-note-${projectId}" placeholder="e.g. Spoke with client — confirmed delivery date" style="flex:1;font-size:12px"/>
+      <button class="btn btn-t btn-sm" onclick="addActivityNote('${projectId}')">+ Add</button>
+    </div>
+  </div>`;
+
+  el.innerHTML = html;
 }
 
 async function addActivityNote(projectId) {
