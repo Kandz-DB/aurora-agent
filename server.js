@@ -725,14 +725,19 @@ async function readConsultantReplies() {
 
     for (const folder of folders) {
       try {
-        // sentitems uses sentDateTime, inbox uses receivedDateTime
-        const dateField = folder === 'sentitems' ? 'sentDateTime' : 'receivedDateTime';
-        const sinceFormatted = since.replace(/\.\d+Z$/, 'Z'); // ensure clean ISO format
-        const url = `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${folder}/messages?$filter=${dateField} ge ${sinceFormatted}&$select=id,subject,from,toRecipients,body,receivedDateTime,sentDateTime&$top=25&$orderby=${dateField} desc`;
+        // Get recent messages — use $top and $orderby, filter in code to avoid OData date type issues
+        const url = `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${folder}/messages?$select=id,subject,from,toRecipients,body,receivedDateTime,sentDateTime,isRead&$top=50&$orderby=receivedDateTime desc`;
         const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 });
-        const msgs = (res.data?.value || []).map(m => ({ ...m, folder }));
+        const sinceDate = new Date(since);
+        const msgs = (res.data?.value || [])
+          .filter(m => {
+            if (m.isRead) return false; // skip already read
+            const msgDate = new Date(m.receivedDateTime || m.sentDateTime || 0);
+            return msgDate >= sinceDate;
+          })
+          .map(m => ({ ...m, folder }));
         allMessages = allMessages.concat(msgs);
-        console.log(`[Poll] ${folder}: ${msgs.length} new email(s)`);
+        console.log(`[Poll] ${folder}: ${msgs.length} new unread email(s) in last 24hrs`);
       } catch(folderErr) {
         console.error(`[Poll] Error reading ${folder}:`, folderErr.response?.data?.error?.message || folderErr.message);
       }
