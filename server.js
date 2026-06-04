@@ -41,9 +41,12 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 app.use('/api', (req, res, next) => {
-  if (req.path === '/auth/login') return next();
+  // Public endpoints — no auth required
+  const publicPaths = ['/auth/login', '/health'];
+  if (publicPaths.some(p => req.path === p || req.path.startsWith(p))) return next();
+
   const authHeader = req.headers['authorization'] || '';
-  const token = authHeader.replace('Bearer ', '');
+  const token = authHeader.replace('Bearer ', '').trim();
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
   try {
     const decoded = Buffer.from(token, 'base64').toString('utf8');
@@ -568,40 +571,89 @@ Ask the team to review the phase completion status, confirm all deliverables are
 // ── Read consultant reply emails from info@ inbox ─────────────────────────────
 async function readConsultantReplies() {
   const token = await getOutlookToken();
-  if (!token) return;
+  if (!token) { console.log('[Poll] No Outlook token — skipping'); return; }
   const mailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
 
   try {
-    // Get unread emails from last 7 days in inbox
-    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const res = await axios.get(
-      `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/inbox/messages?$filter=receivedDateTime ge ${since} and isRead eq false&$select=id,subject,from,body,receivedDateTime&$top=20`,
-      { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
-    );
+    // Get unread emails from last 24 hours (polling catches them quickly)
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-    const messages = res.data?.value || [];
+    // Check both inbox and sent items
+    const folders = ['inbox', 'sentitems'];
+    let allMessages = [];
+
+    for (const folder of folders) {
+      try {
+        const res = await axios.get(
+          `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${folder}/messages?$filter=receivedDateTime ge '${since}' and isRead eq false&$select=id,subject,from,toRecipients,body,receivedDateTime&$top=25`,
+          { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
+        );
+        const msgs = (res.data?.value || []).map(m => ({ ...m, folder }));
+        allMessages = allMessages.concat(msgs);
+      } catch(folderErr) {
+        console.error(`[Poll] Error reading ${folder}:`, folderErr.message);
+      }
+    }
+
+    if (!allMessages.length) { console.log('[Poll] No new emails'); return; }
+    console.log(`[Poll] Processing ${allMessages.length} new email(s)`);
+
     const projects = await db.getProjects();
-    const CONSULTANT_EMAILS = ['dave.c@risk2solution.com','info@risk2solution.com'];
-    // All known consultant/trainer email domains (expand as needed)
+    // Accept emails from any R2S staff, consultants, or forwarded from R2S addresses
     const isFromConsultant = (email) => email && (
-      email.endsWith('@risk2solution.com') ||
-      CONSULTANT_EMAILS.includes(email.toLowerCase())
+      email.toLowerCase().endsWith('@risk2solution.com') ||
+      email.toLowerCase().endsWith('@presilience.com')
     );
 
-    for (const msg of messages) {
+    for (const msg of allMessages) {
       const fromEmail = msg.from?.emailAddress?.address || '';
       if (!isFromConsultant(fromEmail)) continue;
 
       const subject = msg.subject || '';
       const bodyText = msg.body?.content?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 3000) || '';
 
-      // Find matching project by subject line
+      // Find matching project by subject or body content
+      const bodyLower = bodyText.toLowerCase();
+      const subjectLower = subject.toLowerCase();
       const matchedProject = projects.find(p =>
-        p.type === 'standard' &&
-        (subject.toLowerCase().includes((p.clientName || '').toLowerCase()) ||
-         subject.toLowerCase().includes((p.projectName || '').toLowerCase().slice(0, 15)))
+        p.type === 'standard' && p.clientName && (
+          subjectLower.includes(p.clientName.toLowerCase()) ||
+          subjectLower.includes((p.projectName || '').toLowerCase().slice(0, 12)) ||
+          bodyLower.includes(p.clientName.toLowerCase()) ||
+          bodyLower.includes((p.projectName || '').toLowerCase().slice(0, 12))
+        )
       );
-      if (!matchedProject) continue;
+
+      // If no specific project match, send general update to Diane
+      if (!matchedProject) {
+        // Still notify Diane of any R2S staff email with project content
+        if (bodyText.length > 100) {
+          await sendEmail('diane.k@risk2solution.com',
+            `[Aurora] R2S staff update received: ${subject}`,
+            `Aurora received an email from ${fromEmail} that may contain project updates.
+
+Subject: ${subject}
+
+Summary:
+${bodyText.slice(0, 800)}
+
+Please review and update Aurora project records as needed.
+
+Aurora
+R2S Project Management Intelligence`,
+            true
+          );
+        }
+        // Mark as read and continue
+        try {
+          await axios.patch(
+            `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
+            { isRead: true },
+            { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+          );
+        } catch(e) {}
+        continue;
+      }
 
       // Ask Aurora to analyse the reply and determine if phase should change
       try {
@@ -1211,6 +1263,8 @@ R2S Project Management Intelligence`,
   // ── 2. Due date reminders ─────────────────────────────────────────────────
   await checkDueDateReminders();
 
+  // Email polling runs on its own hourly schedule — not in the daily batch
+
   // ── 3. Check for stuck phases + monitor risks ───────────────────────────────
   try { await monitorRisks(standard); } catch(e) { console.error('[Risks]', e.message); }
   // ── 3. Check for stuck phases ─────────────────────────────────────────────
@@ -1676,8 +1730,22 @@ Sign off as Diane Kruger with full signature.`,
   }
 }
 
-// Schedule: 6am AEST (UTC+10) = 8pm UTC
+// ── Cron schedules ───────────────────────────────────────────────────────────
+
+// Daily batch: 6am AEST (UTC+10) = 8pm UTC previous day
 cron.schedule('0 20 * * *', () => runBatch().catch(console.error), { timezone: 'UTC' });
+
+// Email polling: every hour from 7am to 7pm AEST (9pm to 9am UTC)
+// AEST is UTC+10, so 7am AEST = 9pm UTC previous day, 7pm AEST = 9am UTC
+// Run every hour: 21,22,23,0,1,2,3,4,5,6,7,8,9 UTC = 7am-7pm AEST
+cron.schedule('0 21-23,0-9 * * *', async () => {
+  const now = new Date();
+  const dayOfWeek = now.getDay();
+  const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
+  if (!isWeekday) return; // weekdays only
+  console.log('[Poll] Checking inbox...');
+  try { await readConsultantReplies(); } catch(e) { console.error('[Poll] Error:', e.message); }
+}, { timezone: 'UTC' });
 
 // ── API Routes ────────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Aurora R2S v3', db: !!process.env.DATABASE_URL ? 'postgres' : 'json' }));
@@ -2218,6 +2286,13 @@ app.get('/api/cost', async (req, res) => {
 app.post('/api/batch', async (req, res) => {
   try { await runBatch(); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/emails/read', async (req, res) => {
+  try {
+    await readConsultantReplies();
+    res.json({ success: true, message: 'Inbox checked and processed' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/reminders/check', async (req, res) => {
