@@ -568,6 +568,121 @@ Ask the team to review the phase completion status, confirm all deliverables are
   }
 }
 
+// ── Create tentative calendar booking ────────────────────────────────────────
+async function createCalendarBooking(booking, tentative = true) {
+  const token = await getOutlookToken();
+  if (!token) { console.log('[Calendar] No token — booking logged only'); return null; }
+  const mailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+
+  try {
+    const start = new Date(booking.startDateTime);
+    const end   = new Date(start.getTime() + (booking.durationMinutes || 60) * 60 * 1000);
+
+    // Build attendee list
+    const attendees = [];
+    if (booking.consultantEmail) attendees.push({ emailAddress: { address: booking.consultantEmail, name: booking.consultantName || booking.consultantEmail }, type: 'required' });
+    if (booking.clientEmail)     attendees.push({ emailAddress: { address: booking.clientEmail, name: booking.clientName || booking.clientEmail }, type: 'required' });
+    attendees.push({ emailAddress: { address: 'diane.k@risk2solution.com', name: 'Diane Kruger' }, type: 'required' });
+
+    const event = {
+      subject: booking.title,
+      body: { contentType: 'Text', content: booking.description || '' },
+      start: { dateTime: start.toISOString(), timeZone: 'Australia/Brisbane' },
+      end:   { dateTime: end.toISOString(),   timeZone: 'Australia/Brisbane' },
+      location: { displayName: booking.location || booking.clientName || 'To be confirmed' },
+      attendees,
+      showAs: tentative ? 'tentative' : 'busy',
+      isOnlineMeeting: booking.online || false,
+      isReminderOn: true,
+      reminderMinutesBeforeStart: 60 * 24, // 24hr reminder
+    };
+
+    const res = await axios.post(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/calendars`,
+      null,
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 5000 }
+    );
+
+    // Find the training calendar
+    const calsRes = await axios.get(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/calendars`,
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
+    );
+    const trainingCal = calsRes.data?.value?.find(c =>
+      c.name?.toLowerCase().includes('training') || c.name?.toLowerCase().includes('education')
+    );
+    const calId = trainingCal?.id || 'primary';
+
+    // Create the event
+    const eventRes = await axios.post(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/calendars/${calId}/events`,
+      event,
+      { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+    );
+
+    console.log(`[Calendar] ${tentative ? 'Tentative' : 'Confirmed'} booking created: ${booking.title}`);
+    return eventRes.data?.id;
+  } catch (err) {
+    console.error('[Calendar] Booking failed:', err.response?.data?.error?.message || err.message);
+    return null;
+  }
+}
+
+// ── Send meeting invites via Outlook ─────────────────────────────────────────
+async function sendMeetingInvite(booking, eventId) {
+  const token = await getOutlookToken();
+  if (!token || !eventId) return;
+  const mailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+
+  try {
+    // Confirm the tentative event (changes showAs to 'busy' and sends invites)
+    await axios.patch(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/events/${eventId}`,
+      { showAs: 'busy' },
+      { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 10000 }
+    );
+    console.log(`[Calendar] Meeting invites sent for: ${booking.title}`);
+  } catch (err) {
+    console.error('[Calendar] Send invite failed:', err.message);
+  }
+}
+
+// ── Extract calendar event from email body ────────────────────────────────────
+async function extractCalendarEventFromEmail(emailBody, emailSubject, project) {
+  try {
+    const analysis = await aurora('status_email',
+      `Analyse this email to determine if it mentions a specific date and time for a meeting, training session, workshop, or face-to-face deliverable related to the project.
+
+Project: ${project.projectName || project.clientName}
+Client: ${project.clientName}
+Email subject: ${emailSubject}
+Email content: ${emailBody.slice(0, 2000)}
+
+Respond in JSON only:
+{
+  "hasEvent": true or false,
+  "eventType": "training" or "workshop" or "meeting" or "site_visit" or "presentation" or "other",
+  "title": "short event title",
+  "date": "YYYY-MM-DD or empty string if not found",
+  "time": "HH:MM in 24hr format or empty string",
+  "durationMinutes": 60,
+  "location": "location mentioned or empty string",
+  "description": "brief description of what this event is for",
+  "requiresConsultant": true or false,
+  "requiresClient": true or false
+}
+
+Return ONLY the JSON. If no specific date is mentioned, set hasEvent to false.`,
+      null
+    );
+
+    const clean = analysis.replace(/```json|```/g, '').trim();
+    return JSON.parse(clean);
+  } catch (err) {
+    return { hasEvent: false };
+  }
+}
+
 // ── Read consultant reply emails from info@ inbox ─────────────────────────────
 async function readConsultantReplies() {
   const token = await getOutlookToken();
@@ -705,6 +820,72 @@ Aurora
 R2S Project Management Intelligence`,
           true
         );
+
+        // Check if email mentions a bookable event (training, workshop, meeting etc.)
+        try {
+          const eventData = await extractCalendarEventFromEmail(bodyText, subject, matchedProject);
+          if (eventData.hasEvent && eventData.date) {
+            const startDateTime = `${eventData.date}T${eventData.time || '09:00'}:00`;
+            const booking = {
+              title: eventData.title || `${eventData.eventType} — ${matchedProject.clientName}`,
+              description: `${eventData.description || ''}
+
+Source: Email from ${fromEmail}
+Project: ${matchedProject.projectName || matchedProject.clientName}`,
+              startDateTime,
+              durationMinutes: eventData.durationMinutes || 60,
+              location: eventData.location || matchedProject.clientName,
+              clientName: matchedProject.clientName,
+              clientEmail: eventData.requiresClient ? matchedProject.clientEmail : null,
+              consultantName: matchedProject.consultant,
+              consultantEmail: eventData.requiresConsultant ? (matchedProject.consultantEmail || 'info@risk2solution.com') : null,
+              projectId: matchedProject.id,
+            };
+
+            // Create tentative booking in calendar
+            const eventId = await createCalendarBooking(booking, true);
+
+            // Add to suggestions for Diane to approve
+            if (eventId) {
+              await db.saveSuggestion({
+                id: `sug_cal_${matchedProject.id}_${Date.now()}`,
+                projectId: matchedProject.id,
+                clientName: matchedProject.clientName,
+                projectName: matchedProject.projectName,
+                type: 'schedule_kickoff',
+                title: `Tentative booking: ${booking.title}`,
+                reason: `Aurora detected a scheduled ${eventData.eventType} in an email from ${fromEmail} on ${eventData.date}. A tentative booking has been created in the R2S Training & Education calendar. Approve to send meeting invites to all attendees.`,
+                action: { calendarEventId: eventId, booking },
+                confirmLabel: 'Confirm & send invites',
+                dismissLabel: 'Cancel tentative booking',
+              });
+
+              await sendEmail('diane.k@risk2solution.com',
+                `[Aurora] Tentative booking created: ${booking.title}`,
+                `Aurora detected a scheduled event in an email and has created a tentative booking in the R2S Training & Education calendar.
+
+Event: ${booking.title}
+Date: ${eventData.date}
+Time: ${eventData.time || '9:00am'}
+Duration: ${eventData.durationMinutes || 60} minutes
+Location: ${eventData.location || 'TBC'}
+
+Attendees:\n${matchedProject.consultant ? '• ' + matchedProject.consultant + ' (consultant)\n' : ''}${matchedProject.clientContact ? '• ' + matchedProject.clientContact + ' (client)\n' : ''}• Diane Kruger
+
+Please review in Aurora Suggestions and click Confirm to send meeting invites, or Dismiss to cancel the tentative booking.
+
+${process.env.FRONTEND_URL || ''}
+
+Aurora
+R2S Project Management Intelligence`,
+                true
+              );
+              console.log(`[Calendar] Tentative booking created and suggestion added for ${matchedProject.clientName}`);
+            }
+          }
+        } catch (calErr) {
+          console.error('[Calendar] Event detection failed:', calErr.message);
+        }
 
         // Mark email as read
         await axios.patch(
@@ -1056,6 +1237,23 @@ R2S Project Management Intelligence`
   // If suggestion was to draft an escalation
   if (suggestion.action?.draftEscalation) {
     await draftRiskEscalation(project, suggestion.action.riskDescription || 'Risk identified by Aurora');
+  }
+
+  // If suggestion was a calendar booking confirmation
+  if (suggestion.action?.calendarEventId) {
+    await sendMeetingInvite(suggestion.action.booking, suggestion.action.calendarEventId);
+    // Notify Diane that invites were sent
+    await sendEmail('diane.k@risk2solution.com',
+      `[Aurora] Meeting invites sent: ${suggestion.action.booking?.title || 'Event'}`,
+      `Meeting invites have been sent to all attendees for:
+
+${suggestion.action.booking?.title || 'Event'}
+Date: ${suggestion.action.booking?.startDateTime?.slice(0,10) || 'TBC'}
+
+Aurora
+R2S Project Management Intelligence`,
+      true
+    );
   }
 
   // If suggestion was to draft an email
@@ -2286,6 +2484,74 @@ app.get('/api/cost', async (req, res) => {
 app.post('/api/batch', async (req, res) => {
   try { await runBatch(); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Manual calendar booking from deliverable tile
+app.post('/api/projects/:id/deliverables/:delId/book', express.json(), async (req, res) => {
+  try {
+    const project = await db.getProject(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const { date, time, durationMinutes, title, location, online } = req.body;
+    if (!date || !time) return res.status(400).json({ error: 'Date and time are required' });
+
+    const deliverables = await db.getDeliverables(req.params.id);
+    const del = deliverables.find(d => d.id === req.params.delId);
+
+    const booking = {
+      title: title || (del ? del.name : 'Meeting') + ` — ${project.clientName}`,
+      description: del ? `Deliverable: ${del.name}
+Project: ${project.projectName || project.clientName}
+Client: ${project.clientName}` : '',
+      startDateTime: `${date}T${time}:00`,
+      durationMinutes: parseInt(durationMinutes) || 60,
+      location: location || project.clientName,
+      online: online || false,
+      clientName: project.clientName,
+      clientEmail: project.clientEmail,
+      consultantName: project.consultant,
+      consultantEmail: project.consultantEmail || 'info@risk2solution.com',
+      projectId: project.id,
+    };
+
+    // Create confirmed booking (not tentative — Diane is manually scheduling this)
+    const eventId = await createCalendarBooking(booking, false);
+    if (!eventId) return res.status(500).json({ error: 'Calendar booking failed — check Outlook connection' });
+
+    // Send meeting invites immediately
+    await sendMeetingInvite(booking, eventId);
+
+    // Update deliverable status
+    if (del) {
+      await db.updateDeliverable(req.params.id, req.params.delId, {
+        status: 'In Progress',
+        calendarEvent: booking.title,
+        calendarDate: date,
+      });
+    }
+
+    // Notify Diane
+    await sendEmail('diane.k@risk2solution.com',
+      `[Aurora] Meeting booked: ${booking.title}`,
+      `A meeting has been booked in the R2S Training & Education calendar and invites sent.
+
+Event: ${booking.title}
+Date: ${date}
+Time: ${time}
+Duration: ${durationMinutes || 60} minutes
+Location: ${location || 'TBC'}
+${online ? 'Format: Online\n' : ''}Attendees:\n${project.consultant ? '• ' + project.consultant + '\n' : ''}${project.clientContact ? '• ' + project.clientContact + ' (' + project.clientName + ')\n' : ''}• Diane Kruger
+
+Aurora
+R2S Project Management Intelligence`,
+      true
+    );
+
+    res.json({ success: true, eventId, booking });
+  } catch (e) {
+    console.error('[Booking]', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/emails/read', async (req, res) => {
