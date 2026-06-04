@@ -298,3 +298,13 @@ module.exports.updateRisk         = updateRisk;
 module.exports.getDeliverables    = getDeliverables;
 module.exports.saveDeliverables   = saveDeliverables;
 module.exports.updateDeliverable  = updateDeliverable;
+
+// ── Delete document ───────────────────────────────────────────────────────────
+async function deleteDocument(id) {
+  const docs = await read('documents.json', []);
+  const filtered = docs.filter(d => d.id !== id);
+  await write('documents.json', filtered);
+  return filtered;
+}
+
+module.exports.deleteDocument = deleteDocument;
