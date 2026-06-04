@@ -803,82 +803,166 @@ R2S Project Management Intelligence`,
         continue;
       }
 
-      // Ask Aurora to analyse the reply and determine if phase should change
+      // Full autonomous analysis — extract ALL actionable information from the email
       try {
-        const analysis = await aurora('status_email',
-          `You are analysing a reply email from a consultant/trainer to determine if it indicates a project phase change or status update.
+        const analysis = await aurora('consultant_briefing',
+          `You are Aurora, the R2S project management AI. Analyse this email thoroughly and extract ALL actionable information.
 
 Project: ${matchedProject.projectName || matchedProject.clientName}
-Current phase: ${PHASES[matchedProject.phase || 0]}
+Client: ${matchedProject.clientName}
+Current phase: ${PHASES[matchedProject.phase || 0]} (phase index: ${matchedProject.phase || 0})
 Current status: ${matchedProject.status}
+Consultant: ${matchedProject.consultant || 'Unknown'}
+Due date: ${matchedProject.dueDate || 'TBC'}
+Deliverables: ${matchedProject.deliverables || 'See project record'}
 
 Email from: ${fromEmail}
 Subject: ${subject}
-Content: ${bodyText.slice(0, 1500)}
+Full content: ${bodyText.slice(0, 3000)}
 
-Respond in JSON only with exactly this structure:
+Respond in JSON only with this exact structure:
 {
   "phaseChange": true or false,
-  "newPhase": 0-4 (only if phaseChange is true, use: 0=Kick-off, 1=Deployment, 2=Monitoring & Review, 3=Reporting, 4=Close-out),
-  "statusUpdate": "brief summary of what the consultant reported (1-2 sentences)",
+  "newPhase": 0-4 (0=Kick-off, 1=Deployment, 2=Monitoring & Review, 3=Reporting, 4=Close-out),
+  "newStatus": "In Progress" or "On Hold" or "Completed" or "" if no change,
+  "statusSummary": "2-3 sentence summary of what the consultant reported and what has happened",
+  "completedDeliverables": ["list of deliverables mentioned as done or submitted"],
+  "inProgressDeliverables": ["list of deliverables mentioned as in progress"],
+  "invoiceTriggered": true or false,
+  "invoiceNote": "what invoice milestone was reached if any",
+  "needsKickoffScheduling": true or false,
+  "kickoffNote": "why kickoff needs scheduling if applicable",
+  "hasBookableEvent": true or false,
+  "eventDate": "YYYY-MM-DD or empty",
+  "eventTime": "HH:MM or empty",
+  "eventType": "training or workshop or meeting or presentation or empty",
+  "eventTitle": "short title for the event",
+  "eventDuration": 60,
   "requiresAttention": true or false,
-  "attentionReason": "reason if requiresAttention is true, else empty string"
+  "attentionReason": "specific action needed from Diane if any",
+  "activityLogEntry": "one clear sentence describing what happened e.g. Ross confirmed final report submitted to WIC client on 3 June 2026"
 }`,
           buildContext(matchedProject)
         );
 
         let parsed;
-        try { parsed = JSON.parse(analysis.replace(/\`\`\`json|\`\`\`/g, '').trim()); } catch { continue; }
+        try { parsed = JSON.parse(analysis.replace(/```json|```/g, '').trim()); }
+        catch { console.error('[Replies] JSON parse failed'); continue; }
 
-        // Auto-update phase if clearly indicated
-        if (parsed.phaseChange && typeof parsed.newPhase === 'number' && parsed.newPhase !== matchedProject.phase) {
+        const actions = [];
+
+        // ── 1. Update project phase ───────────────────────────────────────────
+        if (parsed.phaseChange && typeof parsed.newPhase === 'number' && parsed.newPhase !== (matchedProject.phase || 0)) {
           await db.updateProjectField(matchedProject.id, { phase: parsed.newPhase });
-          console.log(`[Replies] Phase updated for ${matchedProject.clientName}: ${PHASES[matchedProject.phase]} → ${PHASES[parsed.newPhase]}`);
+          matchedProject.phase = parsed.newPhase;
+          actions.push(`Phase updated: ${PHASES[parsed.newPhase - 1] || 'Kick-off'} → ${PHASES[parsed.newPhase]}`);
+          console.log(`[Replies] Phase updated: ${matchedProject.clientName} → ${PHASES[parsed.newPhase]}`);
         }
 
-        // Always notify Diane of the reply and any updates
-        await sendEmail('diane.k@risk2solution.com',
-          `[Aurora] Consultant reply received: ${matchedProject.clientName}`,
-          `Aurora has received a reply from ${fromEmail} regarding the ${matchedProject.projectName || matchedProject.clientName} project.
+        // ── 2. Update project status ──────────────────────────────────────────
+        if (parsed.newStatus && parsed.newStatus !== matchedProject.status) {
+          await db.updateProjectField(matchedProject.id, { status: parsed.newStatus });
+          actions.push(`Status updated to: ${parsed.newStatus}`);
+        }
 
-Status update: ${parsed.statusUpdate}
+        // ── 3. Update deliverable statuses ────────────────────────────────────
+        if (parsed.completedDeliverables?.length || parsed.inProgressDeliverables?.length) {
+          const deliverables = await db.getDeliverables(matchedProject.id);
+          if (deliverables.length > 0) {
+            for (const delName of (parsed.completedDeliverables || [])) {
+              const match = deliverables.find(d =>
+                d.name.toLowerCase().includes(delName.toLowerCase().slice(0,12)) ||
+                delName.toLowerCase().includes(d.name.toLowerCase().slice(0,12))
+              );
+              if (match) {
+                await db.updateDeliverable(matchedProject.id, match.id, { status: 'Complete' });
+                actions.push(`Deliverable marked complete: ${match.name}`);
+              }
+            }
+            for (const delName of (parsed.inProgressDeliverables || [])) {
+              const match = deliverables.find(d =>
+                d.name.toLowerCase().includes(delName.toLowerCase().slice(0,12)) ||
+                delName.toLowerCase().includes(d.name.toLowerCase().slice(0,12))
+              );
+              if (match && match.status !== 'Complete') {
+                await db.updateDeliverable(matchedProject.id, match.id, { status: 'In Progress' });
+                actions.push(`Deliverable in progress: ${match.name}`);
+              }
+            }
+          }
+        }
 
-${parsed.phaseChange ? `Phase automatically updated to: ${PHASES[parsed.newPhase]}
+        // ── 4. Invoice trigger ────────────────────────────────────────────────
+        if (parsed.invoiceTriggered && matchedProject.clientEmail) {
+          try {
+            const invoiceBody = await aurora('invoice_reminder',
+              `Draft a professional invoice reminder email from R2S to ${matchedProject.clientContact || 'the client'} at ${matchedProject.clientName}.
 
-` : ''}${parsed.requiresAttention ? `ACTION REQUIRED: ${parsed.attentionReason}
+An invoice milestone has been reached: ${parsed.invoiceNote}
 
-` : ''}Please log into Aurora to review and update the project record if needed.
+Project: ${matchedProject.projectName || matchedProject.clientName}
+Contract value: ${matchedProject.value || 'As per contract'}
+Invoicing terms: ${matchedProject.invoicingNotes || 'As per contract'}
 
-Aurora
-R2S Project Management Intelligence`,
-          true
-        );
-
-        // Check if email mentions a bookable event (training, workshop, meeting etc.)
-        try {
-          const eventData = await extractCalendarEventFromEmail(bodyText, subject, matchedProject);
-          if (eventData.hasEvent && eventData.date) {
-            const startDateTime = `${eventData.date}T${eventData.time || '09:00'}:00`;
-            const booking = {
-              title: eventData.title || `${eventData.eventType} — ${matchedProject.clientName}`,
-              description: `${eventData.description || ''}
-
-Source: Email from ${fromEmail}
-Project: ${matchedProject.projectName || matchedProject.clientName}`,
-              startDateTime,
-              durationMinutes: eventData.durationMinutes || 60,
-              location: eventData.location || matchedProject.clientName,
+Write a brief, professional email notifying them that an invoice will be issued. Plain text, no asterisks. Sign off as Diane Kruger.`,
+              null
+            );
+            const draft = {
+              id: `d_${Date.now()}_inv`,
+              projectId: matchedProject.id,
               clientName: matchedProject.clientName,
-              clientEmail: eventData.requiresClient ? matchedProject.clientEmail : null,
+              projectName: matchedProject.projectName,
+              type: 'invoice_reminder',
+              urgency: 'routine',
+              toName: matchedProject.clientContact,
+              toEmail: matchedProject.clientEmail,
+              subject: `Invoice — ${matchedProject.projectName || matchedProject.clientName}`,
+              body: invoiceBody,
+              source: 'auto',
+            };
+            await db.saveDraft(draft);
+            await saveDraftEmail(draft);
+            actions.push(`Invoice email drafted for Diane to review`);
+          } catch(invErr) { console.error('[Invoice]', invErr.message); }
+        }
+
+        // ── 5. Kick-off scheduling ────────────────────────────────────────────
+        if (parsed.needsKickoffScheduling) {
+          try {
+            const availableDates = await getConsultantAvailability();
+            let availText = 'Please check the training calendar for available times.';
+            if (availableDates?.length) {
+              availText = availableDates.map((d, i) => {
+                const dateStr = d.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+                const timeStr = d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true });
+                return `Option ${i+1}: ${dateStr} at ${timeStr} AEST`;
+              }).join('\n');
+            }
+            await sendEmail('diane.k@risk2solution.com',
+              `[Aurora] Kick-off scheduling needed: ${matchedProject.clientName}`,
+              `A kick-off meeting needs to be scheduled for the ${matchedProject.projectName || matchedProject.clientName} project.\n\nReason: ${parsed.kickoffNote}\n\nBased on the R2S Training & Education calendar, these slots appear available:\n\n${availText}\n\nPlease confirm with ${matchedProject.consultant || 'the consultant'} and schedule with the client.\n\nAurora\nR2S Project Management Intelligence`,
+              true
+            );
+            actions.push(`Kick-off scheduling options sent to Diane`);
+          } catch(kErr) { console.error('[Kickoff]', kErr.message); }
+        }
+
+        // ── 6. Calendar event from email ──────────────────────────────────────
+        if (parsed.hasBookableEvent && parsed.eventDate) {
+          try {
+            const booking = {
+              title: parsed.eventTitle || `${parsed.eventType} — ${matchedProject.clientName}`,
+              description: `${parsed.statusSummary || ''}\n\nSource: Email from ${fromEmail}`,
+              startDateTime: `${parsed.eventDate}T${parsed.eventTime || '09:00'}:00`,
+              durationMinutes: parsed.eventDuration || 60,
+              location: matchedProject.clientName,
+              clientName: matchedProject.clientName,
+              clientEmail: matchedProject.clientEmail,
               consultantName: matchedProject.consultant,
-              consultantEmail: eventData.requiresConsultant ? (matchedProject.consultantEmail || 'info@risk2solution.com') : null,
+              consultantEmail: matchedProject.consultantEmail || 'info@risk2solution.com',
               projectId: matchedProject.id,
             };
-
-            // Create tentative booking in calendar
             const eventId = await createCalendarBooking(booking, true);
-
-            // Add to suggestions for Diane to approve
             if (eventId) {
               await db.saveSuggestion({
                 id: `sug_cal_${matchedProject.id}_${Date.now()}`,
@@ -886,56 +970,56 @@ Project: ${matchedProject.projectName || matchedProject.clientName}`,
                 clientName: matchedProject.clientName,
                 projectName: matchedProject.projectName,
                 type: 'schedule_kickoff',
-                title: `Tentative booking: ${booking.title}`,
-                reason: `Aurora detected a scheduled ${eventData.eventType} in an email from ${fromEmail} on ${eventData.date}. A tentative booking has been created in the R2S Training & Education calendar. Approve to send meeting invites to all attendees.`,
+                title: `Tentative: ${booking.title} on ${parsed.eventDate}`,
+                reason: `Aurora detected a scheduled ${parsed.eventType} in an email from ${fromEmail}. A tentative booking has been added to the R2S Training & Education calendar. Approve to send meeting invites.`,
                 action: { calendarEventId: eventId, booking },
                 confirmLabel: 'Confirm & send invites',
                 dismissLabel: 'Cancel tentative booking',
               });
-
-              await sendEmail('diane.k@risk2solution.com',
-                `[Aurora] Tentative booking created: ${booking.title}`,
-                `Aurora detected a scheduled event in an email and has created a tentative booking in the R2S Training & Education calendar.
-
-Event: ${booking.title}
-Date: ${eventData.date}
-Time: ${eventData.time || '9:00am'}
-Duration: ${eventData.durationMinutes || 60} minutes
-Location: ${eventData.location || 'TBC'}
-
-Attendees:\n${matchedProject.consultant ? '• ' + matchedProject.consultant + ' (consultant)\n' : ''}${matchedProject.clientContact ? '• ' + matchedProject.clientContact + ' (client)\n' : ''}• Diane Kruger
-
-Please review in Aurora Suggestions and click Confirm to send meeting invites, or Dismiss to cancel the tentative booking.
-
-${process.env.FRONTEND_URL || ''}
-
-Aurora
-R2S Project Management Intelligence`,
-                true
-              );
-              console.log(`[Calendar] Tentative booking created and suggestion added for ${matchedProject.clientName}`);
+              actions.push(`Tentative calendar booking created: ${booking.title} on ${parsed.eventDate}`);
             }
-          }
-        } catch (calErr) {
-          console.error('[Calendar] Event detection failed:', calErr.message);
+          } catch(calErr) { console.error('[Calendar]', calErr.message); }
         }
 
-        // Mark as read and tag with Aurora Processed category
-        try {
-          await axios.patch(
-            `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
-            { isRead: true, categories: ['Aurora Processed'] },
-            { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
-          );
-        } catch(patchErr) {
-          console.error('[Poll] Mark read/tag failed:', patchErr.message);
-        }
+        // ── 7. Log activity on project ────────────────────────────────────────
+        await db.logActivity(matchedProject.id, {
+          type: 'email_processed',
+          source: fromEmail,
+          subject,
+          summary: parsed.activityLogEntry || parsed.statusSummary,
+          actions,
+        });
+
+        // ── 8. Notify Diane with full summary ─────────────────────────────────
+        const actionsText = actions.length
+          ? `\nActions taken by Aurora:\n${actions.map(a => `• ${a}`).join('\n')}\n`
+          : '\nNo automatic actions were taken.\n';
+
+        await sendEmail('diane.k@risk2solution.com',
+          `[Aurora] Email processed: ${matchedProject.clientName}${actions.length ? ` — ${actions.length} action${actions.length > 1 ? 's' : ''} taken` : ''}`,
+          `Aurora has processed an email from ${fromEmail} regarding the ${matchedProject.projectName || matchedProject.clientName} project.\n\nSummary: ${parsed.statusSummary}\n${actionsText}\nPlease log into Aurora to review.\n\n${process.env.FRONTEND_URL || ''}\n\nAurora\nR2S Project Management Intelligence`,
+          true
+        );
+
+        console.log(`[Replies] ✓ ${matchedProject.clientName}: ${actions.length} actions taken`);
 
       } catch (err) {
         if (err.message === 'MONTHLY_CAP_REACHED') break;
         console.error('[Replies] Analysis failed:', err.message);
       }
-    }
+
+      // Mark as read and tag with Aurora Processed category (always, regardless of analysis result)
+      try {
+        await axios.patch(
+          `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
+          { isRead: true, categories: ['Aurora Processed'] },
+          { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+        );
+      } catch(patchErr) {
+        console.error('[Poll] Mark read/tag failed:', patchErr.message);
+      }
+
+    } // end for each message
   } catch (err) {
     console.error('[Replies] Read failed:', err.message);
   }
@@ -2005,7 +2089,15 @@ app.post('/api/projects', express.json(), async (req, res) => {
 
 app.put('/api/projects/:id', express.json(), async (req, res) => {
   try {
+    const before = await db.getProject(req.params.id);
     const updated = await db.updateProjectField(req.params.id, req.body);
+    // Log manual updates
+    if (req.body.phase !== undefined && before && req.body.phase !== before.phase) {
+      await db.logActivity(req.params.id, { type: 'phase_change', summary: `Phase updated to ${PHASES[req.body.phase]} by Diane` });
+    }
+    if (req.body.status !== undefined && before && req.body.status !== before.status) {
+      await db.logActivity(req.params.id, { type: 'status_change', summary: `Status updated to ${req.body.status} by Diane` });
+    }
     // If phase changed to Close-out (4), set 1yr and 2yr follow-up reminders
     if (req.body.phase === 4 || req.body.status === 'Completed') {
       const p = await db.getProject(req.params.id);
@@ -2094,7 +2186,61 @@ app.post('/api/contracts/upload', upload.single('file'), async (req, res) => {
     console.log(`[Contract] Reading ${req.file.originalname}...`);
     const rawText = await extractTextFromFile(req.file.path, req.file.mimetype);
     if (!rawText || rawText.trim().length < 100) {
+      fs.unlinkSync(req.file.path);
       return res.status(400).json({ error: 'Could not extract text from this file. Try a different format.' });
+    }
+
+    // ── Duplicate detection — do a quick name scan before full extraction ──────
+    // Extract just client/project name cheaply using Haiku before full Sonnet extraction
+    if (!req.body.forceCreate) {
+      try {
+        const quickScan = await aurora('status_email',
+          `Read the first 2000 characters of this document and extract ONLY:
+1. The client or organisation name
+2. The project or engagement name or title
+
+Return as JSON only: {"clientName": "...", "projectName": "..."}
+If not found use empty string.
+
+Document start:
+${rawText.slice(0, 2000)}`,
+          null
+        );
+        const quickData = JSON.parse(quickScan.replace(/\`\`\`json|\`\`\`/g,'').trim());
+        const existingProjects = await db.getProjects();
+
+        // Check for similar existing projects
+        const duplicates = existingProjects.filter(p => {
+          const clientMatch = quickData.clientName &&
+            p.clientName?.toLowerCase().includes(quickData.clientName.toLowerCase().slice(0,8)) ||
+            quickData.clientName?.toLowerCase().includes((p.clientName||'').toLowerCase().slice(0,8));
+          const projectMatch = quickData.projectName &&
+            p.projectName?.toLowerCase().includes(quickData.projectName.toLowerCase().slice(0,10)) ||
+            quickData.projectName?.toLowerCase().includes((p.projectName||'').toLowerCase().slice(0,10));
+          return clientMatch || projectMatch;
+        });
+
+        if (duplicates.length > 0) {
+          // Don't delete the file yet — return duplicate warning so Diane can decide
+          return res.status(409).json({
+            duplicate: true,
+            message: `A similar project may already exist in Aurora.`,
+            existingProjects: duplicates.map(p => ({
+              id: p.id,
+              clientName: p.clientName,
+              projectName: p.projectName,
+              status: p.status,
+              phase: p.phase,
+            })),
+            detectedClient: quickData.clientName,
+            detectedProject: quickData.projectName,
+            fileStillUploaded: true,
+          });
+        }
+      } catch (scanErr) {
+        // If quick scan fails, continue with full extraction
+        console.log('[Contract] Quick scan failed, proceeding with full extraction:', scanErr.message);
+      }
     }
 
     const extracted = await analyseContract(rawText, req.file.originalname);
@@ -2501,6 +2647,19 @@ app.put('/api/projects/:id/deliverables/:delId', express.json(), async (req, res
   try {
     const del = await db.updateDeliverable(req.params.id, req.params.delId, req.body);
     res.json({ deliverable: del });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Activity log ─────────────────────────────────────────────────────────────
+app.get('/api/projects/:id/activity', async (req, res) => {
+  try { res.json({ activity: await db.getActivityLog(req.params.id) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/projects/:id/activity', express.json(), async (req, res) => {
+  try {
+    const entry = await db.logActivity(req.params.id, req.body);
+    res.json({ entry });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
