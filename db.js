@@ -308,3 +308,24 @@ async function deleteDocument(id) {
 }
 
 module.exports.deleteDocument = deleteDocument;
+
+// ── Activity log ──────────────────────────────────────────────────────────────
+async function logActivity(projectId, entry) {
+  const key = `activity_${projectId}.json`;
+  const log = await read(key, []);
+  log.unshift({ // newest first
+    id: `act_${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    ...entry,
+  });
+  // Keep last 100 entries
+  await write(key, log.slice(0, 100));
+  return log[0];
+}
+
+async function getActivityLog(projectId) {
+  return read(`activity_${projectId}.json`, []);
+}
+
+module.exports.logActivity    = logActivity;
+module.exports.getActivityLog = getActivityLog;
