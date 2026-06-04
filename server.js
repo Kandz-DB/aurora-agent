@@ -727,7 +727,8 @@ async function readConsultantReplies() {
       try {
         // sentitems uses sentDateTime, inbox uses receivedDateTime
         const dateField = folder === 'sentitems' ? 'sentDateTime' : 'receivedDateTime';
-        const url = `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${folder}/messages?$filter=${dateField} ge '${since}' and isRead eq false&$select=id,subject,from,toRecipients,body,receivedDateTime,sentDateTime&$top=25&$orderby=${dateField} desc`;
+        const sinceFormatted = since.replace(/\.\d+Z$/, 'Z'); // ensure clean ISO format
+        const url = `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${folder}/messages?$filter=${dateField} ge ${sinceFormatted}&$select=id,subject,from,toRecipients,body,receivedDateTime,sentDateTime&$top=25&$orderby=${dateField} desc`;
         const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 });
         const msgs = (res.data?.value || []).map(m => ({ ...m, folder }));
         allMessages = allMessages.concat(msgs);
