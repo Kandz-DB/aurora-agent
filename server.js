@@ -1,2132 +1,3015 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Aurora — R2S Project Management Intelligence</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;600&family=DM+Sans:wght@400;500&family=DM+Mono:wght@400&display=swap" rel="stylesheet"/>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#07090f;--surface:#0d1120;--card:#131825;--card2:#1a2030;
-  --border:#2a3550;--border2:#344060;
-  --teal:#00e8bb;--blue:#6aa3ff;--amber:#ffb340;--rose:#ff6080;--violet:#c4a8ff;
-  --pink:#e8197a;--pink-light:#ff4da6;
-  --text:#ffffff;--text2:#a8b8d8;--text3:#5a7090;
-  --fs:'Syne',sans-serif;--fb:'DM Sans',sans-serif;--fm:'DM Mono',monospace;
-}
-/* Login screen */
-.login-screen{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:999;flex-direction:column;gap:0}
-.login-box{background:var(--surface);border:1px solid var(--border2);border-radius:16px;padding:36px 40px;width:360px;text-align:center}
-.login-logo{width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,var(--teal),var(--pink));display:flex;align-items:center;justify-content:center;font-family:var(--fs);font-weight:600;font-size:22px;color:#fff;margin:0 auto 16px}
-.login-title{font-family:var(--fs);font-size:20px;font-weight:600;color:var(--text);margin-bottom:4px}
-.login-sub{font-size:12px;color:var(--text2);margin-bottom:24px}
-.login-input{width:100%;padding:11px 14px;background:var(--card);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-size:13px;font-family:var(--fb);outline:none;text-align:center;letter-spacing:2px;margin-bottom:12px}
-.login-input:focus{border-color:var(--teal)}
-.login-btn{width:100%;padding:11px;background:var(--pink);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:500;font-family:var(--fb);cursor:pointer;transition:opacity .12s}
-.login-btn:hover{opacity:.88}
-.login-error{font-size:11px;color:var(--rose);margin-top:8px;min-height:16px}
-.login-brand{font-size:10px;color:var(--text3);margin-top:20px;letter-spacing:.5px;text-transform:uppercase}
-body{font-family:var(--fb);background:var(--bg);color:var(--text);font-size:13px;height:100vh;display:flex;flex-direction:column;overflow:hidden}
-::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
-button{font-family:var(--fb);cursor:pointer;transition:opacity .12s}
-button:active{transform:scale(.98)}
-input,select,textarea{font-family:var(--fb);font-size:13px;color:var(--text);background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:8px 11px;outline:none;width:100%;transition:border-color .15s}
-input:focus,select:focus,textarea:focus{border-color:var(--teal)}
-input::placeholder,textarea::placeholder{color:var(--text3)}
-label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
+'use strict';
+require('dotenv').config();
 
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:0 18px;height:50px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
-.brand{display:flex;align-items:center;gap:9px}
-.mark{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,var(--teal),var(--pink));display:flex;align-items:center;justify-content:center;font-family:var(--fs);font-weight:600;font-size:14px;color:#fff}
-.bname{font-family:var(--fs);font-size:14px;font-weight:600}
-.bsub{font-size:9px;color:var(--text2);letter-spacing:.6px;text-transform:uppercase;margin-top:1px}
-.pills{display:flex;gap:6px;flex-wrap:wrap}
-.pill{display:flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:10px;border:1px solid var(--border2);color:var(--text2)}
-.dot{width:5px;height:5px;border-radius:50%}
+const express   = require('express');
+const cors      = require('cors');
+const fs        = require('fs');
+const path      = require('path');
+const multer    = require('multer');
+const cron      = require('node-cron');
+const Anthropic = require('@anthropic-ai/sdk');
+const axios     = require('axios');
+const nodemailer= require('nodemailer');
+const db        = require('./db');
 
-.body{display:flex;flex:1;overflow:hidden}
-.nav{width:180px;background:var(--surface);border-right:1px solid var(--border);padding:10px 0;overflow-y:auto;flex-shrink:0}
-.nlbl{font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--text2);padding:0 13px;margin:12px 0 5px;font-family:var(--fs)}
-.ni{display:flex;align-items:center;gap:7px;padding:7px 13px;font-size:12px;color:var(--text2);cursor:pointer;border-left:2px solid transparent;transition:all .12s}
-.ni:hover{color:var(--text);background:rgba(255,255,255,.04)}
-.ni.on{color:var(--teal);border-left-color:var(--teal);background:rgba(0,232,187,.07)}
-.nbadge{margin-left:auto;background:var(--rose);color:#fff;font-size:9px;font-family:var(--fm);padding:1px 5px;border-radius:8px}
-.pane{flex:1;overflow-y:auto;padding:18px 20px}
-.pg{display:none}.pg.on{display:block}
+// ── Setup ─────────────────────────────────────────────────────────────────────
+const app    = express();
+const PORT   = process.env.PORT || 3001;
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const AURORA_PROMPT = fs.readFileSync(path.join(__dirname, 'prompt.txt'), 'utf8');
 
-.ph-title{font-family:var(--fs);font-size:16px;font-weight:600;margin-bottom:3px}
-.ph-sub{font-size:11px;color:var(--text2);margin-bottom:14px}
-.sec{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text2);margin:16px 0 8px;font-family:var(--fs)}
+const INTERNAL_EMAILS = [
+  process.env.INTERNAL_EMAIL_1 || 'diane.k@risk2solution.com',
+  process.env.INTERNAL_EMAIL_2 || 'info@risk2solution.com',
+];
 
-.badge{display:inline-flex;align-items:center;font-size:10px;padding:2px 8px;border-radius:10px;font-family:var(--fm)}
-.bt{background:rgba(0,232,187,.12);color:var(--teal);border:1px solid rgba(0,232,187,.25)}
-.ba{background:rgba(255,179,64,.12);color:var(--amber);border:1px solid rgba(255,179,64,.25)}
-.br{background:rgba(255,96,128,.12);color:var(--rose);border:1px solid rgba(255,96,128,.25)}
-.bb{background:rgba(106,163,255,.12);color:var(--blue);border:1px solid rgba(106,163,255,.25)}
-.bp{background:rgba(232,25,122,.15);color:var(--pink-light);border:1px solid rgba(232,25,122,.3)}
-.bg{background:var(--card2);color:var(--text2);border:1px solid var(--border2)}
-.bv{background:rgba(196,168,255,.12);color:var(--violet);border:1px solid rgba(196,168,255,.25)}
+// ── Middleware ────────────────────────────────────────────────────────────────
+app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
+app.use(express.json({ limit: '10mb' }));
 
-.btn{display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:6px;font-size:12px;font-weight:500;border:none;cursor:pointer}
-.btn-p{background:var(--pink);color:#fff}.btn-p:hover{opacity:.88}
-.btn-t{background:var(--teal);color:#07090f}.btn-t:hover{opacity:.88}
-.btn-g{background:var(--border2);color:var(--text2)}.btn-g:hover{background:var(--border);color:var(--text)}
-.btn-r{background:rgba(255,96,128,.15);color:var(--rose);border:1px solid rgba(255,96,128,.3)}
-.btn-b{background:rgba(106,163,255,.15);color:var(--blue);border:1px solid rgba(106,163,255,.3)}
-.btn-sm{padding:4px 10px;font-size:11px}
-.arow{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+// ── Auth — simple password protection ────────────────────────────────────────
+const AURORA_PASSWORD = process.env.AURORA_PASSWORD || 'r2s-aurora-2026';
 
-.card{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:12px 14px;margin-bottom:6px}
-.ibanner{background:rgba(255,179,64,.08);border:1px solid rgba(255,179,64,.25);border-radius:9px;padding:9px 12px;display:flex;gap:8px;margin-bottom:12px;font-size:11px;color:var(--amber);line-height:1.55}
+app.post('/api/auth/login', (req, res) => {
+  const { password } = req.body;
+  if (password === AURORA_PASSWORD) {
+    const token = Buffer.from('aurora:' + AURORA_PASSWORD + ':' + Date.now()).toString('base64');
+    res.json({ success: true, token });
+  } else {
+    res.status(401).json({ success: false, error: 'Incorrect password' });
+  }
+});
 
-/* Tiles */
-.tiles-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-bottom:16px}
-.tile{background:var(--card);border:1px solid var(--border);border-radius:11px;padding:14px;cursor:pointer;position:relative;transition:border-color .15s,transform .12s}
-.tile:hover{border-color:var(--border2);transform:translateY(-1px)}
-.tile-alert{position:absolute;top:10px;right:10px;font-size:10px;font-weight:500;font-family:var(--fm);padding:2px 8px;border-radius:8px}
-.tile-alert.behind{background:rgba(255,96,128,.2);color:var(--rose);border:1px solid rgba(255,96,128,.4)}
-.tile-alert.at-risk{background:rgba(255,179,64,.2);color:var(--amber);border:1px solid rgba(255,179,64,.4)}
-.tile-alert.on-hold{background:rgba(106,163,255,.2);color:var(--blue);border:1px solid rgba(106,163,255,.4)}
-.tile-client{font-size:13px;font-weight:600;color:var(--text);font-family:var(--fs);margin-bottom:2px;padding-right:70px}
-.tile-project{font-size:11px;color:var(--text2);margin-bottom:10px;padding-right:70px}
-.tile-phases{display:flex;gap:2px;margin-bottom:4px}
-.tile-ph{flex:1;height:5px;border-radius:3px;background:var(--border2)}
-.tile-ph.done{background:rgba(0,232,187,.4)}
-.tile-ph.now{background:var(--pink)}
-.tile-ph-labels{display:flex;gap:2px;margin-bottom:10px}
-.tile-ph-label{flex:1;font-size:8px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--fm)}
-.tile-ph-label.now{color:var(--pink-light);font-weight:500}
-.tile-ph-label.done{color:rgba(0,232,187,.6)}
-.tile-ph-label.pend{color:var(--text3)}
-.tile-meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+app.use('/api', (req, res, next) => {
+  // Public endpoints — no auth required
+  const publicPaths = ['/auth/login', '/health'];
+  if (publicPaths.some(p => req.path === p || req.path.startsWith(p))) return next();
 
-/* Modal */
-.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;align-items:center;justify-content:center;padding:20px}
-.modal-bg.open{display:flex}
-.modal{background:var(--surface);border:1px solid var(--border2);border-radius:14px;width:700px;max-width:95vw;max-height:88vh;overflow-y:auto;padding:24px}
-.modal-hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px}
-.modal-title{font-family:var(--fs);font-size:18px;font-weight:600;color:var(--text)}
-.modal-sub{font-size:12px;color:var(--text2);margin-top:3px}
-.modal-close{background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer;padding:0;line-height:1;flex-shrink:0}
-.modal-close:hover{color:var(--text)}
+  const authHeader = req.headers['authorization'] || '';
+  const token = authHeader.replace('Bearer ', '').trim();
+  if (!token) return res.status(401).json({ error: 'Not authenticated' });
+  try {
+    const decoded = Buffer.from(token, 'base64').toString('utf8');
+    if (!decoded.startsWith('aurora:' + AURORA_PASSWORD)) throw new Error('Invalid');
+    next();
+  } catch (e) {
+    res.status(401).json({ error: 'Invalid session — please log in again' });
+  }
+});
 
-/* Phase cards */
-.phase-cards{display:flex;gap:6px;margin-bottom:14px;overflow-x:auto;padding-bottom:4px}
-.phase-card{flex-shrink:0;width:110px;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:9px;cursor:pointer;transition:all .12s}
-.phase-card:hover{border-color:var(--border2)}
-.phase-card.active-ph{background:var(--pink);border-color:var(--pink)}
-.phase-card.done-ph{background:rgba(0,232,187,.08);border-color:rgba(0,232,187,.25)}
-.phase-card.pending-ph{opacity:.5}
-.phase-num{font-size:9px;font-family:var(--fm);margin-bottom:4px;color:var(--text3)}
-.phase-name{font-size:11px;font-weight:500;color:var(--text2)}
-.phase-card.active-ph .phase-num,.phase-card.active-ph .phase-name{color:#fff}
-.phase-card.done-ph .phase-num,.phase-card.done-ph .phase-name{color:var(--teal)}
+app.use(express.static(path.join(__dirname, 'public')));
+app.get(/^(?!\/api).*/, (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-.phase-detail-box{background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:13px;margin-bottom:14px}
-.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
-.info-item{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 12px}
-.info-label{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:4px}
-.info-val{font-size:13px;font-weight:500;color:var(--text)}
+const upload = multer({
+  dest: path.join(db.DATA, 'uploads'),
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ok = ['.pdf', '.docx', '.doc', '.txt', '.md'].includes(
+      path.extname(file.originalname).toLowerCase()
+    );
+    cb(null, ok);
+  },
+});
 
-/* Form */
-.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
-.form-group{display:flex;flex-direction:column;gap:4px}
-.form-group.full{grid-column:1/-1}
+// ── Cost tracking ─────────────────────────────────────────────────────────────
+const CAP_USD = parseFloat(process.env.MONTHLY_SPEND_CAP_USD || '20');
 
-/* Phase selector in form */
-.phase-selector{display:flex;gap:4px;margin-top:2px}
-.phase-btn{flex:1;padding:6px 4px;text-align:center;border-radius:6px;border:1px solid var(--border2);background:var(--card);color:var(--text2);font-size:10px;cursor:pointer;transition:all .12s;font-family:var(--fb)}
-.phase-btn:hover{border-color:var(--border2);color:var(--text)}
-.phase-btn.selected{background:var(--pink);border-color:var(--pink);color:#fff}
-
-/* Chat */
-.chat-msgs{min-height:260px;max-height:360px;overflow-y:auto;display:flex;flex-direction:column;gap:9px;padding-bottom:10px}
-.msg{display:flex;gap:7px;align-items:flex-start}
-.msg.u{flex-direction:row-reverse}
-.av{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0;font-family:var(--fs)}
-.av-a{background:var(--teal);color:#07090f}
-.av-u{background:var(--border2);color:var(--text2)}
-.bub{background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:8px 11px;font-size:12px;line-height:1.65;max-width:88%;white-space:pre-line;color:var(--text)}
-.msg.u .bub{background:rgba(106,163,255,.1);border-color:rgba(106,163,255,.2)}
-.cin-row{display:flex;gap:6px;padding-top:10px;border-top:1px solid var(--border)}
-.cin{width:auto;flex:1}
-.csend{background:var(--teal);color:#07090f;border:none;border-radius:6px;padding:0 14px;cursor:pointer;font-size:14px;flex-shrink:0}
-.tdots{display:inline-flex;gap:3px;align-items:center}
-.tdots span{width:4px;height:4px;background:var(--text3);border-radius:50%;animation:td 1.2s ease-in-out infinite}
-.tdots span:nth-child(2){animation-delay:.2s}.tdots span:nth-child(3){animation-delay:.4s}
-@keyframes td{0%,80%,100%{opacity:.2}40%{opacity:1}}
-.chip{padding:4px 11px;border-radius:20px;font-size:11px;background:var(--card2);border:1px solid var(--border2);color:var(--text2);cursor:pointer;transition:all .12s}
-.chip:hover{border-color:var(--teal);color:var(--teal)}
-
-/* Upload */
-.upzone{border:1px dashed var(--border2);border-radius:9px;padding:20px;text-align:center;cursor:pointer;transition:all .15s}
-.upzone:hover,.upzone.over{background:rgba(0,232,187,.05);border-color:var(--teal)}
-
-/* Completed toggle */
-.completed-toggle{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--card2);border:1px solid var(--border);border-radius:9px;cursor:pointer;font-size:12px;color:var(--text2);margin-top:8px;border:none;width:100%;text-align:left}
-.completed-toggle:hover{color:var(--text)}
-.completed-section{display:none;margin-top:8px}
-.completed-section.open{display:block}
-
-.rep-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.rep-card{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:12px 14px;cursor:pointer;transition:border-color .12s}
-.rep-card:hover{border-color:var(--border2)}
-
-/* Project detail tabs */
-.proj-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:16px}
-.proj-tab{padding:8px 16px;font-size:12px;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent;transition:all .12s;font-family:var(--fb)}
-.proj-tab:hover{color:var(--text)}
-.proj-tab.on{color:var(--teal);border-bottom-color:var(--teal);font-weight:500}
-.proj-tab-content{display:none}.proj-tab-content.on{display:block}
-
-/* Deliverable tiles */
-.del-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-top:10px}
-.del-tile{background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:12px;border-left:3px solid var(--border2)}
-.del-tile.complete{border-left-color:var(--teal)}
-.del-tile.inprogress{border-left-color:var(--blue)}
-.del-tile.duesoon{border-left-color:var(--amber)}
-.del-tile.overdue{border-left-color:var(--rose)}
-.del-tile.outstanding{border-left-color:var(--border2)}
-.del-num{font-size:9px;font-family:var(--fm);color:var(--text3);margin-bottom:4px}
-.del-name{font-size:12px;font-weight:500;color:var(--text);margin-bottom:6px;line-height:1.4}
-.del-due{font-size:10px;color:var(--text3);margin-bottom:6px}
-.del-badge{font-size:10px;padding:2px 8px;border-radius:8px;font-family:var(--fm);display:inline-block}
-
-/* Risk cards */
-.risk-card{background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:12px;margin-bottom:6px;border-left:3px solid var(--border2)}
-.risk-card.high{border-left-color:var(--rose)}
-.risk-card.medium{border-left-color:var(--amber)}
-.risk-card.low{border-left-color:var(--teal)}
-.risk-card.triggered{border-left-color:var(--rose);background:rgba(255,96,128,.05)}
-.risk-header{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-.risk-num{font-size:10px;font-family:var(--fm);color:var(--text3)}
-.risk-desc{font-size:12px;font-weight:500;color:var(--text);flex:1}
-.risk-mitigation{font-size:11px;color:var(--text2);line-height:1.55;margin-top:4px;padding-left:8px;border-left:2px solid var(--border2)}
-
-/* Activity log */
-.activity-item{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
-.activity-item:last-child{border-bottom:none}
-.activity-dot{width:8px;height:8px;border-radius:50%;background:var(--teal);flex-shrink:0;margin-top:4px}
-.activity-dot.email{background:var(--blue)}
-.activity-dot.phase{background:var(--pink)}
-.activity-dot.status{background:var(--amber)}
-.activity-dot.booking{background:var(--violet)}
-.activity-dot.manual{background:var(--text3)}
-.activity-time{font-size:10px;color:var(--text3);font-family:var(--fm);white-space:nowrap;margin-top:2px}
-.activity-body{flex:1}
-.activity-summary{font-size:12px;color:var(--text);line-height:1.5;margin-bottom:2px}
-.activity-actions{font-size:10px;color:var(--text3);line-height:1.6}
-
-/* Booking form */
-.booking-form{background:var(--card2);border:1px solid var(--teal);border-radius:9px;padding:14px;margin-top:8px}
-.booking-form label{font-size:11px;color:var(--text2);margin-bottom:3px;display:block}
-.booking-form input,.booking-form select{margin-bottom:8px;font-size:12px}
-.booking-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-
-/* Suggestion cards */
-.sug-card{background:var(--card);border:1px solid var(--border);border-radius:11px;padding:14px;margin-bottom:8px;border-left:3px solid var(--violet)}
-.sug-card.urgent{border-left-color:var(--rose)}
-.sug-card.phase{border-left-color:var(--teal)}
-.sug-card.closeout{border-left-color:var(--pink)}
-.sug-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;font-family:var(--fs)}
-.sug-reason{font-size:12px;color:var(--text2);line-height:1.55;margin-bottom:10px}
-.sug-meta{font-size:10px;color:var(--text3);font-family:var(--fm);margin-bottom:8px}
-</style>
-</head>
-<body>
-
-<div class="topbar">
-  <div class="brand">
-    <div class="mark">A</div>
-    <div><div class="bname">Aurora</div><div class="bsub">R2S Project Management Intelligence</div></div>
-  </div>
-  <div style="display:flex;align-items:center;gap:8px">
-    <button class="btn btn-b btn-sm" onclick="pollNow(this)" style="font-size:11px">▶ Poll inbox now</button>
-    <button class="btn btn-g btn-sm" onclick="downloadBackup()" style="font-size:11px" title="Download all Aurora data as a backup file">⬇ Backup data</button>
-  </div>
-  <div class="pills">
-    <div class="pill"><div class="dot" style="background:var(--teal)"></div>Projects</div>
-    <div class="pill"><div class="dot" style="background:var(--teal)"></div>Contracts</div>
-    <div class="pill"><div class="dot" style="background:var(--blue)"></div>info@risk2solution.com</div>
-    <div class="pill"><div class="dot" style="background:var(--amber)"></div>Reminders active</div>
-  </div>
-</div>
-
-<div class="body">
-  <div class="nav">
-    <div class="nlbl">Command</div>
-    <div class="ni on" onclick="nav('overview',this)">⬜ Overview</div>
-    <div class="ni" onclick="nav('suggestions',this)" id="nav-suggestions">◈ Aurora's suggestions</div>
-    <div class="ni" onclick="nav('projects',this)">💼 Projects</div>
-    <div class="ni" onclick="nav('new',this)">＋ New project</div>
-    <div class="ni" onclick="nav('ask',this)">✦ Ask Aurora</div>
-    <div class="nlbl">PM toolkit</div>
-    <div class="ni" onclick="nav('milestones',this)">⚑ Deliverables</div>
-    <div class="ni" onclick="nav('risks',this)">△ Risks</div>
-    <div class="ni" onclick="nav('stakeholders',this)">◎ Stakeholders</div>
-    <div class="nlbl">Comms & finance</div>
-    <div class="ni" onclick="nav('comms',this)" id="nav-comms">✉ Comms drafts</div>
-    <div class="ni" onclick="nav('invoicing',this)">$ Invoicing</div>
-    <div class="ni" onclick="nav('calendar',this)">◫ Calendar</div>
-    <div class="nlbl">Knowledge</div>
-    <div class="ni" onclick="nav('docs',this)">◧ Documents</div>
-    <div class="ni" onclick="nav('reports',this)">≡ Reports</div>
-  </div>
-
-  <div class="pane">
-
-    <!-- OVERVIEW -->
-    <div id="pg-overview" class="pg on">
-      <div class="ph-title">Good morning</div>
-      <div class="ph-sub" id="ov-sub">Aurora is reviewing your projects…</div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
-        <div class="card" style="padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Active</div><div style="font-size:20px;font-family:var(--fs);font-weight:600" id="k-active">—</div><div style="font-size:10px;color:var(--teal);margin-top:2px">Projects</div></div>
-        <div class="card" style="padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">On track</div><div style="font-size:20px;font-family:var(--fs);font-weight:600" id="k-ontrack">—</div><div style="font-size:10px;color:var(--teal);margin-top:2px">Healthy</div></div>
-        <div class="card" style="padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Due soon</div><div style="font-size:20px;font-family:var(--fs);font-weight:600" id="k-due">—</div><div style="font-size:10px;color:var(--amber);margin-top:2px">Within 14 days</div></div>
-        <div class="card" style="padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Ongoing</div><div style="font-size:20px;font-family:var(--fs);font-weight:600" id="k-ongoing">—</div><div style="font-size:10px;color:var(--text3);margin-top:2px">Training delivery</div></div>
-      </div>
-      <div class="ibanner">ℹ <div><strong style="display:block;margin-bottom:2px">Aurora is always watching</strong>Inbox polled every hour 7am–7pm weekdays. Daily batch runs at 6am. Client emails always require your approval before sending. Internal alerts to diane.k@ are automatic.</div></div>
-      <div class="sec">Quick actions</div>
-      <div id="suggestions-banner" style="display:none;margin-bottom:12px"></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div class="card" style="cursor:pointer" onclick="nav('new',document.querySelector('[onclick*=new]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--pink-light)">＋</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">New project</div><div style="font-size:11px;color:var(--text2)">Upload a contract or create manually. Aurora reads the contract and sets up the project.</div></div>
-        <div class="card" style="cursor:pointer" onclick="nav('comms',document.querySelector('[onclick*=comms]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--teal)">✉</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Comms drafts</div><div style="font-size:11px;color:var(--text2)">Review and approve Aurora's drafted emails.</div></div>
-        <div class="card" style="cursor:pointer" onclick="nav('projects',document.querySelector('[onclick*=projects]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--blue)">💼</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">View projects</div><div style="font-size:11px;color:var(--text2)">See all projects, update phases, and manage status.</div></div>
-        <div class="card" style="cursor:pointer" onclick="nav('ask',document.querySelector('[onclick*=ask]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--violet)">✦</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Ask Aurora</div><div style="font-size:11px;color:var(--text2)">Get a briefing, draft a report, or ask anything.</div></div>
-        <div class="card" style="cursor:pointer" onclick="triggerInboxCheck(this)"><div style="font-size:16px;margin-bottom:6px;color:var(--blue)" id="inbox-icon">✉</div><div style="font-size:12px;font-weight:500;margin-bottom:3px" id="inbox-label">Poll inbox now</div><div style="font-size:11px;color:var(--text2)" id="inbox-sub">Aurora polls every hour 7am–7pm. Click to run immediately.</div><div style="margin-top:8px"><span class="btn btn-b btn-sm" style="pointer-events:none">▶ Run now</span></div></div>
-      </div>
-    </div>
-
-    <!-- SUGGESTIONS -->
-    <div id="pg-suggestions" class="pg">
-      <div class="ph-title">Aurora's suggestions</div>
-      <div class="ph-sub">Aurora has identified these actions. Approve to execute, dismiss to skip.</div>
-      <div style="display:flex;gap:6px;margin-bottom:14px">
-        <button class="btn btn-g btn-sm" onclick="loadSuggestions()">↻ Refresh</button>
-        <button class="btn btn-p btn-sm" onclick="generateSuggestions()">✦ Generate new suggestions</button>
-      </div>
-      <div id="suggestions-list"><div style="color:var(--text3);font-size:12px">Loading…</div></div>
-    </div>
-
-    <!-- PROJECTS -->
-    <div id="pg-projects" class="pg">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
-        <div><div class="ph-title">Projects</div><div class="ph-sub">Click a tile to open. Pink bar = current phase. Update phase and status from inside each project.</div></div>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-g btn-sm" onclick="syncMonday()">↻ Sync Monday.com</button>
-          <button class="btn btn-p btn-sm" onclick="nav('new',document.querySelector('[onclick*=new]'))">＋ New project</button>
-        </div>
-      </div>
-      <div id="projects-list"><div style="color:var(--text3);font-size:12px">Loading…</div></div>
-    </div>
-
-    <!-- NEW PROJECT -->
-    <div id="pg-new" class="pg">
-      <div class="ph-title">New project</div>
-      <div class="ph-sub">Upload a contract and Aurora will fill in everything automatically, or create manually.</div>
-
-      <!-- Contract upload -->
-      <div class="sec">Option 1 — Upload contract (recommended)</div>
-      <div class="upzone" id="contract-upzone" onclick="document.getElementById('contract-file').click()" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="handleContractDrop(event)">
-        <div style="font-size:28px;margin-bottom:8px">📄</div>
-        <div style="font-size:13px;color:var(--text);margin-bottom:4px;font-weight:500">Upload contract or proposal</div>
-        <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Aurora reads the document and extracts all project details automatically</div>
-        <div style="font-size:10px;color:var(--text3)">PDF, Word (.docx), or text file · drag & drop or click</div>
-        <input type="file" id="contract-file" style="display:none" accept=".pdf,.docx,.doc,.txt" onchange="uploadContract(this.files[0])"/>
-      </div>
-      <div id="contract-status" style="display:none;margin-top:10px"></div>
-
-      <!-- Manual creation -->
-      <div class="sec" style="margin-top:20px">Option 2 — Create manually</div>
-      <div class="form-grid">
-        <div class="form-group"><label>Client name *</label><input id="f-client" placeholder="e.g. Glencore"/></div>
-        <div class="form-group"><label>Project name</label><input id="f-project" placeholder="e.g. Security audit - Rolleston"/></div>
-        <div class="form-group"><label>Client contact</label><input id="f-contact" placeholder="Contact person name"/></div>
-        <div class="form-group"><label>Client email</label><input id="f-email" type="email" placeholder="contact@client.com.au"/></div>
-        <div class="form-group"><label>Contract value</label><input id="f-value" placeholder="e.g. $25,000"/></div>
-        <div class="form-group"><label>Due / end date</label><input id="f-due" type="date"/></div>
-        <div class="form-group full"><label>Summary of service</label><textarea id="f-summary" rows="3" placeholder="What R2S is delivering to this client…"></textarea></div>
-        <div class="form-group full"><label>Deliverables</label><textarea id="f-deliverables" rows="2" placeholder="Reports, training sessions, assessments, etc."></textarea></div>
-        <div class="form-group"><label>Invoicing notes</label><input id="f-invoicing" placeholder="e.g. 50% on award, 50% on completion"/></div>
-        <div class="form-group"><label>Consultant / Trainer</label><input id="f-consultant" placeholder="Assigned R2S consultant or trainer"/></div>
-        <div class="form-group full">
-          <label>Starting phase</label>
-          <div class="phase-selector" id="phase-selector">
-            <button class="phase-btn selected" onclick="selectPhase(0)">Kick-off</button>
-            <button class="phase-btn" onclick="selectPhase(1)">Deployment</button>
-            <button class="phase-btn" onclick="selectPhase(2)">Monitoring</button>
-            <button class="phase-btn" onclick="selectPhase(3)">Reporting</button>
-            <button class="phase-btn" onclick="selectPhase(4)">Close-out</button>
-          </div>
-        </div>
-        <div class="form-group full"><label>Status</label>
-          <select id="f-status">
-            <option>In Progress</option><option>Not Started</option><option>On Hold</option><option>Completed</option>
-          </select>
-        </div>
-        <div class="form-group full"><label>Type</label>
-          <select id="f-type">
-            <option value="standard">Standard project</option>
-            <option value="ongoing">Ongoing training delivery</option>
-          </select>
-        </div>
-      </div>
-      <div class="arow">
-        <button class="btn btn-p" onclick="createProject()">Create project</button>
-        <button class="btn btn-g" onclick="nav('projects',document.querySelector('[onclick*=projects]'))">Cancel</button>
-      </div>
-      <div id="create-status" style="margin-top:10px;font-size:12px;color:var(--text2)"></div>
-    </div>
-
-    <!-- ASK AURORA -->
-    <div id="pg-ask" class="pg">
-      <div class="ph-title">Ask Aurora</div>
-      <div class="ph-sub">Your AI project manager — ask anything about projects, contracts, or deliverables.</div>
-      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px">
-        <div class="chip" onclick="qs('What needs attention today across all projects?')">What needs attention today?</div>
-        <div class="chip" onclick="qs('Give me a portfolio snapshot of all active projects')">Portfolio snapshot</div>
-        <div class="chip" onclick="qs('Which projects are due within the next 2 weeks?')">Due soon</div>
-        <div class="chip" onclick="qs('Draft weekly status update emails for all active projects')">Draft status emails</div>
-        <div class="chip" onclick="qs('What automated reminders has Aurora set for this week?')">This week\'s reminders</div>
-      </div>
-      <div class="chat-msgs" id="chat-msgs">
-        <div class="msg"><div class="av av-a">A</div><div class="bub">Morning. I'm across all your projects. I manage the full lifecycle, read your contracts, and send automated reminders to the team when due dates approach. Client emails always need your approval — internal reminders are automatic. What would you like to work on?</div></div>
-      </div>
-      <div class="cin-row">
-        <input class="cin" id="cin" placeholder="Ask Aurora anything…" onkeydown="if(event.key==='Enter')sendChat()"/>
-        <button class="csend" onclick="sendChat()">➤</button>
-      </div>
-    </div>
-
-    <!-- DELIVERABLES / MILESTONES -->
-    <div id="pg-milestones" class="pg">
-      <div class="ph-title">Deliverables</div>
-      <div class="ph-sub">What R2S is delivering to each client. Pulled from contracts and Monday.com.</div>
-      <div id="milestones-list"><div style="color:var(--text3);font-size:12px">Loading…</div></div>
-    </div>
-
-    <!-- RISKS -->
-    <div id="pg-risks" class="pg">
-      <div class="ph-title">Risk register</div>
-      <div class="ph-sub">Projects at risk or behind schedule.</div>
-      <div id="risks-list"><div style="color:var(--text3);font-size:12px">Loading…</div></div>
-    </div>
-
-    <!-- STAKEHOLDERS -->
-    <div id="pg-stakeholders" class="pg">
-      <div class="ph-title">Stakeholders</div>
-      <div class="ph-sub">Client contacts across all active projects.</div>
-      <div id="stakeholders-list"><div style="color:var(--text3);font-size:12px">Loading…</div></div>
-    </div>
-
-    <!-- COMMS -->
-    <div id="pg-comms" class="pg">
-      <div class="ph-title">Comms drafts</div>
-      <div class="ph-sub">All client-facing drafts reviewed here. Nothing sends to clients without your approval.</div>
-      <div class="ibanner">ℹ Aurora saves all drafts to the info@risk2solution.com Outlook shared mailbox. Review and approve here — or open Outlook to send directly.</div>
-      <div id="drafts-list"><div style="color:var(--text3);font-size:12px">Loading…</div></div>
-    </div>
-
-    <!-- INVOICING -->
-    <div id="pg-invoicing" class="pg">
-      <div class="ph-title">Invoicing</div>
-      <div class="ph-sub">Contract values and invoicing terms across all projects.</div>
-      <div id="invoicing-list"><div style="color:var(--text3);font-size:12px">Loading…</div></div>
-    </div>
-
-    <!-- CALENDAR -->
-    <div id="pg-calendar" class="pg">
-      <div class="ph-title">Outlook calendar</div>
-      <div class="ph-sub">Reminders written to info@risk2solution.com calendar. Training calendar read-only.</div>
-      <div class="card" style="margin-bottom:10px">
-        <div style="font-size:12px;font-weight:500;margin-bottom:8px;color:var(--text)">Automated due date reminders</div>
-        <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:12px;color:var(--text2);align-items:start">
-          <span style="color:var(--rose);font-family:var(--fm)">14 days</span><span>Internal reminder to diane.k@ + info@ to review phase completion</span>
-          <span style="color:var(--amber);font-family:var(--fm)">7 days</span><span>Flag anything not yet completed — more urgent tone</span>
-          <span style="color:var(--rose);font-family:var(--fm)">3 days</span><span>Final alert — list outstanding deliverables from the contract</span>
-          <span style="color:var(--rose);font-family:var(--fm)">Due date</span><span>Confirm close-out or update the date in Aurora</span>
-        </div>
-      </div>
-      <div class="card">
-        <div style="font-size:12px;font-weight:500;margin-bottom:8px;color:var(--text)">Client follow-up reminders (set on close-out)</div>
-        <div style="font-size:11px;color:var(--text2);line-height:1.8">
-          When you mark a project as Completed, Aurora automatically:<br>
-          • Sets a 1-year reminder in the info@risk2solution.com Outlook calendar<br>
-          • Sets a 2-year reminder in the info@risk2solution.com Outlook calendar<br>
-          • Sends a close-out notification to diane.k@ and info@
-        </div>
-      </div>
-      <div class="sec">Reading R2S Training & Education calendar</div>
-      <div class="card" style="font-size:12px;color:var(--text2);line-height:1.6">Aurora reads the R2S Training & Education Outlook calendar to check if training or consulting sessions have been delivered, and uses that to update project status. She never writes to the training calendar.</div>
-    </div>
-
-    <!-- DOCUMENTS -->
-    <div id="pg-docs" class="pg">
-      <div class="ph-title">Document library</div>
-      <div class="ph-sub">Contracts Aurora has read. Upload additional documents to any project.</div>
-      <div id="docs-list"></div>
-      <div class="upzone" onclick="document.getElementById('doc-file').click()" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="handleDocDrop(event)" style="margin-top:10px">
-        <div style="font-size:20px;margin-bottom:6px">⬆</div>
-        <div style="font-size:12px;color:var(--text2);margin-bottom:3px">Upload additional document</div>
-        <div style="font-size:10px;color:var(--text3)">PDF, DOCX, TXT · drag & drop or click</div>
-        <input type="file" id="doc-file" style="display:none" multiple onchange="handleDocFiles(this.files)"/>
-      </div>
-    </div>
-
-    <!-- REPORTS -->
-    <div id="pg-reports" class="pg">
-      <div class="ph-title">Reports</div>
-      <div class="ph-sub">Select a client and report type. Aurora generates it using contract data.</div>
-      <div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
-        <label style="font-size:11px;color:var(--text2);margin:0">Client</label>
-        <select id="rep-client" onchange="updateRepProjects()" style="min-width:160px;width:auto"></select>
-        <label style="font-size:11px;color:var(--text2);margin:0">Project</label>
-        <select id="rep-project" style="min-width:160px;width:auto"></select>
-      </div>
-      <div class="rep-grid">
-        <div class="rep-card" onclick="generateReport('status')"><div style="font-size:18px;margin-bottom:7px;color:var(--blue)">📄</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Project status report</div><div style="font-size:11px;color:var(--text2)">Where we are, what's next, any issues.</div><div style="margin-top:8px"><span class="badge bb">Word</span></div></div>
-        <div class="rep-card" onclick="generateReport('milestones')"><div style="font-size:18px;margin-bottom:7px;color:var(--teal)">📊</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Deliverables tracker</div><div style="font-size:11px;color:var(--text2)">All deliverables, due dates, and status.</div><div style="margin-top:8px"><span class="badge bt">Excel</span></div></div>
-        <div class="rep-card" onclick="generateReport('risks')"><div style="font-size:18px;margin-bottom:7px;color:var(--amber)">🛡</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Risk register</div><div style="font-size:11px;color:var(--text2)">Risks, ratings, and mitigations.</div><div style="margin-top:8px"><span class="badge ba">Excel</span></div></div>
-        <div class="rep-card" onclick="generateReport('closeout')"><div style="font-size:18px;margin-bottom:7px;color:var(--teal)">🏁</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Close-out report</div><div style="font-size:11px;color:var(--text2)">What was delivered and recommendations.</div><div style="margin-top:8px"><span class="badge bt">Word</span></div></div>
-        <div class="rep-card" onclick="generateReport('invoices')"><div style="font-size:18px;margin-bottom:7px;color:var(--rose)">🧾</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Invoice summary</div><div style="font-size:11px;color:var(--text2)">Contract values and payment status.</div><div style="margin-top:8px"><span class="badge bt">Excel</span></div></div>
-        <div class="rep-card" onclick="generateReport('portfolio')"><div style="font-size:18px;margin-bottom:7px;color:var(--violet)">⬜</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Portfolio overview</div><div style="font-size:11px;color:var(--text2)">All active projects — status and dates.</div><div style="margin-top:8px"><span class="badge bb">Word</span></div></div>
-      </div>
-      <!-- Reports download directly — no preview panel needed -->
-    </div>
-
-  </div>
-</div>
-
-<!-- PROJECT DETAIL MODAL -->
-<div class="modal-bg" id="modal-bg" onclick="if(event.target===this)closeModal()">
-  <div class="modal">
-    <div class="modal-hdr">
-      <div><div class="modal-title" id="modal-title"></div><div class="modal-sub" id="modal-sub"></div></div>
-      <button class="modal-close" onclick="closeModal()">✕</button>
-    </div>
-    <div id="modal-body"></div>
-  </div>
-</div>
-
-<script>
-const PHASES = ['Kick-off','Deployment','Monitoring & Review','Reporting','Close-out','Completed'];
-const PHASE_DESC = {
-  0: 'Initial project meeting with client and R2S. Confirm scope, contacts, timelines, and expectations.',
-  1: 'Active service delivery. The contracted work is underway — assessments, training, audits, or consulting as per the SOW.',
-  2: 'Service or systems in place. Aurora drafts weekly summary emails covering progress, what has been done, what is next, and any actions needed from either party.',
-  3: 'Compiling and finalising all deliverables, reports, and documentation for client delivery.',
-  4: 'Final delivery confirmed. Invoice issued. Aurora sets 1-year and 2-year follow-up reminders in Outlook calendar.',
+const TASK_MODELS = {
+  chat:              'claude-haiku-4-5-20251001', // Haiku for chat to save credits
+  document_analysis: 'claude-haiku-4-5-20251001',
+  contract_extract:  'claude-sonnet-4-6', // Sonnet for accuracy with tables and financials
+  status_email:      'claude-haiku-4-5-20251001',
+  checkin_email:     'claude-haiku-4-5-20251001',
+  escalation_email:  'claude-haiku-4-5-20251001',
+  invoice_reminder:  'claude-haiku-4-5-20251001',
+  reminder_email:    'claude-haiku-4-5-20251001',
+  closeout_email:    'claude-haiku-4-5-20251001',
+  status_report:     'claude-haiku-4-5-20251001',
+  portfolio_report:  'claude-haiku-4-5-20251001',
+  closeout_report:   'claude-haiku-4-5-20251001',
 };
 
-let projects = [], drafts = [], chatHistory = [], lastReport = '', selectedPhase = 0;
+const TASK_TOKENS = {
+  chat: 800, document_analysis: 1500, contract_extract: 2000,
+  status_email: 400, checkin_email: 350, escalation_email: 450,
+  invoice_reminder: 300, reminder_email: 300, closeout_email: 400,
+  status_report: 800, portfolio_report: 900, closeout_report: 900,
+};
 
-// ── Navigation ────────────────────────────────────────────────────────────────
-function nav(id, el) {
-  document.querySelectorAll('.pg').forEach(p => p.classList.remove('on'));
-  document.querySelectorAll('.ni').forEach(n => n.classList.remove('on'));
-  document.getElementById('pg-' + id).classList.add('on');
-  if (el) el.classList.add('on');
-  if (id === 'suggestions')  loadSuggestions();
-  if (id === 'projects')    renderProjects();
-  if (id === 'comms')       loadDrafts();
-  if (id === 'milestones')  renderMilestones();
-  if (id === 'risks')       renderRisks();
-  if (id === 'stakeholders')renderStakeholders();
-  if (id === 'invoicing')   renderInvoicing();
-  if (id === 'docs')        renderDocs();
-}
+async function aurora(taskType, userMessage, context) {
+  const spend = await db.getSpend();
+  if (spend.total >= CAP_USD) throw new Error('MONTHLY_CAP_REACHED');
 
-async function api(path, opts = {}) {
-  const token = sessionStorage.getItem('aurora_token') || '';
-  const res = await fetch(path, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + token,
-      ...(opts.headers || {}),
-    },
+  const model     = TASK_MODELS[taskType] || 'claude-haiku-4-5-20251001';
+  const maxTokens = TASK_TOKENS[taskType] || 500;
+  const system    = context ? `${AURORA_PROMPT}\n\nPROJECT CONTEXT:\n${context}` : AURORA_PROMPT;
+
+  const response = await client.messages.create({
+    model, max_tokens: maxTokens,
+    system,
+    messages: [{ role: 'user', content: userMessage }],
   });
-  if (res.status === 401) {
-    sessionStorage.removeItem('aurora_token');
-    document.getElementById('login-screen').style.display = 'flex';
-    throw new Error('Session expired — please log in again');
+
+  const rates = model.includes('haiku') ? { in: 0.80, out: 4.00 } : { in: 3.00, out: 15.00 };
+  const cost  = (response.usage.input_tokens / 1e6) * rates.in + (response.usage.output_tokens / 1e6) * rates.out;
+  await db.recordSpend(cost);
+
+  if (spend.total + cost >= CAP_USD * 0.8 && spend.total < CAP_USD * 0.8) {
+    await sendInternalEmail('⚠ Aurora spend alert', `Monthly API spend has reached 80% of the $${CAP_USD} USD cap. Current: $${(spend.total + cost).toFixed(2)}`);
   }
-  return res.json();
+
+  return response.content.filter(b => b.type === 'text').map(b => b.text).join('');
 }
 
-// ── Projects ──────────────────────────────────────────────────────────────────
-async function loadProjects() {
-  const data = await api('/api/projects');
-  projects = data.projects || [];
-  updateOverview();
-  populateReportSelects();
+// ── Email (Outlook via nodemailer / Graph API) ────────────────────────────────
+async function getOutlookToken() {
+  const tenantId     = process.env.OUTLOOK_TENANT_ID;
+  const clientId     = process.env.OUTLOOK_CLIENT_ID;
+  const clientSecret = process.env.OUTLOOK_CLIENT_SECRET;
+  if (!tenantId || !clientId || !clientSecret) return null;
+  try {
+    const res = await axios.post(
+      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+      new URLSearchParams({ client_id: clientId, client_secret: clientSecret, scope: 'https://graph.microsoft.com/.default', grant_type: 'client_credentials' }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 10000 }
+    );
+    return res.data.access_token;
+  } catch (err) {
+    console.error('[Email] Token failed:', err.message);
+    return null;
+  }
+}
+
+async function sendEmail(to, subject, body, isInternal = false, cc = []) {
+  const token = await getOutlookToken();
+  const fromMailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+
+  if (token) {
+    try {
+      const toArray = Array.isArray(to) ? to : [to];
+      const ccArray = Array.isArray(cc) ? cc : (cc ? [cc] : []);
+      const message = {
+        subject,
+        body: { contentType: 'Text', content: body },
+        toRecipients: toArray.map(addr => ({ emailAddress: { address: addr } })),
+      };
+      if (ccArray.length > 0) {
+        message.ccRecipients = ccArray.map(addr => ({ emailAddress: { address: addr } }));
+      }
+      await axios.post(
+        `https://graph.microsoft.com/v1.0/users/${fromMailbox}/sendMail`,
+        { message },
+        { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+      );
+      console.log(`[Email] ✓ Sent to ${toArray.join(', ')}${ccArray.length ? ' CC: '+ccArray.join(', ') : ''}: ${subject}`);
+      return true;
+    } catch (err) {
+      console.error('[Email] Send failed:', err.response?.data || err.message);
+    }
+  }
+  // Fallback — log only
+  console.log(`[Email] [LOGGED - no Outlook config] To: ${to}${cc?' CC: '+cc:''} | Subject: ${subject}`);
+  return false;
+}
+
+async function sendInternalEmail(subject, body) {
+  return sendEmail(INTERNAL_EMAILS, subject, body, true);
+}
+
+async function saveDraftEmail(draft) {
+  // Save draft to Outlook shared mailbox drafts folder
+  const token = await getOutlookToken();
+  const fromMailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+  if (token) {
+    try {
+      await axios.post(
+        `https://graph.microsoft.com/v1.0/users/${fromMailbox}/messages`,
+        {
+          subject: draft.subject,
+          body: { contentType: 'Text', content: draft.body },
+          toRecipients: [{ emailAddress: { address: draft.toEmail || fromMailbox } }],
+        },
+        { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+      );
+      console.log(`[Email] Draft saved to Outlook: ${draft.subject}`);
+    } catch (err) {
+      console.error('[Email] Draft save failed:', err.message);
+    }
+  }
+}
+
+// ── Calendar (Outlook) ────────────────────────────────────────────────────────
+async function createCalendarReminder(subject, body, reminderDate) {
+  const token = await getOutlookToken();
+  const mailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+  if (!token) { console.log('[Calendar] No token — reminder logged only:', subject); return; }
+  try {
+    const start = new Date(reminderDate);
+    const end   = new Date(start.getTime() + 60 * 60 * 1000);
+    await axios.post(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/events`,
+      {
+        subject,
+        body: { contentType: 'Text', content: body },
+        start: { dateTime: start.toISOString(), timeZone: 'Australia/Brisbane' },
+        end:   { dateTime: end.toISOString(),   timeZone: 'Australia/Brisbane' },
+        isReminderOn: true, reminderMinutesBeforeStart: 60 * 24 * 3,
+      },
+      { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+    );
+    console.log(`[Calendar] ✓ Reminder set: ${subject} on ${reminderDate}`);
+  } catch (err) {
+    console.error('[Calendar] Failed:', err.message);
+  }
+}
+
+// ── Contract text extraction ──────────────────────────────────────────────────
+async function extractTextFromFile(filePath, mimeType) {
+  const ext = path.extname(filePath).toLowerCase();
+  try {
+    if (ext === '.pdf' || mimeType === 'application/pdf') {
+      const pdfParse = require('pdf-parse');
+      const buf  = fs.readFileSync(filePath);
+      const data = await pdfParse(buf);
+      return data.text;
+    }
+    if (ext === '.docx') {
+      const mammoth = require('mammoth');
+      const result  = await mammoth.extractRawText({ path: filePath });
+      return result.value;
+    }
+    return fs.readFileSync(filePath, 'utf8');
+  } catch (err) {
+    console.error('[Extract] Text extraction failed:', err.message);
+    return '';
+  }
+}
+
+async function analyseContract(rawText, filename) {
+  // Use up to 28000 chars to capture full proposals including cost summaries at end
+  const fullText = rawText.slice(0, 28000);
+
+  // Also extract a "tail" section — the last 5000 chars often has cost totals
+  const tailText = rawText.length > 15000 ? rawText.slice(-5000) : '';
+
+  const combinedText = fullText + (tailText ? '\n\n[END OF DOCUMENT — KEY TOTALS SECTION:]\n' + tailText : '');
+
+  const text = await aurora(
+    'contract_extract',
+    `You are reading a client contract or proposal for Risk 2 Solution (R2S). Extract ALL of the following information and return it as a valid JSON object with exactly these keys. Be thorough — read the ENTIRE document including the costs summary and commercial offer sections which are often near the end.
+
+IMPORTANT FOR VALUE FIELD: Look for a TOTAL or GRAND TOTAL line in the costs summary table. This is usually the single largest dollar figure in the document. Do NOT use a per-session rate or sub-total. Find the overall total project cost (e.g. TOTAL $63,000).
+
+{
+  "organisationName": "full legal organisation/company name of the client",
+  "clientName": "organisation name (same as above, used for display)",
+  "projectName": "project title or name of the engagement as written in the document",
+  "clientContact": "primary client contact person full name",
+  "clientEmail": "primary client contact email address",
+  "clientPhone": "primary client contact phone number",
+  "value": "TOTAL project cost only — the grand total from the costs summary e.g. $63,000. Do NOT list individual line items.",
+  "contractStart": "contract start date or engagement commencement date",
+  "dueDate": "project completion date, contract end date, or due date",
+  "summary": "full description of services R2S is providing — extract the key paragraphs describing what R2S will do for the client",
+  "deliverables": "all specific deliverables and stages listed — include phase names and what is delivered in each",
+  "milestones": "any key milestones, phases, or stages mentioned with dates or conditions",
+  "timeline": "overall project timeline description — start to finish with any phasing or scheduling mentioned",
+  "invoicingNotes": "full payment terms, invoicing schedule, milestone payment triggers, and invoicing frequency",
+  "consultant": "name(s) of any R2S consultant, trainer, or staff member assigned or mentioned",
+  "consultantEmail": "email address of the assigned consultant or trainer if mentioned",
+  "flightsRequired": "yes or no — are flights required for this engagement",
+  "accommodationRequired": "yes or no — is accommodation required for this engagement",
+  "notes": "any special conditions, exclusions, cancellation terms, or important requirements"
+}
+
+Return ONLY the JSON object. No markdown, no explanation, no other text. If a field is not found in the document, use an empty string "".
+
+Document: ${filename}
+---
+${combinedText}`,
+    null
+  );
+
+  try {
+    const clean = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(clean);
+  } catch (err) {
+    console.error('[Contract] JSON parse failed:', err.message);
+    return { summary: text, deliverables: '', clientName: '', projectName: filename };
+  }
+}
+
+// ── Consultant / trainer briefing email ──────────────────────────────────────
+async function sendConsultantBriefing(project, extracted, prebuiltContext) {
+  const DIANE = 'diane.k@risk2solution.com';
+
+  // Consultant email — use extracted email if available, otherwise fall back to info@ for now
+  const consultantEmail = extracted.consultantEmail || process.env.CONSULTANT_DEFAULT_EMAIL || 'info@risk2solution.com';
+  const consultantName  = extracted.consultant || project.consultant || 'Team';
+
+  const context = prebuiltContext || buildContext(project);
+
+  const firstName = consultantName.split(' ')[0];
+  const briefingBody = await aurora(
+    'consultant_briefing',
+    `Write a short project assignment email. Plain text only — no asterisks, no bold, no markdown formatting at all.
+
+Start exactly with:
+Hi ${firstName},
+
+You've been assigned to a new project for ${project.clientName} — ${project.projectName || project.clientName}. Commencing ${project.contractStart || 'TBC'} and due ${project.dueDate || 'TBC'}.
+
+Then write these four short sections with no section headings — just plain paragraphs and dot points:
+
+1. SCOPE (1-2 sentences only): What R2S is doing for this client. Be concise.
+
+2. KEY DELIVERABLES (3-5 dot points maximum, starting with •): The most important deliverables only. Not the full list.
+
+3. TIMELINE (one sentence only): Just the total duration e.g. "The engagement runs for approximately 6 weeks from commencement." Do not list individual phases.
+
+4. TRAVEL (one line only if flights or accommodation are needed): State simply e.g. "Flights and accommodation are required for this engagement." Skip this section entirely if not required.
+
+Then end with exactly:
+
+Here is the link to the client SharePoint folder: [Diane to insert SP link]
+
+Please ensure all working notes, materials, and deliverables are saved to this folder throughout the engagement in accordance with our File Management SOP.
+
+Please confirm you have received this briefing and are clear on the requirements. Contact Diane if you have any questions.
+
+Kind regards,
+
+Diane Kruger
+Corporate Operations Lead
+Risk 2 Solution Group
+P: 1300 459 970 | M: +61 415 748 747
+E: diane.k@risk2solution.com
+W: www.risk2solution.com
+Queensland, Australia`,
+    context
+  );
+
+  const subject = `Project briefing: ${project.clientName} — ${project.projectName || project.clientName}`;
+
+  // Save as draft in Outlook shared mailbox (requires approval before sending)
+  const draft = {
+    id: `d_${Date.now()}_consult`,
+    projectId: project.id,
+    clientName: project.clientName,
+    projectName: project.projectName,
+    type: 'consultant_briefing',
+    urgency: 'routine',
+    toName: consultantName,
+    toEmail: consultantEmail,
+    ccEmail: DIANE,
+    subject,
+    body: briefingBody,
+    source: 'auto',
+  };
+
+  await db.saveDraft(draft);
+
+  // Save to Outlook drafts with CC
+  const token = await getOutlookToken();
+  const fromMailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+  if (token) {
+    try {
+      await axios.post(
+        `https://graph.microsoft.com/v1.0/users/${fromMailbox}/messages`,
+        {
+          subject,
+          body: { contentType: 'Text', content: briefingBody },
+          toRecipients: [{ emailAddress: { address: consultantEmail } }],
+          ccRecipients: [{ emailAddress: { address: DIANE } }],
+        },
+        { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+      );
+      console.log(`[Briefing] ✓ Consultant briefing draft saved for ${consultantName} (${consultantEmail})`);
+    } catch (err) {
+      console.error('[Briefing] Draft save failed:', err.message);
+    }
+  } else {
+    console.log(`[Briefing] [LOGGED] Consultant briefing for ${consultantName} — ${subject}`);
+  }
+
+  // Notify internal team that a briefing has been prepared
+  await sendInternalEmail(
+    `[Aurora] Consultant briefing ready: ${project.clientName}`,
+    `Aurora has prepared a consultant briefing email for ${consultantName} on the ${project.projectName || project.clientName} project.
+
+Please review and approve in the Comms Drafts section of Aurora or in the info@risk2solution.com Outlook shared mailbox drafts folder before sending.
+
+Project: ${project.projectName || project.clientName}
+Client: ${project.clientName}
+Consultant: ${consultantName}
+Due date: ${project.dueDate || 'TBC'}
+
+Aurora
+R2S Project Management Intelligence`
+  );
+
+  return draft;
+}
+
+// ── Project context builder ───────────────────────────────────────────────────
+const PHASES = ['Kick-off', 'Deployment', 'Monitoring & Review', 'Reporting', 'Close-out', 'Completed'];
+
+function buildContext(p, docs = []) {
+  if (!p || p.type === 'ongoing') return null;
+  const docText = docs.map(d => d.extract ? `Contract: ${d.name}\n${d.extract.slice(0, 2000)}` : '').filter(Boolean).join('\n\n');
+  return [
+    `Organisation: ${p.clientName}`,
+    `Project: ${p.projectName || p.clientName}`,
+    `Client contact: ${p.clientContact || ''}${p.clientEmail ? ` (${p.clientEmail})` : ''}${p.clientPhone ? ` Ph: ${p.clientPhone}` : ''}`,
+    `Phase: ${PHASES[p.phase || 0]}`,
+    `Status: ${p.status || 'In Progress'}`,
+    `Contract start: ${p.contractStart || 'TBC'}`,
+    `Due / completion date: ${p.dueDate || 'TBC'}`,
+    `Contract value: ${p.value || 'TBC'}`,
+    p.summary ? `Summary of service: ${p.summary}` : '',
+    p.deliverables ? `Deliverables: ${p.deliverables}` : '',
+    p.milestones ? `Milestones: ${p.milestones}` : '',
+    p.timeline ? `Timeline: ${p.timeline}` : '',
+    p.invoicingNotes ? `Invoicing terms: ${p.invoicingNotes}` : '',
+    p.consultant ? `Consultant/Trainer: ${p.consultant}${p.consultantEmail ? ` (${p.consultantEmail})` : ''}` : '',
+    p.flightsRequired ? `Flights required: ${p.flightsRequired}` : '',
+    p.accommodationRequired ? `Accommodation required: ${p.accommodationRequired}` : '',
+    p.notes ? `Notes / special requirements: ${p.notes}` : '',
+    docText ? `\nContract detail:\n${docText}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+// ── Monday.com sync (backup) ──────────────────────────────────────────────────
+const ONGOING_KEYWORDS = ['ongoing training delivery', 'ongoing training', 'ongoing', 'retainer', 'training delivery'];
+
+function isOngoing(status) {
+  if (!status) return false;
+  return ONGOING_KEYWORDS.some(k => status.toLowerCase().includes(k));
 }
 
 async function syncMonday() {
-  document.getElementById('projects-list').innerHTML = '<div style="color:var(--text3);font-size:12px">Syncing from Monday.com…</div>';
-  await api('/api/projects/sync', { method: 'POST' });
-  await loadProjects();
-  renderProjects();
+  const apiKey  = process.env.MONDAY_API_KEY;
+  const boardId = process.env.MONDAY_BOARD_ID;
+  if (!apiKey || !boardId) return [];
+
+  try {
+    const query = `query {
+      boards(ids:[${boardId}]) {
+        items_page(limit: 100) {
+          items {
+            id name
+            column_values { id type text value }
+          }
+        }
+      }
+    }`;
+
+    const res = await axios.post('https://api.monday.com/v2', { query },
+      { headers: { Authorization: apiKey, 'Content-Type': 'application/json', 'API-Version': '2024-01' }, timeout: 10000 }
+    );
+
+    const items = res.data?.data?.boards?.[0]?.items_page?.items || [];
+
+    for (const item of items) {
+      const byId   = id   => item.column_values.find(c => c.id === id)?.text || '';
+      const byType = type => item.column_values.find(c => c.type === type)?.text || '';
+
+      const status  = byId('color_mks0pnz5') || byType('color') || '';
+      const ongoing = isOngoing(status);
+      const numCols = item.column_values.filter(c => c.type === 'numbers' && c.text && parseFloat(c.text) > 0);
+      const rawVal  = numCols[0]?.text || '';
+      const displayValue = rawVal ? '$' + parseFloat(rawVal.replace(/[$,]/g,'')).toLocaleString('en-AU') : '';
+      const longTexts = item.column_values.filter(c => c.type === 'long_text' && c.text);
+      const dateCols  = item.column_values.filter(c => c.type === 'date' && c.text);
+      const spCol     = item.column_values.find(c => c.type === 'link');
+      let sharepointUrl = '';
+      if (spCol?.value) { try { const v = JSON.parse(spCol.value); sharepointUrl = v.url || ''; } catch { sharepointUrl = spCol.text || ''; } }
+
+      const project = {
+        id:            `monday_${item.id}`,
+        mondayId:      item.id,
+        clientName:    item.name,
+        projectName:   byId('text__1') || item.name,
+        clientContact: byId('text8__1') || '',
+        clientEmail:   byId('client_contact_email__1') || byType('email') || '',
+        status,
+        type:          ongoing ? 'ongoing' : 'standard',
+        phase:         0,
+        value:         displayValue,
+        summary:       longTexts[0]?.text || '',
+        deliverables:  item.column_values.find(c => c.id?.includes('deliver'))?.text || '',
+        invoicingNotes:item.column_values.find(c => c.id?.includes('invoic'))?.text || '',
+        consultant:    item.column_values.find(c => c.id?.includes('trainer') || c.id?.includes('consultant'))?.text || '',
+        dueDate:       dateCols[1]?.text || dateCols[0]?.text || '',
+        contractStart: dateCols[0]?.text || '',
+        notes:         longTexts[1]?.text || '',
+        sharepointUrl,
+      };
+
+      await db.upsertProject(project);
+    }
+
+    const count = items.length;
+    console.log(`[Monday] Synced ${count} projects`);
+    return await db.getProjects();
+  } catch (err) {
+    console.error('[Monday] Sync failed:', err.message);
+    return db.getProjects();
+  }
 }
 
-function daysUntil(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d)) return null;
-  return Math.round((d - new Date()) / (1000 * 60 * 60 * 24));
+// ── Due date reminder checker ─────────────────────────────────────────────────
+async function checkDueDateReminders() {
+  console.log('[Reminders] Checking due dates...');
+  const projects = await db.getProjects();
+  const standard = projects.filter(p => p.type === 'standard' && !['Completed','Terminated','Closed'].includes(p.status));
+  const today    = new Date();
+
+  for (const p of standard) {
+    if (!p.dueDate) continue;
+    const due  = new Date(p.dueDate);
+    if (isNaN(due)) continue;
+    const days = Math.round((due - today) / (1000 * 60 * 60 * 24));
+    const context = buildContext(p);
+
+    // Send reminders at 14, 7, and 3 days before due date
+    if ([14, 7, 3].includes(days)) {
+      const urgency = days <= 3 ? 'URGENT' : days <= 7 ? 'Important' : 'Reminder';
+      const subject = `[Aurora] ${urgency}: ${p.clientName} — ${p.projectName || 'Project'} due in ${days} day${days !== 1 ? 's' : ''}`;
+
+      const body = await aurora(
+        'reminder_email',
+        `Draft an internal reminder email to the R2S team. The ${p.projectName || p.clientName} project is due in ${days} days (${p.dueDate}).
+Current phase: ${PHASES[p.phase || 0]}.
+${p.summary ? `Service: ${p.summary.slice(0, 300)}` : ''}
+${p.deliverables ? `Deliverables: ${p.deliverables.slice(0, 200)}` : ''}
+Ask the team to review the phase completion status, confirm all deliverables are on track, and flag anything outstanding. Keep it short and direct. This is an internal email only.`,
+        context
+      );
+
+      await sendInternalEmail(subject, body);
+      console.log(`[Reminders] ✓ ${days}-day reminder sent for ${p.clientName}`);
+    }
+
+    // Day of due date
+    if (days === 0) {
+      const subject = `[Aurora] Due today: ${p.clientName} — ${p.projectName || 'Project'}`;
+      const body = `The contract end date for ${p.clientName} (${p.projectName || 'project'}) is today.\n\nCurrent phase: ${PHASES[p.phase || 0]}\n\nPlease confirm whether the project is ready for close-out or if the date needs to be updated in Aurora.`;
+      await sendInternalEmail(subject, body);
+    }
+
+    // Overdue
+    if (days < 0 && days >= -3) {
+      const subject = `[Aurora] OVERDUE: ${p.clientName} — ${p.projectName || 'Project'} (${Math.abs(days)} days overdue)`;
+      const body = `The ${p.clientName} project was due ${Math.abs(days)} days ago and has not been marked complete in Aurora.\n\nPlease review and either update the due date or move to Close-out.`;
+      await sendInternalEmail(subject, body);
+    }
+  }
 }
 
-function updateOverview() {
+// ── Ensure Outlook category exists ───────────────────────────────────────────
+async function ensureOutlookCategory(token, mailbox) {
+  try {
+    // Check if category already exists
+    const res = await axios.get(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/outlook/masterCategories`,
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
+    );
+    const exists = (res.data?.value || []).some(c => c.displayName === 'Aurora Processed');
+    if (!exists) {
+      // Create it with green colour
+      await axios.post(
+        `https://graph.microsoft.com/v1.0/users/${mailbox}/outlook/masterCategories`,
+        { displayName: 'Aurora Processed', color: 'preset5' }, // preset5 = green
+        { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 10000 }
+      );
+      console.log('[Category] Created "Aurora Processed" category in Outlook');
+    }
+  } catch (err) {
+    console.error('[Category] Could not create category:', err.response?.data?.error?.message || err.message);
+  }
+}
+
+// ── Create tentative calendar booking ────────────────────────────────────────
+async function createCalendarBooking(booking, tentative = true) {
+  const token = await getOutlookToken();
+  if (!token) { console.log('[Calendar] No token — booking logged only'); return null; }
+  const mailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+
+  try {
+    const start = new Date(booking.startDateTime);
+    const end   = new Date(start.getTime() + (booking.durationMinutes || 60) * 60 * 1000);
+
+    // Build attendee list
+    const attendees = [];
+    if (booking.consultantEmail) attendees.push({ emailAddress: { address: booking.consultantEmail, name: booking.consultantName || booking.consultantEmail }, type: 'required' });
+    if (booking.clientEmail)     attendees.push({ emailAddress: { address: booking.clientEmail, name: booking.clientName || booking.clientEmail }, type: 'required' });
+    attendees.push({ emailAddress: { address: 'diane.k@risk2solution.com', name: 'Diane Kruger' }, type: 'required' });
+
+    const event = {
+      subject: booking.title,
+      body: { contentType: 'Text', content: booking.description || '' },
+      start: { dateTime: start.toISOString(), timeZone: 'Australia/Brisbane' },
+      end:   { dateTime: end.toISOString(),   timeZone: 'Australia/Brisbane' },
+      location: { displayName: booking.location || booking.clientName || 'To be confirmed' },
+      attendees,
+      showAs: tentative ? 'tentative' : 'busy',
+      isOnlineMeeting: booking.online || false,
+      isReminderOn: true,
+      reminderMinutesBeforeStart: 60 * 24, // 24hr reminder
+    };
+
+    const res = await axios.post(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/calendars`,
+      null,
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 5000 }
+    );
+
+    // Find the training calendar
+    const calsRes = await axios.get(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/calendars`,
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
+    );
+    const trainingCal = calsRes.data?.value?.find(c =>
+      c.name?.toLowerCase().includes('training') || c.name?.toLowerCase().includes('education')
+    );
+    const calId = trainingCal?.id || 'primary';
+
+    // Create the event
+    const eventRes = await axios.post(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/calendars/${calId}/events`,
+      event,
+      { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+    );
+
+    console.log(`[Calendar] ${tentative ? 'Tentative' : 'Confirmed'} booking created: ${booking.title}`);
+    return eventRes.data?.id;
+  } catch (err) {
+    console.error('[Calendar] Booking failed:', err.response?.data?.error?.message || err.message);
+    return null;
+  }
+}
+
+// ── Send meeting invites via Outlook ─────────────────────────────────────────
+async function sendMeetingInvite(booking, eventId) {
+  const token = await getOutlookToken();
+  if (!token || !eventId) return;
+  const mailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+
+  try {
+    // Confirm the tentative event (changes showAs to 'busy' and sends invites)
+    await axios.patch(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/events/${eventId}`,
+      { showAs: 'busy' },
+      { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 10000 }
+    );
+    console.log(`[Calendar] Meeting invites sent for: ${booking.title}`);
+  } catch (err) {
+    console.error('[Calendar] Send invite failed:', err.message);
+  }
+}
+
+// ── Extract calendar event from email body ────────────────────────────────────
+async function extractCalendarEventFromEmail(emailBody, emailSubject, project) {
+  try {
+    const analysis = await aurora('status_email',
+      `Analyse this email to determine if it mentions a specific date and time for a meeting, training session, workshop, or face-to-face deliverable related to the project.
+
+Project: ${project.projectName || project.clientName}
+Client: ${project.clientName}
+Email subject: ${emailSubject}
+Email content: ${emailBody.slice(0, 2000)}
+
+Respond in JSON only:
+{
+  "hasEvent": true or false,
+  "eventType": "training" or "workshop" or "meeting" or "site_visit" or "presentation" or "other",
+  "title": "short event title",
+  "date": "YYYY-MM-DD or empty string if not found",
+  "time": "HH:MM in 24hr format or empty string",
+  "durationMinutes": 60,
+  "location": "location mentioned or empty string",
+  "description": "brief description of what this event is for",
+  "requiresConsultant": true or false,
+  "requiresClient": true or false
+}
+
+Return ONLY the JSON. If no specific date is mentioned, set hasEvent to false.`,
+      null
+    );
+
+    const clean = analysis.replace(/```json|```/g, '').trim();
+    return JSON.parse(clean);
+  } catch (err) {
+    return { hasEvent: false };
+  }
+}
+
+// ── Read consultant reply emails from info@ inbox ─────────────────────────────
+async function readConsultantReplies() {
+  const token = await getOutlookToken();
+  if (!token) { console.log('[Poll] No Outlook token — skipping'); return; }
+  const mailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+
+  try {
+    // Ensure the Aurora Processed category exists in Outlook
+    await ensureOutlookCategory(token, mailbox);
+
+    // Get unread emails NOT already tagged with Aurora Processed — last 7 days
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Check both inbox and sent items
+    const folders = ['inbox', 'sentitems'];
+    let allMessages = [];
+
+    for (const folder of folders) {
+      try {
+        // Fetch recent messages — filter in code to avoid OData type issues
+        const url = `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${folder}/messages?$select=id,subject,from,toRecipients,body,receivedDateTime,sentDateTime,isRead,categories&$top=50&$orderby=receivedDateTime desc`;
+        const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 });
+        const sinceDate = new Date(since);
+        const msgs = (res.data?.value || [])
+          .filter(m => {
+            const msgDate = new Date(m.receivedDateTime || m.sentDateTime || 0);
+            if (msgDate < sinceDate) return false; // too old
+            // Skip only if already tagged Aurora Processed
+            const cats = m.categories || [];
+            if (cats.includes('Aurora Processed')) return false;
+            return true; // process ALL emails not yet tagged — read or unread
+          })
+          .map(m => ({ ...m, folder }));
+        allMessages = allMessages.concat(msgs);
+        console.log(`[Poll] ${folder}: ${msgs.length} email(s) to process (last 7 days, not yet tagged)`);
+      } catch(folderErr) {
+        console.error(`[Poll] Error reading ${folder}:`, folderErr.response?.data?.error?.message || folderErr.message);
+      }
+    }
+
+    if (!allMessages.length) {
+      console.log('[Poll] No new emails to process — all recent emails already tagged Aurora Processed');
+      return;
+    }
+    console.log(`[Poll] Processing ${allMessages.length} email(s) total`);
+
+    const projects = await db.getProjects();
+
+    for (const msg of allMessages) {
+      const fromEmail = msg.from?.emailAddress?.address || '';
+      const fromName  = msg.from?.emailAddress?.name || fromEmail;
+      const subject   = msg.subject || '';
+      const bodyText  = msg.body?.content?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 3000) || '';
+
+      console.log(`[Poll] Checking: "${subject}" from ${fromEmail}`);
+
+      // Determine if this is internal R2S or external (client/other)
+      const isInternal = fromEmail.toLowerCase().endsWith('@risk2solution.com') ||
+                         fromEmail.toLowerCase().endsWith('@presilience.com');
+
+      // Find ALL matching projects — email may mention multiple
+      const bodyLower    = bodyText.toLowerCase();
+      const subjectLower = subject.toLowerCase();
+      const matchedProjects = projects.filter(p =>
+        p.type === 'standard' && p.clientName && (
+          subjectLower.includes(p.clientName.toLowerCase()) ||
+          subjectLower.includes((p.projectName || '').toLowerCase().slice(0, 12)) ||
+          bodyLower.includes(p.clientName.toLowerCase()) ||
+          bodyLower.includes((p.projectName || '').toLowerCase().slice(0, 12)) ||
+          (p.clientEmail && fromEmail.toLowerCase() === p.clientEmail.toLowerCase())
+        )
+      );
+
+      console.log(`[Poll] Project matches: ${matchedProjects.length > 0 ? matchedProjects.map(p => p.clientName).join(', ') : 'NONE'}  Internal: ${isInternal}`);
+
+
+      // If no project match — tag and optionally alert Diane
+      if (!matchedProjects.length) {
+        const isNoise = /remittance|payment|invoice|survey|notification|enquiry form|abandoned call|tender|digest|order|fmclarity|localbuy|vendorpanel/i.test(subject);
+        if (isInternal && bodyText.length > 100 && !isNoise) {
+          await sendEmail('diane.k@risk2solution.com',
+            `[Aurora] R2S staff email — no project match: ${subject}`,
+            `Aurora received an email from ${fromName} (${fromEmail}) that could not be matched to any existing project.\n\nSubject: ${subject}\n\nContent summary:\n${bodyText.slice(0, 600)}\n\nIf this relates to a project, please create it in Aurora.\n\nAurora\nR2S Project Management Intelligence`,
+            true
+          );
+        }
+        try {
+          await axios.patch(
+            `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
+            { categories: ['Aurora Processed'] },
+            { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+          );
+        } catch(e) {}
+        continue;
+      }
+
+      // Process EACH matched project — one email may reference multiple projects
+      for (const matchedProject of matchedProjects) {
+        console.log(`[Poll] Processing for: ${matchedProject.clientName}`);
+
+      // Full autonomous analysis
+      try {
+        const analysis = await aurora('contract_extract',
+          `Analyse this email and return a JSON object. Return ONLY the JSON — no explanation, no preamble, no markdown, just the raw JSON object starting with { and ending with }.
+
+Project context:
+- Project: ${matchedProject.projectName || matchedProject.clientName}
+- Client: ${matchedProject.clientName}
+- Current phase: ${PHASES[matchedProject.phase || 0]} (index: ${matchedProject.phase || 0})
+- Consultant: ${matchedProject.consultant || 'Unknown'}
+- Deliverables: ${(matchedProject.deliverables || '').slice(0, 200)}
+
+Email:
+From: ${fromEmail}
+Subject: ${subject}
+Content: ${bodyText.slice(0, 2000)}
+
+PHASE CHANGE RULES — be proactive, not conservative:
+- If email says work is "commencing", "starting", "about to begin", "wanting to start" → move to Deployment (phase 1)
+- If email says work is "underway", "in progress", "delivering", "on site" → move to Deployment (phase 1)  
+- If email says report is "submitted", "sent to client", "delivered", "complete", "finalised" → move to Reporting (phase 3)
+- If email says "final report sent", "all deliverables complete", "wrapping up" → move to Close-out (phase 4)
+- If email says "waiting", "delayed", "on hold", "postponed" → set newStatus to "On Hold"
+- Only keep current phase if email has no project progress information
+
+INVOICE RULES — trigger if any of these are mentioned:
+- Delivery of any training session or workshop
+- Submission of any report or deliverable
+- Project commencement (first milestone)
+- Project completion
+
+Return this exact JSON (no other text):
+{"phaseChange":false,"newPhase":${matchedProject.phase || 0},"newStatus":"","statusSummary":"summary here","completedDeliverables":[],"inProgressDeliverables":[],"invoiceTriggered":false,"invoiceNote":"","needsKickoffScheduling":false,"kickoffNote":"","hasBookableEvent":false,"eventDate":"","eventTime":"","eventType":"","eventTitle":"","eventDuration":60,"requiresAttention":false,"attentionReason":"","activityLogEntry":"summary of what happened"}`,
+          buildContext(matchedProject)
+        );
+
+        // Extract JSON from response — try multiple strategies
+        let parsed;
+        try {
+          let clean = analysis.trim();
+          // Remove markdown code blocks
+          clean = clean.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+          // Find JSON object if surrounded by other text
+          const jsonMatch = clean.match(/\{[\s\S]*\}/);
+          if (jsonMatch) clean = jsonMatch[0];
+          console.log(`[Replies] Parsing analysis for ${matchedProject.clientName}:`, clean.slice(0, 150));
+          parsed = JSON.parse(clean);
+          console.log(`[Replies] Analysis: phaseChange=${parsed.phaseChange}, newPhase=${parsed.newPhase}, invoice=${parsed.invoiceTriggered}, kickoff=${parsed.needsKickoffScheduling}`);
+        } catch(jsonErr) {
+          console.error('[Replies] JSON parse failed. Raw:', analysis.slice(0, 400));
+          // Notify Diane manually
+          await sendEmail('diane.k@risk2solution.com',
+            `[Aurora] Email received — needs manual review: ${matchedProject.clientName}`,
+            `Aurora received an email from ${fromEmail} about ${matchedProject.projectName || matchedProject.clientName} but could not automatically analyse it.\n\nSubject: ${subject}\n\nContent:\n${bodyText.slice(0, 1000)}\n\nPlease review and update Aurora project record manually.\n\nAurora\nR2S Project Management Intelligence`,
+            true
+          );
+          await db.logActivity(matchedProject.id, { type: 'email_processed', source: fromEmail, subject, summary: `Email from ${fromEmail} received — manual review needed` });
+          continue;
+        }
+
+        console.log(`[Replies] Analysis complete for ${matchedProject.clientName}: phaseChange=${parsed.phaseChange}, newPhase=${parsed.newPhase}, invoiceTriggered=${parsed.invoiceTriggered}, needsKickoff=${parsed.needsKickoffScheduling}, hasEvent=${parsed.hasBookableEvent}`);
+
+        const actions = [];
+
+        // ── 1. Update project phase ───────────────────────────────────────────
+        if (parsed.phaseChange && typeof parsed.newPhase === 'number' && parsed.newPhase !== (matchedProject.phase || 0)) {
+          await db.updateProjectField(matchedProject.id, { phase: parsed.newPhase });
+          matchedProject.phase = parsed.newPhase;
+          actions.push(`Phase updated: ${PHASES[parsed.newPhase - 1] || 'Kick-off'} → ${PHASES[parsed.newPhase]}`);
+          console.log(`[Replies] Phase updated: ${matchedProject.clientName} → ${PHASES[parsed.newPhase]}`);
+          // Add suggestion so Diane can revert if Aurora got it wrong
+          await db.saveSuggestion({
+            id: `sug_phase_${matchedProject.id}_${Date.now()}`,
+            projectId: matchedProject.id,
+            clientName: matchedProject.clientName,
+            projectName: matchedProject.projectName,
+            type: 'phase_advance',
+            title: `Aurora moved ${matchedProject.clientName} to ${PHASES[parsed.newPhase]}`,
+            reason: `Based on an email from ${fromEmail}, Aurora automatically updated this project to ${PHASES[parsed.newPhase]}. Please confirm this is correct, or dismiss to revert.`,
+            action: { phase: parsed.newPhase },
+            confirmLabel: 'Confirmed — keep this phase',
+            dismissLabel: 'Revert to previous phase',
+          });
+        }
+
+        // ── 2. Update project status ──────────────────────────────────────────
+        if (parsed.newStatus && parsed.newStatus !== matchedProject.status) {
+          await db.updateProjectField(matchedProject.id, { status: parsed.newStatus });
+          actions.push(`Status updated to: ${parsed.newStatus}`);
+        }
+
+        // ── 3. Update deliverable statuses ────────────────────────────────────
+        if (parsed.completedDeliverables?.length || parsed.inProgressDeliverables?.length) {
+          const deliverables = await db.getDeliverables(matchedProject.id);
+          if (deliverables.length > 0) {
+            for (const delName of (parsed.completedDeliverables || [])) {
+              const match = deliverables.find(d =>
+                d.name.toLowerCase().includes(delName.toLowerCase().slice(0,12)) ||
+                delName.toLowerCase().includes(d.name.toLowerCase().slice(0,12))
+              );
+              if (match) {
+                await db.updateDeliverable(matchedProject.id, match.id, { status: 'Complete' });
+                actions.push(`Deliverable marked complete: ${match.name}`);
+              }
+            }
+            for (const delName of (parsed.inProgressDeliverables || [])) {
+              const match = deliverables.find(d =>
+                d.name.toLowerCase().includes(delName.toLowerCase().slice(0,12)) ||
+                delName.toLowerCase().includes(d.name.toLowerCase().slice(0,12))
+              );
+              if (match && match.status !== 'Complete') {
+                await db.updateDeliverable(matchedProject.id, match.id, { status: 'In Progress' });
+                actions.push(`Deliverable in progress: ${match.name}`);
+              }
+            }
+          }
+        }
+
+        // ── 4. Invoice trigger ────────────────────────────────────────────────
+        if (parsed.invoiceTriggered && matchedProject.clientEmail) {
+          try {
+            const invoiceBody = await aurora('invoice_reminder',
+              `Draft a professional invoice reminder email from R2S to ${matchedProject.clientContact || 'the client'} at ${matchedProject.clientName}.
+
+An invoice milestone has been reached: ${parsed.invoiceNote}
+
+Project: ${matchedProject.projectName || matchedProject.clientName}
+Contract value: ${matchedProject.value || 'As per contract'}
+Invoicing terms: ${matchedProject.invoicingNotes || 'As per contract'}
+
+Write a brief, professional email notifying them that an invoice will be issued. Plain text, no asterisks. Sign off as Diane Kruger.`,
+              null
+            );
+            const draft = {
+              id: `d_${Date.now()}_inv`,
+              projectId: matchedProject.id,
+              clientName: matchedProject.clientName,
+              projectName: matchedProject.projectName,
+              type: 'invoice_reminder',
+              urgency: 'routine',
+              toName: matchedProject.clientContact,
+              toEmail: matchedProject.clientEmail,
+              subject: `Invoice — ${matchedProject.projectName || matchedProject.clientName}`,
+              body: invoiceBody,
+              source: 'auto',
+            };
+            await db.saveDraft(draft);
+            await saveDraftEmail(draft);
+            actions.push(`Invoice email drafted for Diane to review`);
+          } catch(invErr) { console.error('[Invoice]', invErr.message); }
+        }
+
+        // ── 5. Kick-off scheduling ────────────────────────────────────────────
+        if (parsed.needsKickoffScheduling) {
+          try {
+            const availableDates = await getConsultantAvailability();
+            let availText = 'Please check the training calendar for available times.';
+            if (availableDates?.length) {
+              availText = availableDates.map((d, i) => {
+                const dateStr = d.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+                const timeStr = d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true });
+                return `Option ${i+1}: ${dateStr} at ${timeStr} AEST`;
+              }).join('\n');
+            }
+            await sendEmail('diane.k@risk2solution.com',
+              `[Aurora] Kick-off scheduling needed: ${matchedProject.clientName}`,
+              `A kick-off meeting needs to be scheduled for the ${matchedProject.projectName || matchedProject.clientName} project.\n\nReason: ${parsed.kickoffNote}\n\nBased on the R2S Training & Education calendar, these slots appear available:\n\n${availText}\n\nPlease confirm with ${matchedProject.consultant || 'the consultant'} and schedule with the client.\n\nAurora\nR2S Project Management Intelligence`,
+              true
+            );
+            actions.push(`Kick-off scheduling options sent to Diane`);
+          } catch(kErr) { console.error('[Kickoff]', kErr.message); }
+        }
+
+        // ── 6. Calendar event from email ──────────────────────────────────────
+        if (parsed.hasBookableEvent && parsed.eventDate) {
+          try {
+            const booking = {
+              title: parsed.eventTitle || `${parsed.eventType} — ${matchedProject.clientName}`,
+              description: `${parsed.statusSummary || ''}\n\nSource: Email from ${fromEmail}`,
+              startDateTime: `${parsed.eventDate}T${parsed.eventTime || '09:00'}:00`,
+              durationMinutes: parsed.eventDuration || 60,
+              location: matchedProject.clientName,
+              clientName: matchedProject.clientName,
+              clientEmail: matchedProject.clientEmail,
+              consultantName: matchedProject.consultant,
+              consultantEmail: matchedProject.consultantEmail || 'info@risk2solution.com',
+              projectId: matchedProject.id,
+            };
+            const eventId = await createCalendarBooking(booking, true);
+            if (eventId) {
+              await db.saveSuggestion({
+                id: `sug_cal_${matchedProject.id}_${Date.now()}`,
+                projectId: matchedProject.id,
+                clientName: matchedProject.clientName,
+                projectName: matchedProject.projectName,
+                type: 'schedule_kickoff',
+                title: `Tentative: ${booking.title} on ${parsed.eventDate}`,
+                reason: `Aurora detected a scheduled ${parsed.eventType} in an email from ${fromEmail}. A tentative booking has been added to the R2S Training & Education calendar. Approve to send meeting invites.`,
+                action: { calendarEventId: eventId, booking },
+                confirmLabel: 'Confirm & send invites',
+                dismissLabel: 'Cancel tentative booking',
+              });
+              actions.push(`Tentative calendar booking created: ${booking.title} on ${parsed.eventDate}`);
+            }
+          } catch(calErr) { console.error('[Calendar]', calErr.message); }
+        }
+
+        // ── 7. Log activity on project ────────────────────────────────────────
+        await db.logActivity(matchedProject.id, {
+          type: 'email_processed',
+          source: fromEmail,
+          subject,
+          summary: parsed.activityLogEntry || parsed.statusSummary,
+          actions,
+        });
+
+        // ── 8. Notify Diane with full summary ─────────────────────────────────
+        const actionsText = actions.length
+          ? `\nActions taken by Aurora:\n${actions.map(a => `• ${a}`).join('\n')}\n`
+          : '\nNo automatic actions were taken.\n';
+
+        await sendEmail('diane.k@risk2solution.com',
+          `[Aurora] Email processed: ${matchedProject.clientName}${actions.length ? ` — ${actions.length} action${actions.length > 1 ? 's' : ''} taken` : ''}`,
+          `Aurora has processed an email from ${fromEmail} regarding the ${matchedProject.projectName || matchedProject.clientName} project.\n\nSummary: ${parsed.statusSummary}\n${actionsText}\nPlease log into Aurora to review.\n\n${process.env.FRONTEND_URL || ''}\n\nAurora\nR2S Project Management Intelligence`,
+          true
+        );
+
+        console.log(`[Replies] ✓ ${matchedProject.clientName}: ${actions.length} actions taken`);
+
+      } catch (err) {
+        if (err.message === 'MONTHLY_CAP_REACHED') break;
+        console.error('[Replies] Analysis failed:', err.message);
+      }
+
+      // Mark as read and tag with Aurora Processed category (always, regardless of analysis result)
+      try {
+        await axios.patch(
+          `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
+          { isRead: true, categories: ['Aurora Processed'] },
+          { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+        );
+      } catch(patchErr) {
+        console.error('[Poll] Mark read/tag failed:', patchErr.message);
+      }
+
+      } // end for each matched project
+
+    } // end for each message
+  } catch (err) {
+    console.error('[Replies] Read failed:', err.message);
+  }
+}
+
+// ── Weekly consultant check-in draft ─────────────────────────────────────────
+async function generateWeeklyConsultantCheckins(projects) {
+  const active = projects.filter(p =>
+    p.type === 'standard' &&
+    p.consultant &&
+    !['Completed','Terminated','Closed'].includes(p.status) &&
+    [1, 2, 3].includes(p.phase) // Deployment, Monitoring, Reporting phases only
+  );
+
+  for (const p of active) {
+    try {
+      const context = buildContext(p);
+      const firstName = (p.consultant || '').split(' ')[0];
+      const text = await aurora('checkin_email',
+        `Draft a short weekly check-in email from Diane (R2S Project Manager) to ${p.consultant}, the assigned consultant/trainer on the ${p.projectName || p.clientName} project.
+
+The email should:
+- Be brief and friendly — 3-4 sentences max
+- Ask for a quick update on progress against deliverables and timeline
+- Ask if there are any issues, blockers, or anything they need from the PM
+- Reference the specific project and any relevant deliverables or milestones if known
+- Not repeat information they already know
+
+Start with: Hi ${firstName},
+
+Sign off as:
+Kind regards,
+Diane Kruger
+Corporate Operations Lead | Risk 2 Solution Group`,
+        context
+      );
+
+      const draft = {
+        id: `d_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: 'consultant_checkin', urgency: 'routine',
+        toName: p.consultant, toEmail: p.consultantEmail || 'info@risk2solution.com',
+        subject: `${p.projectName || p.clientName} — Weekly check-in`,
+        body: text, source: 'batch',
+      };
+      await db.saveDraft(draft);
+      await saveDraftEmail(draft);
+    } catch (err) {
+      if (err.message === 'MONTHLY_CAP_REACHED') break;
+      console.error(`[Checkins] Error on ${p.clientName}:`, err.message);
+    }
+  }
+  return active.length;
+}
+
+// ── Phase stuck too long detection ────────────────────────────────────────────
+async function checkStuckPhases(projects) {
+  const MAX_PHASE_DAYS = { 0: 7, 1: 60, 2: 60, 3: 21, 4: 14 }; // days per phase before flagging
+  const active = projects.filter(p => p.type === 'standard' && !['Completed','Terminated'].includes(p.status));
+
+  for (const p of active) {
+    const updatedAt = p.updatedAt ? new Date(p.updatedAt) : null;
+    if (!updatedAt) continue;
+    const daysSinceUpdate = Math.round((new Date() - updatedAt) / (1000 * 60 * 60 * 24));
+    const maxDays = MAX_PHASE_DAYS[p.phase || 0];
+    if (daysSinceUpdate >= maxDays) {
+      await sendEmail('diane.k@risk2solution.com',
+        `[Aurora] Project phase check: ${p.clientName} — ${PHASES[p.phase||0]}`,
+        `The ${p.clientName} project (${p.projectName || ''}) has been in the ${PHASES[p.phase||0]} phase for ${daysSinceUpdate} days without a recorded update in Aurora.
+
+Please log into Aurora and update the project status or phase as appropriate.
+
+Aurora
+R2S Project Management Intelligence`,
+        true
+      );
+    }
+  }
+}
+
+// ── SOP-TRN-001: Materials submission reminder ────────────────────────────────
+async function checkMaterialsSubmissionReminders(projects) {
+  const active = projects.filter(p =>
+    p.type === 'standard' && p.consultant && p.dueDate &&
+    p.phase === 1 && // Deployment phase
+    !['Completed','Terminated'].includes(p.status)
+  );
+
+  for (const p of active) {
+    const dueDate = new Date(p.dueDate);
+    const days = Math.round((dueDate - new Date()) / (1000 * 60 * 60 * 24));
+    // Remind at 4 days before due date (allows 2 days for COO review + 2 buffer)
+    if (days === 4) {
+      const consultantFirst = (p.consultant || '').split(' ')[0];
+      await sendEmail(p.consultantEmail || 'info@risk2solution.com',
+        `[Aurora] Materials submission reminder: ${p.clientName}`,
+        `Hi ${consultantFirst},
+
+This is a reminder that all training and consulting materials for the ${p.projectName || p.clientName} project must be submitted to the COO for approval no later than 2 business days before delivery.
+
+Project due date: ${p.dueDate}
+Deadline for materials submission: Please ensure materials are submitted immediately to allow time for COO review.
+
+Please ensure all materials are:
+• Fully customised to ${p.clientName}
+• Client-ready (not draft)
+• Submitted via the SharePoint project folder
+
+Contact Diane if you have any questions.
+
+Kind regards,
+Diane Kruger
+Corporate Operations Lead | Risk 2 Solution Group`,
+        false,
+        'diane.k@risk2solution.com'
+      );
+
+      // Also prompt COO (Diane) to expect materials
+      await sendEmail('diane.k@risk2solution.com',
+        `[Aurora] COO approval needed soon: ${p.clientName}`,
+        `Materials for the ${p.clientName} project (${p.projectName || ''}) should be submitted by ${p.consultant} for your approval within the next 1-2 days.
+
+Project due date: ${p.dueDate}
+
+Please allow time in your schedule to review and approve before delivery.
+
+Aurora
+R2S Project Management Intelligence`,
+        true
+      );
+    }
+
+    // Session report reminder — 2 days after due date (post-delivery)
+    if (days === -2 && p.consultant) {
+      const consultantFirst = (p.consultant || '').split(' ')[0];
+      await sendEmail(p.consultantEmail || 'info@risk2solution.com',
+        `[Aurora] Session report due: ${p.clientName}`,
+        `Hi ${consultantFirst},
+
+This is a reminder that your session report for the ${p.projectName || p.clientName} engagement is due today (within 2 business days of delivery).
+
+Your session report should include:
+• Session overview
+• Key observations
+• Identified gaps
+• Recommendations
+• Any follow-up actions
+• Any off-scope items raised
+• Any incidents or issues
+
+Please submit your completed report to Diane and save it to the SharePoint project folder: 07 Session Reports
+
+Kind regards,
+Diane Kruger
+Corporate Operations Lead | Risk 2 Solution Group`,
+        false,
+        'diane.k@risk2solution.com'
+      );
+    }
+  }
+}
+
+// ── Suggestion engine ────────────────────────────────────────────────────────
+// Aurora autonomously identifies actions and surfaces them for Diane to approve
+
+const SUGGESTION_TYPES = {
+  PHASE_ADVANCE:    'phase_advance',
+  PHASE_REGRESS:    'phase_regress',
+  STATUS_CHANGE:    'status_change',
+  SEND_CLIENT_UPDATE: 'send_client_update',
+  ESCALATE:         'escalate',
+  CLOSE_OUT:        'close_out',
+  SCHEDULE_KICKOFF: 'schedule_kickoff',
+  REQUEST_REPORT:   'request_report',
+};
+
+async function generateSuggestions() {
+  const projects = await db.getProjects();
   const standard = projects.filter(p => p.type === 'standard');
-  const ongoing  = projects.filter(p => p.type === 'ongoing');
-  const active   = standard.filter(p => !['Completed','Terminated'].includes(p.status));
-  const ontrack  = active.filter(p => !isAtRisk(p)).length;
-  const dueSoon  = active.filter(p => { const d = daysUntil(p.dueDate); return d !== null && d >= 0 && d <= 14; }).length;
-  document.getElementById('k-active').textContent  = active.length;
-  document.getElementById('k-ontrack').textContent = ontrack;
-  document.getElementById('k-due').textContent     = dueSoon;
-  document.getElementById('k-ongoing').textContent = ongoing.length;
-  document.getElementById('ov-sub').textContent    = dueSoon > 0
-    ? `${dueSoon} project${dueSoon > 1 ? 's' : ''} due within 14 days — reminders sent automatically.`
-    : 'All projects monitored. Automated reminders active.';
+  const suggestions = [];
+
+  for (const p of standard) {
+    const phase = p.phase || 0;
+    const status = p.status || 'Active';
+    const days  = p.dueDate ? Math.round((new Date(p.dueDate) - new Date()) / (1000*60*60*24)) : null;
+    const updatedDaysAgo = p.updatedAt ? Math.round((new Date() - new Date(p.updatedAt)) / (1000*60*60*24)) : 999;
+
+    // ── Phase 4 (Close-out) — trigger all close-out actions ──────────────────
+    if (phase === 4) {
+      // Invoice check
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_inv_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.SEND_CLIENT_UPDATE,
+        title: `Check invoicing status: ${p.clientName}`,
+        reason: `${p.clientName} is in Close-out. Please confirm all invoices have been issued as per the payment schedule: ${p.invoicingNotes || 'see contract'}. Aurora will draft a final invoice if needed.`,
+        action: { draftInvoice: true },
+        confirmLabel: 'Draft final invoice email',
+        dismissLabel: 'Invoicing complete',
+      }));
+
+      // Client satisfaction email
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_feedback_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.SEND_CLIENT_UPDATE,
+        title: `Send client satisfaction email: ${p.clientName}`,
+        reason: `${p.clientName} project is at Close-out. A client satisfaction and feedback email should be sent. Aurora has a draft ready for Diane to review.`,
+        action: { draftFeedback: true },
+        confirmLabel: 'Draft feedback email',
+        dismissLabel: 'Already sent',
+      }));
+
+      // Final report check
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_report_check_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.REQUEST_REPORT,
+        title: `Confirm final deliverables sent: ${p.clientName}`,
+        reason: `${p.clientName} is in Close-out. Please confirm all reports, materials, and deliverables have been sent to the client and saved in the SharePoint project folder.`,
+        action: null,
+        confirmLabel: 'Confirmed — all sent',
+        dismissLabel: 'Outstanding items remain',
+      }));
+    }
+
+    // Skip further checks for completed/terminated projects
+    if (['Completed','Terminated','Closed'].includes(status)) continue;
+
+    // ── Phase 0 (Kick-off) ────────────────────────────────────────────────────
+    if (phase === 0 && updatedDaysAgo >= 5 && p.consultant) {
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_kickoff_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.PHASE_ADVANCE,
+        title: `Move ${p.clientName} to Deployment phase`,
+        reason: `This project has been in Kick-off for ${updatedDaysAgo} days. If the kick-off meeting has occurred and work has commenced, it should move to Deployment.`,
+        action: { phase: 1 },
+        confirmLabel: 'Move to Deployment',
+        dismissLabel: 'Keep in Kick-off',
+      }));
+    }
+
+    // ── Phase 1 (Deployment) → Phase 2 (Monitoring) ──────────────────────────
+    if (phase === 1 && updatedDaysAgo >= 45) {
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_deploy_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.PHASE_ADVANCE,
+        title: `Move ${p.clientName} to Monitoring & Review`,
+        reason: `This project has been in Deployment for ${updatedDaysAgo} days. If the primary service delivery is complete, it should move to Monitoring & Review.`,
+        action: { phase: 2 },
+        confirmLabel: 'Move to Monitoring & Review',
+        dismissLabel: 'Keep in Deployment',
+      }));
+    }
+
+    // ── Phase 2 (Monitoring) → Phase 3 (Reporting) ───────────────────────────
+    if (phase === 2 && updatedDaysAgo >= 30) {
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_monitor_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.PHASE_ADVANCE,
+        title: `Move ${p.clientName} to Reporting phase`,
+        reason: `This project has been in Monitoring & Review for ${updatedDaysAgo} days. If monitoring is complete, move to Reporting to finalise deliverables.`,
+        action: { phase: 3 },
+        confirmLabel: 'Move to Reporting',
+        dismissLabel: 'Keep in Monitoring',
+      }));
+    }
+
+    // ── Phase 3 (Reporting) → Phase 4 (Close-out) ────────────────────────────
+    if (phase === 3 && updatedDaysAgo >= 14) {
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_report_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.CLOSE_OUT,
+        title: `Close out ${p.clientName} project`,
+        reason: `This project has been in Reporting for ${updatedDaysAgo} days. If all reports and deliverables are complete, it is ready for Close-out.`,
+        action: { phase: 4 },
+        confirmLabel: 'Move to Close-out',
+        dismissLabel: 'Not ready yet',
+      }));
+    }
+
+    // ── Due within 7 days and not in Reporting/Close-out ─────────────────────
+    if (days !== null && days <= 7 && days >= 0 && phase < 3) {
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_due_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.ESCALATE,
+        title: `${p.clientName} due in ${days} day${days!==1?'s':''}`,
+        reason: `This project is due in ${days} days but is still in ${PHASES[phase]} phase. Aurora will draft an escalation email for Diane to review and send.`,
+        action: { draftEscalation: true, riskDescription: `Project due in ${days} days but currently in ${PHASES[phase]} phase with deliverables potentially outstanding.` },
+        confirmLabel: 'Draft escalation email',
+        dismissLabel: 'Acknowledged',
+      }));
+    }
+
+    // ── On Hold for 14+ days ──────────────────────────────────────────────────
+    if (p.status === 'On Hold' && updatedDaysAgo >= 14) {
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_hold_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.STATUS_CHANGE,
+        title: `${p.clientName} has been On Hold for ${updatedDaysAgo} days`,
+        reason: `This project has been on hold for ${updatedDaysAgo} days. Consider following up with the client or updating the status.`,
+        action: null,
+        confirmLabel: 'Draft client follow-up',
+        dismissLabel: 'Acknowledged',
+        confirmTaskType: 'checkin_email',
+      }));
+    }
+
+    // ── Phase 4 (Close-out) → Phase 5 (Completed) ───────────────────────────────
+    if (phase === 4 && updatedDaysAgo >= 3) {
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_complete_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.CLOSE_OUT,
+        title: `Mark ${p.clientName} as Completed`,
+        reason: `This project is in Close-out. Once all close-out actions are done (invoices sent, feedback email sent, documents filed), mark it as Completed to move it to the completed projects archive.`,
+        action: { phase: 5, status: 'Completed' },
+        confirmLabel: 'Mark as Completed — archive project',
+        dismissLabel: 'Still in progress',
+      }));
+    }
+
+    // ── No consultant assigned and in Deployment/Monitoring ──────────────────
+    if (!p.consultant && phase >= 1 && phase <= 3) {
+      suggestions.push(await db.saveSuggestion({
+        id: `sug_${p.id}_noconsult_${Date.now()}`,
+        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+        type: SUGGESTION_TYPES.STATUS_CHANGE,
+        title: `No consultant assigned to ${p.clientName}`,
+        reason: `This project is in ${PHASES[phase]} phase but has no consultant or trainer assigned. Please assign one in the project record.`,
+        action: null,
+        confirmLabel: 'Open project to assign',
+        dismissLabel: 'Acknowledged',
+      }));
+    }
+  }
+
+  // Filter out null suggestions (duplicates that returned existing)
+  return suggestions.filter(Boolean);
 }
 
-function isAtRisk(p) {
-  const s = (p.status || '').toLowerCase();
-  const days = daysUntil(p.dueDate);
-  return s.includes('behind') || s.includes('risk') || (days !== null && days <= 7 && days >= 0);
+// ── Apply a suggestion action ─────────────────────────────────────────────────
+async function applySuggestion(suggestion) {
+  const project = await db.getProject(suggestion.projectId);
+  if (!project) return;
+
+  if (suggestion.action?.phase !== undefined) {
+    await db.updateProjectField(suggestion.projectId, {
+      phase: suggestion.action.phase,
+      ...(suggestion.action.status ? { status: suggestion.action.status } : {}),
+    });
+
+    // If moving to Close-out, trigger close-out actions
+    if (suggestion.action.phase === 4 || suggestion.action.status === 'Completed') {
+      // Draft client feedback email
+      try { await draftClientFeedback(project); } catch(e) { console.error('[Feedback]', e.message); }
+      const yr1 = new Date(); yr1.setFullYear(yr1.getFullYear() + 1);
+      const yr2 = new Date(); yr2.setFullYear(yr2.getFullYear() + 2);
+      await createCalendarReminder(
+        `1-year follow-up: ${project.clientName}`,
+        `Check in with ${project.clientName} — explore new opportunities for R2S.`,
+        yr1.toISOString().slice(0,10)
+      );
+      await createCalendarReminder(
+        `2-year follow-up: ${project.clientName}`,
+        `2-year relationship check-in with ${project.clientName}.`,
+        yr2.toISOString().slice(0,10)
+      );
+      await sendInternalEmail(
+        `[Aurora] Project closed: ${project.clientName}`,
+        `The ${project.projectName||project.clientName} project has been marked complete.
+
+Aurora has set 1-year and 2-year follow-up reminders in the Outlook calendar.
+
+Aurora
+R2S Project Management Intelligence`
+      );
+    }
+
+    console.log(`[Suggestions] Phase updated for ${project.clientName}: ${PHASES[project.phase||0]} → ${PHASES[suggestion.action.phase]}`);
+  }
+
+  // If suggestion was to draft an escalation
+  if (suggestion.action?.draftEscalation) {
+    await draftRiskEscalation(project, suggestion.action.riskDescription || 'Risk identified by Aurora');
+  }
+
+  // If suggestion was a close-out action (invoice, feedback, report check)
+  if (suggestion.action?.draftInvoice) {
+    // Internal email to Diane only — just a prompt to check and send invoices
+    await sendEmail('diane.k@risk2solution.com',
+      `[Aurora] Action required — check invoicing: ${project.clientName}`,
+      `Hi Diane,\n\nThe ${project.projectName || project.clientName} project is now in Close-out. Please review the invoicing status in Aurora and send any outstanding invoices to the client.\n\nProject: ${project.projectName || project.clientName}\nClient: ${project.clientName}\nContract value: ${project.value || 'See project record'}\nInvoicing terms: ${project.invoicingNotes || 'See project record'}\n\nPlease log into Aurora to review and update the invoicing status.\n\n${process.env.FRONTEND_URL || ''}\n\nAurora\nR2S Project Management Intelligence`,
+      true
+    );
+    await db.logActivity(project.id, { type: 'manual_note', summary: 'Invoicing check alert sent to Diane' });
+  }
+
+  if (suggestion.action?.draftFeedback) {
+    await draftClientFeedback(project);
+  }
+
+  // If suggestion was a calendar booking confirmation
+  if (suggestion.action?.calendarEventId) {
+    await sendMeetingInvite(suggestion.action.booking, suggestion.action.calendarEventId);
+    // Notify Diane that invites were sent
+    await sendEmail('diane.k@risk2solution.com',
+      `[Aurora] Meeting invites sent: ${suggestion.action.booking?.title || 'Event'}`,
+      `Meeting invites have been sent to all attendees for:
+
+${suggestion.action.booking?.title || 'Event'}
+Date: ${suggestion.action.booking?.startDateTime?.slice(0,10) || 'TBC'}
+
+Aurora
+R2S Project Management Intelligence`,
+      true
+    );
+  }
+
+  // If suggestion was to draft an email
+  if (suggestion.confirmTaskType) {
+    const docs    = await db.getDocuments(suggestion.projectId);
+    const context = buildContext(project, docs);
+    const text    = await aurora(suggestion.confirmTaskType,
+      `Draft a ${suggestion.confirmTaskType.replace(/_/g,' ')} for ${project.projectName||project.clientName} at ${project.clientName}.`,
+      context
+    );
+    const draft = {
+      id: `d_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+      projectId: suggestion.projectId, clientName: project.clientName,
+      projectName: project.projectName, type: suggestion.confirmTaskType,
+      urgency: suggestion.type === SUGGESTION_TYPES.ESCALATE ? 'urgent' : 'routine',
+      toName: project.clientContact, toEmail: project.clientEmail,
+      subject: `${project.projectName||project.clientName}`,
+      body: text, source: 'suggestion',
+    };
+    await db.saveDraft(draft);
+    await saveDraftEmail(draft);
+  }
+}
+
+
+// ── Parse risk register from tab-separated AI output ────────────────────────
+function parseRiskRegister(tsvText, projectId) {
+  const lines = tsvText.split('\n').filter(l => l.trim() && !l.toLowerCase().startsWith('client'));
+  return lines.map((line, i) => {
+    const cols = line.split('\t').map(c => c.trim().replace(/"/g,''));
+    return {
+      id: `risk_${projectId}_${i+1}`,
+      projectId,
+      number: i + 1,
+      description: cols[2] || cols[1] || 'Risk ' + (i+1),
+      likelihood: cols[3] || 'Medium',
+      impact: cols[4] || 'Medium',
+      level: cols[5] || 'Medium',
+      mitigation: cols[6] || '',
+      owner: cols[7] || 'Diane Kruger',
+      status: 'Open',
+      triggered: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }).filter(r => r.description.length > 2);
+}
+
+// ── Parse deliverables tracker from AI output ────────────────────────────────
+function parseDeliverables(tsvText, projectId) {
+  const lines = tsvText.split('\n').filter(l => l.trim() && !l.toLowerCase().startsWith('client'));
+  return lines.map((line, i) => {
+    const cols = line.split('\t').map(c => c.trim().replace(/"/g,''));
+    return {
+      id: `del_${projectId}_${i+1}`,
+      projectId,
+      number: i + 1,
+      name: cols[2] || cols[1] || 'Deliverable ' + (i+1),
+      phase: cols[3] || '',
+      dueDate: cols[4] || '',
+      status: cols[5] || 'Outstanding',
+      notes: cols[7] || '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }).filter(d => d.name.length > 2);
+}
+
+// ── Monitor risks daily ───────────────────────────────────────────────────────
+async function monitorRisks(projects) {
+  for (const p of projects) {
+    if (p.type !== 'standard' || isCompleted(p)) continue;
+    const risks = await db.getRiskRegister(p.id);
+    if (!risks.length) continue;
+
+    const days = p.dueDate ? Math.round((new Date(p.dueDate) - new Date()) / (1000*60*60*24)) : null;
+    const phase = p.phase || 0;
+    const status = (p.status||'').toLowerCase();
+
+    for (const risk of risks) {
+      if (risk.triggered || risk.status === 'Closed') continue;
+
+      let triggered = false;
+      let triggerReason = '';
+
+      const desc = (risk.description||'').toLowerCase();
+
+      // Check if risk conditions are met
+      if (desc.includes('delay') || desc.includes('overdue') || desc.includes('timeline')) {
+        if (days !== null && days < 0) { triggered = true; triggerReason = 'Project is now overdue.'; }
+        else if (days !== null && days <= 7) { triggered = true; triggerReason = `Project due in ${days} days.`; }
+      }
+      if ((desc.includes('hold') || desc.includes('stall') || desc.includes('block')) && status.includes('hold')) {
+        triggered = true; triggerReason = 'Project is currently On Hold.';
+      }
+      if (desc.includes('consultant') || desc.includes('trainer') || desc.includes('resource')) {
+        if (!p.consultant) { triggered = true; triggerReason = 'No consultant assigned to this project.'; }
+      }
+      if (desc.includes('phase') && phase === 0 && days !== null && days <= 14) {
+        triggered = true; triggerReason = `Project still in Kick-off with ${days} days remaining.`;
+      }
+
+      if (triggered) {
+        await db.updateRisk(p.id, risk.id, { triggered: true, triggeredAt: new Date().toISOString(), triggerReason });
+
+        // Email Diane
+        await sendEmail('diane.k@risk2solution.com',
+          `[Aurora] Risk triggered: ${p.clientName} — ${risk.description.slice(0,60)}`,
+          `Hi Diane,
+
+Aurora has detected that a documented risk has been triggered on the ${p.clientName} project.
+
+Project: ${p.projectName || p.clientName}
+Current phase: ${PHASES[phase]}
+
+RISK #${risk.number}: ${risk.description}
+Likelihood: ${risk.likelihood} | Impact: ${risk.impact} | Level: ${risk.level}
+
+Trigger reason: ${triggerReason}
+
+DOCUMENTED MITIGATION:
+${risk.mitigation || 'No mitigation documented — please review.'}
+
+Risk owner: ${risk.owner || 'Diane Kruger'}
+
+Please review the mitigation plan and take appropriate action. You can view and update the full risk register in Aurora under the project record.
+
+${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}
+
+Aurora
+R2S Project Management Intelligence`,
+          true
+        );
+        console.log(`[Risks] Risk triggered for ${p.clientName}: ${risk.description.slice(0,50)}`);
+      }
+    }
+  }
+}
+
+// ── Update deliverable status from calendar/emails ────────────────────────────
+async function updateDeliverableFromCalendar(projectId, deliverableName, calendarEvent) {
+  const items = await db.getDeliverables(projectId);
+  const match = items.find(d =>
+    d.name.toLowerCase().includes(deliverableName.toLowerCase()) ||
+    deliverableName.toLowerCase().includes(d.name.toLowerCase().slice(0,15))
+  );
+  if (match) {
+    const now = new Date();
+    const eventDate = new Date(calendarEvent.start);
+    const status = eventDate < now ? 'Complete' : 'In Progress';
+    await db.updateDeliverable(projectId, match.id, { status, calendarEvent: calendarEvent.subject });
+    console.log(`[Deliverables] Updated ${match.name} → ${status}`);
+  }
 }
 
 function isCompleted(p) {
-  return ['Completed','Terminated','Closed'].includes(p.status) || (p.phase || 0) === 5;
+  return ['Completed','Terminated','Closed'].includes(p.status);
 }
 
-function alertLabel(p) {
-  const s = (p.status || '').toLowerCase();
-  const days = daysUntil(p.dueDate);
-  if (s.includes('hold')) return { label: 'On Hold', cls: 'on-hold' };
-  if (s.includes('behind') || s.includes('risk')) return { label: 'At Risk', cls: 'at-risk' };
-  if (days !== null && days <= 3 && days >= 0) return { label: `Due in ${days}d`, cls: 'behind' };
-  if (days !== null && days <= 7 && days >= 0) return { label: `Due in ${days}d`, cls: 'at-risk' };
-  return null;
-}
-
-function ini(name) {
-  if (!name) return '?';
-  return name.split(' ').slice(0,2).map(w => w[0]||'').join('').toUpperCase();
-}
-
-function bulletList(text) {
-  if (!text) return '';
-  // Convert text to bullet points — split on newlines, numbered items, or sentence ends
-  const lines = text
-    .split(/\n|(?<=\.)\s+(?=[A-Z0-9])|(?:^|\s)\d+\.\s+/)
-    .map(l => l.trim())
-    .filter(l => l.length > 4);
-  if (lines.length <= 1) {
-    // Single block — try splitting on commas or semicolons
-    const parts = text.split(/[;,]/).map(l => l.trim()).filter(l => l.length > 4);
-    if (parts.length > 1) return parts.map(p => `• ${p}`).join('\n');
-    return `• ${text.trim()}`;
-  }
-  return lines.map(l => `• ${l.replace(/^[•\-\*]\s*/, '')}`).join('\n');
-}
-
-function tileHTML(p) {
-  const phase = p.phase || 0;
-  const alert = alertLabel(p);
-  // Summary — first sentence only, strip all markdown, max 120 chars
-  const summaryRaw = (p.summary || p.deliverables || '').replace(/\*\*?|__|\#/g, '').trim();
-  const summaryFirst = summaryRaw.split(/\.\s+/)[0].trim().slice(0, 120);
-  const summaryHTML = summaryFirst
-    ? `<div style="font-size:11px;color:var(--text2);line-height:1.5;margin-bottom:10px">${summaryFirst}${summaryFirst.length >= 120 ? '…' : '.'}</div>`
-    : '';
-
-  // Value — first $ amount only (e.g. "$15,000 ex GST"), strip everything after the first amount
-  const rawVal = (p.value || '').replace(/\*\*?/g, '').trim();
-  const amtMatch = rawVal.match(/\$[\d,]+(?:\.\d+)?(?:\s*(?:ex|inc)\.?\s*GST)?/i);
-  const val = amtMatch ? amtMatch[0] : (rawVal ? rawVal.split(/[—\-–]/)[0].trim().slice(0, 25) : '');
-
-  // Phase bar with labels
-  const phaseBars = PHASES.map((_,i) =>
-    `<div style="flex:1;height:4px;border-radius:2px;background:${i<phase?'rgba(0,232,187,.5)':i===phase?'var(--pink)':'var(--border2)'}"></div>`
-  ).join('');
-  const phaseLabels = PHASES.map((ph,i) =>
-    `<div style="flex:1;font-size:8px;text-align:center;color:${i===phase?'var(--pink-light)':i<phase?'rgba(0,232,187,.7)':'var(--text3)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--fm)">${ph.split(' ')[0]}</div>`
-  ).join('');
-
-  const isCompleted2 = p.status === 'Completed' || p.phase === 5;
-  return `<div class="tile" onclick="openProject('${p.id}')" style="${isCompleted2 ? 'opacity:0.7;border-color:rgba(0,232,187,.2)' : ''}">
-    ${isCompleted2 ? `<div class="tile-alert ba">✓ Completed</div>` : alert ? `<div class="tile-alert ${alert.cls}">${alert.label}</div>` : ''}
-    <div class="tile-client">${p.clientName}</div>
-    <div class="tile-project" style="margin-bottom:8px">${p.projectName || ''}</div>
-    ${summaryHTML}
-    <div style="display:flex;gap:2px;margin-bottom:3px">${phaseBars}</div>
-    <div style="display:flex;gap:2px;margin-bottom:10px">${phaseLabels}</div>
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px">
-      ${val ? `<span style="font-size:13px;font-weight:600;font-family:var(--fs);color:var(--teal)">${val}</span>` : '<span></span>'}
-      <div style="display:flex;gap:5px;align-items:center">
-        ${p.dueDate ? `<span class="badge bg" style="font-size:10px">📅 ${p.dueDate}</span>` : ''}
-        ${isCompleted(p) ? '<span class="badge bt">✓ Complete</span>' : ''}
-      </div>
-    </div>
-  </div>`;
-}
-
-function renderProjects() {
-  // Phase 5 = Completed — goes to completed folder
-  const active    = projects.filter(p => p.type === 'standard' && !isCompleted(p) && (p.phase || 0) < 5);
-  const completed = projects.filter(p => p.type === 'standard' && (isCompleted(p) || (p.phase || 0) === 5));
-  const ongoing   = projects.filter(p => p.type === 'ongoing');
-  let html = '';
-
-  if (active.length) html += `<div class="tiles-grid">${active.map(tileHTML).join('')}</div>`;
-
-  if (ongoing.length) {
-    html += `<div class="sec">Ongoing training delivery — display only</div><div style="display:flex;flex-direction:column;gap:5px">`;
-    ongoing.forEach(p => {
-      html += `<div class="card" style="display:flex;align-items:center;gap:10px">
-        <div style="width:26px;height:26px;border-radius:6px;background:var(--card2);color:var(--text3);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${ini(p.clientName)}</div>
-        <div style="flex:1"><div style="font-size:12px;font-weight:500">${p.clientName}</div><div style="font-size:11px;color:var(--text3)">${p.projectName||p.status||''}</div></div>
-        <span class="badge bg">Ongoing</span>
-      </div>`;
-    });
-    html += '</div>';
-  }
-
-  if (completed.length) {
-    html += `<button class="completed-toggle" onclick="toggleCompleted()">▶ Completed projects (${completed.length})</button>
-    <div class="completed-section" id="completed-section"><div class="tiles-grid" style="margin-top:8px">${completed.map(tileHTML).join('')}</div></div>`;
-  }
-
-  if (!html) html = `<div style="color:var(--text3);font-size:12px;text-align:center;padding:40px 20px">No projects yet. <span style="color:var(--teal);cursor:pointer" onclick="nav('new',document.querySelector('[onclick*=new]'))">Create your first project ↗</span></div>`;
-  document.getElementById('projects-list').innerHTML = html;
-}
-
-function toggleCompleted() {
-  const s = document.getElementById('completed-section');
-  const t = document.querySelector('.completed-toggle');
-  s.classList.toggle('open');
-  t.textContent = (s.classList.contains('open') ? '▼' : '▶') + ` Completed projects (${projects.filter(p=>p.type==='standard'&&isCompleted(p)).length})`;
-}
-
-// ── Project detail modal ──────────────────────────────────────────────────────
-function openProject(id) {
-  const p = projects.find(x => x.id === id);
-  if (!p) return;
-  const phase = p.phase || 0;
-  document.getElementById('modal-title').textContent = p.clientName;
-  document.getElementById('modal-sub').textContent   = p.projectName || '';
-
-  const phasecards = PHASES.map((ph, i) => {
-    const cls = i < phase ? 'done-ph' : i === phase ? 'active-ph' : 'pending-ph';
-    return `<div class="phase-card ${cls}" onclick="showPhaseDetail(${i})">
-      <div class="phase-num">Phase ${i+1}</div>
-      <div class="phase-name">${ph}</div>
-    </div>`;
-  }).join('');
-
-  const alert = alertLabel(p);
-  const statusBadge = alert
-    ? `<span class="badge ${alert.cls==='behind'?'br':alert.cls==='on-hold'?'bb':'ba'}">${alert.label}</span>`
-    : `<span class="badge bt">${p.status||'In Progress'}</span>`;
-
-  // Format as numbered list for modal
-  function fmtNumbered(text) {
-    if (!text) return '';
-    const lines = text
-      .split(/\n|(?<=\d\.)\s+/)
-      .map(l => l.trim().replace(/^[•\-\*]\s*/, '').replace(/^\d+\.\s*/, ''))
-      .filter(l => l.length > 3);
-    if (lines.length <= 1) return `<div style="font-size:12px;color:var(--text);line-height:1.65">${text}</div>`;
-    return lines.map((l,i) => `<div style="display:flex;gap:8px;margin-bottom:5px"><span style="color:var(--teal);font-family:var(--fm);font-size:11px;flex-shrink:0;min-width:18px">${i+1}.</span><span style="font-size:12px;color:var(--text);line-height:1.5">${l}</span></div>`).join('');
-  }
-
-  const delHtml = (p.summary || p.deliverables) ? `
-    <div style="margin-bottom:14px">
-      <div class="sec" style="margin-top:0">What we are delivering</div>
-      ${p.summary ? `<div style="background:var(--card2);border:1px solid var(--border);border-left:3px solid var(--teal);border-radius:8px;padding:11px 13px;margin-bottom:6px">
-        <div style="font-size:10px;color:var(--teal);font-family:var(--fm);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Service provision</div>
-        ${fmtNumbered(p.summary)}
-      </div>` : ''}
-      ${p.deliverables ? `<div style="background:var(--card2);border:1px solid var(--border);border-left:3px solid var(--pink);border-radius:8px;padding:11px 13px">
-        <div style="font-size:10px;color:var(--pink-light);font-family:var(--fm);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Deliverables</div>
-        ${fmtNumbered(p.deliverables)}
-      </div>` : ''}
-    </div>` : '';
-
-  // Format deliverables as numbered list
-  function fmtList(text, numbered) {
-    if (!text) return '—';
-    const lines = text
-      .split(/\n|(?<=\d\.)\s+/)
-      .map(l => l.trim().replace(/^[•\-\*]\s*/, '').replace(/^\d+\.\s*/, ''))
-      .filter(l => l.length > 3);
-    if (lines.length <= 1) {
-      // Try splitting on sentences
-      const parts = text.split(/(?<=\.)\s+(?=[A-Z0-9])/).map(l=>l.trim()).filter(l=>l.length>3);
-      if (parts.length > 1) return parts.map((l,i) => numbered ? `${i+1}. ${l}` : `• ${l}`).join('<br>');
-      return text;
-    }
-    return lines.map((l,i) => numbered ? `${i+1}. ${l}` : `• ${l}`).join('<br>');
-  }
-
-  // Extract just the first dollar amount for display — no breakdown
-  const rawValModal = (p.value || '').replace(/\*\*?/g, '').trim();
-  const firstAmtModal = rawValModal.match(/\$[\d,]+(?:\.\d+)?(?:\s*(?:ex|inc)\.?\s*GST)?/i);
-  const val = firstAmtModal ? firstAmtModal[0] : (rawValModal ? rawValModal.split(/[—\-–]/)[0].trim().slice(0,30) : '—');
-
-  const CONSULTANT_LIST = ['Mick Harran','Paul Johnston','Dave Cohen','Ross Mackenzie','Lawrence Phillips','Marina Toailoa','Gavriel Schneider','Pierre Andipatin','Daniel Du Plessis','Gavriel Guriel'];
-
-  document.getElementById('modal-body').innerHTML = `
-    <div class="phase-cards">${phasecards}</div>
-    <div class="phase-detail-box" id="phase-detail-box">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <span style="background:var(--pink);color:#fff;padding:2px 8px;border-radius:6px;font-size:11px">Phase ${phase+1}</span>
-        <span style="font-size:13px;font-weight:500">${PHASES[phase]}</span>
-      </div>
-      <div style="font-size:12px;color:var(--text2);line-height:1.6">${PHASE_DESC[phase]}</div>
-    </div>
-    ${delHtml}
-
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
-      <!-- Status dropdown -->
-      <div class="info-item">
-        <div class="info-label">Status</div>
-        <select onchange="updateStatus('${p.id}',this.value)" style="width:100%;margin-top:4px;font-size:12px;padding:5px 8px;border-radius:6px;background:var(--card2);border:1px solid var(--border2);color:var(--text)">
-          <option value="In Progress" ${p.status==='In Progress'?'selected':''}>In Progress</option>
-          <option value="On Hold" ${p.status==='On Hold'?'selected':''}>On Hold</option>
-          <option value="Completed" ${p.status==='Completed'?'selected':''}>Completed</option>
-        </select>
-      </div>
-      <!-- Contract value -->
-      <div class="info-item">
-        <div class="info-label">Total project cost</div>
-        <div class="info-val" style="color:var(--teal);font-family:var(--fm);font-size:16px">${val}</div>
-      </div>
-      <!-- Contract start with date picker -->
-      <div class="info-item">
-        <div class="info-label">Contract start</div>
-        <input type="date" value="${p.contractStart||''}" onchange="updateField('${p.id}','contractStart',this.value)"
-          style="width:100%;margin-top:4px;font-size:12px;padding:5px 8px;border-radius:6px;background:var(--card2);border:1px solid var(--border2);color:var(--text)"/>
-      </div>
-      <!-- Due date with date picker -->
-      <div class="info-item">
-        <div class="info-label">Completion / due date</div>
-        <input type="date" value="${p.dueDate||''}" onchange="updateField('${p.id}','dueDate',this.value)"
-          style="width:100%;margin-top:4px;font-size:12px;padding:5px 8px;border-radius:6px;background:var(--card2);border:1px solid var(--border2);color:var(--text)"/>
-      </div>
-      <!-- Contact -->
-      <div class="info-item">
-        <div class="info-label">Client contact</div>
-        <div class="info-val" style="font-size:12px">${p.clientContact||'—'}${p.clientEmail?`<div style="font-size:11px;color:var(--text3);margin-top:2px">${p.clientEmail}</div>`:''}</div>
-      </div>
-      <!-- Phone -->
-      <div class="info-item">
-        <div class="info-label">Client phone</div>
-        <div class="info-val" style="font-size:12px">${p.clientPhone||'—'}</div>
-      </div>
-      <!-- Consultant multi-select -->
-      <div class="info-item" style="grid-column:1/-1">
-        <div class="info-label">Consultant(s) / Trainer(s) assigned</div>
-        <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px" id="assigned-tags-${p.id}">
-          ${(p.consultant||'').split(',').map(c=>c.trim()).filter(Boolean).map(c =>
-            `<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(0,232,187,.12);border:1px solid rgba(0,232,187,.3);color:var(--teal);border-radius:20px;padding:2px 8px;font-size:11px">
-              ${c}<button onclick="removeConsultant('${p.id}','${c}')" style="background:none;border:none;color:var(--teal);cursor:pointer;font-size:12px;line-height:1;padding:0">×</button>
-            </span>`
-          ).join('')}
-        </div>
-        <select onchange="addConsultant('${p.id}',this)" style="width:100%;font-size:12px;padding:5px 8px;border-radius:6px;background:var(--card2);border:1px solid var(--border2);color:var(--text)">
-          <option value="">+ Add consultant or trainer</option>
-          ${['Mick Harran','Paul Johnston','Dave Cohen','Ross Mackenzie','Lawrence Phillips','Marina Toailoa','Gavriel Schneider','Pierre Andipatin','Daniel Du Plessis','Gavriel Guriel'].map(c => `<option value="${c}">${c}</option>`).join('')}
-        </select>
-        <div id="briefing-status-${p.id}" style="font-size:11px;color:var(--text3);margin-top:5px">
-          ${p.consultant ? `${p.consultant} assigned. Add more from the dropdown. Each new addition triggers a briefing email.` : 'Select a consultant or trainer — Aurora will draft a briefing email for Diane to review and send.'}
-        </div>
-      </div>
-      <!-- Travel -->
-      ${(p.flightsRequired&&p.flightsRequired.toLowerCase()!=='no'&&p.flightsRequired!=='')||
-        (p.accommodationRequired&&p.accommodationRequired.toLowerCase()!=='no'&&p.accommodationRequired!=='') ?
-        `<div class="info-item" style="grid-column:1/-1">
-          <div class="info-label">Travel requirements</div>
-          <div class="info-val" style="font-size:12px;color:var(--amber)">
-            Flights: ${p.flightsRequired||'N/A'} &nbsp;·&nbsp; Accommodation: ${p.accommodationRequired||'N/A'}
-          </div>
-        </div>` : ''}
-      <!-- Invoicing -->
-      ${p.invoicingNotes?`<div class="info-item" style="grid-column:1/-1"><div class="info-label">Invoicing terms</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2)">${p.invoicingNotes}</div></div>`:''}
-      <!-- Milestones — numbered -->
-      ${p.milestones?`<div class="info-item" style="grid-column:1/-1"><div class="info-label">Milestones</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2);line-height:1.8">${fmtList(p.milestones,true)}</div></div>`:''}
-      <!-- Timeline -->
-      ${p.timeline?`<div class="info-item" style="grid-column:1/-1"><div class="info-label">Timeline</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2);line-height:1.8">${fmtList(p.timeline,true)}</div></div>`:''}
-      <!-- Notes -->
-      ${p.notes?`<div class="info-item" style="grid-column:1/-1"><div class="info-label">Notes</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2)">${p.notes}</div></div>`:''}
-    </div>
-
-    <div class="sec">Update phase</div>
-    <div style="display:flex;gap:4px;margin-bottom:14px;flex-wrap:wrap">
-      ${PHASES.map((ph,i) => `<button class="phase-btn ${i===phase?'selected':''}" onclick="updatePhase('${p.id}',${i})" style="flex:1;min-width:80px">${ph}</button>`).join('')}
-    </div>
-    <div class="proj-tabs">
-      <div class="proj-tab on" onclick="switchProjTab(this,'tab-overview-${p.id}')">Overview</div>
-      <div class="proj-tab" onclick="switchProjTab(this,'tab-deliverables-${p.id}');loadDeliverables('${p.id}')">Deliverables</div>
-      <div class="proj-tab" onclick="switchProjTab(this,'tab-risks-${p.id}');loadRisks('${p.id}')">Risk Register</div>
-      <div class="proj-tab" onclick="switchProjTab(this,'tab-activity-${p.id}');loadActivity('${p.id}')">Activity log</div>
-    </div>
-
-    <!-- Overview tab -->
-    <div id="tab-overview-${p.id}" class="proj-tab-content on">
-      <div class="arow">
-        <button class="btn btn-p btn-sm" onclick="closeModal();generateDraft('${p.id}','status_email','')">Draft status email ↗</button>
-        <button class="btn btn-g btn-sm" onclick="closeModal();askAbout('${p.id}')">Ask Aurora ↗</button>
-      </div>
-    </div>
-
-    <!-- Deliverables tab -->
-    <div id="tab-deliverables-${p.id}" class="proj-tab-content">
-      <div id="del-content-${p.id}"><div style="color:var(--text3);font-size:12px">Loading deliverables…</div></div>
-    </div>
-
-    <!-- Risk register tab -->
-    <div id="tab-risks-${p.id}" class="proj-tab-content">
-      <div id="risk-content-${p.id}"><div style="color:var(--text3);font-size:12px">Loading risk register…</div></div>
-    </div>`;
-
-  document.getElementById('modal-bg').classList.add('open');
-}
-
-function showPhaseDetail(idx) {
-  document.querySelectorAll('.phase-card').forEach((c,i) => {
-    c.className = `phase-card ${i < idx ? 'done-ph' : i === idx ? 'active-ph' : 'pending-ph'}`;
-  });
-  const box = document.getElementById('phase-detail-box');
-  if (box) box.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-      <span style="background:var(--pink);color:#fff;padding:2px 8px;border-radius:6px;font-size:11px">Phase ${idx+1}</span>
-      <span style="font-size:13px;font-weight:500">${PHASES[idx]}</span>
-    </div>
-    <div style="font-size:12px;color:var(--text2);line-height:1.6">${PHASE_DESC[idx]}</div>`;
-}
-
-async function updatePhase(id, phase) {
-  await api(`/api/projects/${id}`, { method: 'PUT', body: JSON.stringify({ phase }) });
-  const p = projects.find(x => x.id === id);
-  if (p) { p.phase = phase; openProject(id); renderProjects(); }
-}
-
-async function updateStatus(id, status) {
-  await api(`/api/projects/${id}`, { method: 'PUT', body: JSON.stringify({ status }) });
-  const p = projects.find(x => x.id === id);
-  if (p) { p.status = status; renderProjects(); updateOverview(); }
-}
-
-async function updateField(id, field, value) {
-  await api(`/api/projects/${id}`, { method: 'PUT', body: JSON.stringify({ [field]: value }) });
-  const p = projects.find(x => x.id === id);
-  if (p) p[field] = value;
-}
-
-const CONSULTANT_EMAIL_MAP = {
-  'Mick Harran':'info@risk2solution.com','Paul Johnston':'info@risk2solution.com',
-  'Dave Cohen':'dave.c@risk2solution.com','Ross Mackenzie':'info@risk2solution.com',
-  'Lawrence Phillips':'info@risk2solution.com','Marina Toailoa':'info@risk2solution.com',
-  'Gavriel Schneider':'info@risk2solution.com','Pierre Andipatin':'info@risk2solution.com',
-  'Daniel Du Plessis':'info@risk2solution.com','Gavriel Guriel':'info@risk2solution.com',
-};
-
-async function addConsultant(id, selectEl) {
-  const name = selectEl.value;
-  selectEl.value = '';
-  if (!name) return;
-
-  const p = projects.find(x => x.id === id);
-  if (!p) return;
-
-  // Build updated consultant list
-  const existing = (p.consultant||'').split(',').map(c=>c.trim()).filter(Boolean);
-  if (existing.includes(name)) return; // already assigned
-  existing.push(name);
-  const consultantStr = existing.join(', ');
-
-  // Save to project
-  await api(`/api/projects/${id}`, { method: 'PUT', body: JSON.stringify({ consultant: consultantStr, consultantEmail: CONSULTANT_EMAIL_MAP[name]||'info@risk2solution.com' }) });
-  p.consultant = consultantStr;
-
-  // Update tags UI
-  const tagsEl = document.getElementById(`briefing-status-${id}`);
-  if (tagsEl) { tagsEl.textContent = 'Generating briefing email for ' + name + '…'; tagsEl.style.color = 'var(--text3)'; }
-
-  // Refresh tags display
-  const tagsContainer = document.getElementById(`assigned-tags-${id}`);
-  if (tagsContainer) {
-    tagsContainer.innerHTML = existing.map(c =>
-      `<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(0,232,187,.12);border:1px solid rgba(0,232,187,.3);color:var(--teal);border-radius:20px;padding:2px 8px;font-size:11px">
-        ${c}<button onclick="removeConsultant('${id}','${c}')" style="background:none;border:none;color:var(--teal);cursor:pointer;font-size:12px;line-height:1;padding:0">×</button>
-      </span>`
-    ).join('');
-  }
-
-  // Trigger briefing for the newly added consultant only
-  try {
-    const res = await api(`/api/projects/${id}/briefing`, { method: 'POST', body: JSON.stringify({ consultantName: name }) });
-    if (res.success && tagsEl) { tagsEl.textContent = '✓ Briefing drafted for ' + name + ' — review in Comms Drafts'; tagsEl.style.color = 'var(--teal)'; }
-    loadDrafts();
-  } catch (e) {
-    if (tagsEl) { tagsEl.textContent = 'Briefing failed — try again'; tagsEl.style.color = 'var(--rose)'; }
-  }
-}
-
-async function removeConsultant(id, name) {
-  const p = projects.find(x => x.id === id);
-  if (!p) return;
-  const updated = (p.consultant||'').split(',').map(c=>c.trim()).filter(c => c && c !== name).join(', ');
-  await api(`/api/projects/${id}`, { method: 'PUT', body: JSON.stringify({ consultant: updated }) });
-  p.consultant = updated;
-  openProject(id); // refresh modal
-}
-
-function closeModal() { document.getElementById('modal-bg').classList.remove('open'); }
-
-// ── New project ───────────────────────────────────────────────────────────────
-function selectPhase(i) {
-  selectedPhase = i;
-  document.querySelectorAll('.phase-btn').forEach((b,idx) => b.classList.toggle('selected', idx === i));
-}
-
-async function createProject() {
-  const clientName = document.getElementById('f-client').value.trim();
-  if (!clientName) { document.getElementById('create-status').textContent = 'Client name is required.'; return; }
-  document.getElementById('create-status').textContent = 'Creating project…';
-  const project = {
-    clientName, projectName: document.getElementById('f-project').value.trim(),
-    clientContact: document.getElementById('f-contact').value.trim(),
-    clientEmail:   document.getElementById('f-email').value.trim(),
-    value:         document.getElementById('f-value').value.trim(),
-    dueDate:       document.getElementById('f-due').value,
-    summary:       document.getElementById('f-summary').value.trim(),
-    deliverables:  document.getElementById('f-deliverables').value.trim(),
-    invoicingNotes:document.getElementById('f-invoicing').value.trim(),
-    consultant:    document.getElementById('f-consultant').value.trim(),
-    status:        document.getElementById('f-status').value,
-    type:          document.getElementById('f-type').value,
-    phase:         selectedPhase,
-  };
-  const data = await api('/api/projects', { method: 'POST', body: JSON.stringify(project) });
-  if (data.project) {
-    projects.push(data.project);
-    document.getElementById('create-status').textContent = '✓ Project created!';
-    updateOverview();
-    setTimeout(() => nav('projects', document.querySelector('[onclick*=projects]')), 800);
-  } else {
-    document.getElementById('create-status').textContent = 'Error: ' + (data.error || 'Unknown error');
-  }
-}
-
-// Contract upload
-async function uploadContract(file, forceCreate) {
-  if (!file) return;
-  const status = document.getElementById('contract-status');
-  status.style.display = 'block';
-  status.innerHTML = `<div class="card" style="color:var(--text2)"><div style="margin-bottom:6px">📄 Reading <strong>${file.name}</strong>…</div><div style="font-size:11px;color:var(--text3)">Aurora is extracting client, scope, deliverables, fees, and dates. This takes about 15–30 seconds.</div></div>`;
-  const fd = new FormData();
-  fd.append('file', file);
-  if (forceCreate) fd.append('forceCreate', 'true');
-  try {
-    const res = await fetch('/api/contracts/upload', { method: 'POST', body: fd, headers: { 'Authorization': 'Bearer ' + (sessionStorage.getItem('aurora_token') || '') } });
-    const data = await res.json();
-
-    // Handle duplicate detection
-    if (res.status === 409 && data.duplicate) {
-      const existingList = data.existingProjects.map(p =>
-        `• ${p.clientName} — ${p.projectName || 'No project name'} (${p.status || 'Active'})`
-      ).join('\n');
-      status.innerHTML = `<div class="card" style="border-color:rgba(255,179,64,.4)">
-        <div style="color:var(--amber);font-weight:500;margin-bottom:8px">⚠ Possible duplicate detected</div>
-        <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Aurora found a similar project already in the system. Please review before proceeding.</div>
-        <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Detected in this file:</div>
-        <div style="font-size:12px;color:var(--text);margin-bottom:10px"><strong>${data.detectedClient||'Unknown client'}</strong> — ${data.detectedProject||'Unknown project'}</div>
-        <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Existing similar project(s):</div>
-        <div style="font-size:12px;color:var(--text);white-space:pre-line;margin-bottom:12px;padding:8px;background:var(--card2);border-radius:6px">${existingList}</div>
-        <div style="font-size:11px;color:var(--amber);margin-bottom:10px">Is this a new version of an existing contract, or a completely new project?</div>
-        <div class="arow">
-          <button class="btn btn-p btn-sm" onclick="uploadContract(window._pendingFile, true)">This is a new project — create it</button>
-          <button class="btn btn-g btn-sm" onclick="document.getElementById('contract-status').style.display='none'">Cancel</button>
-        </div>
-      </div>`;
-      window._pendingFile = file;
-      return;
-    }
-
-    if (data.project) {
-      projects.push(data.project);
-      updateOverview();
-      const p = data.project;
-      const e = data.extracted;
-      status.innerHTML = `<div class="card" style="border-color:rgba(0,232,187,.3)">
-        <div style="color:var(--teal);font-weight:500;margin-bottom:8px">✓ Contract read — project created</div>
-        <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:12px;color:var(--text2)">
-          <span style="color:var(--text3)">Client</span><span style="color:var(--text)">${p.clientName||'—'}</span>
-          <span style="color:var(--text3)">Project</span><span style="color:var(--text)">${p.projectName||'—'}</span>
-          <span style="color:var(--text3)">Value</span><span style="color:var(--teal);font-family:var(--fm)">${p.value||'—'}</span>
-          <span style="color:var(--text3)">Due date</span><span style="color:var(--text)">${p.dueDate||'—'}</span>
-          <span style="color:var(--text3)">Contact</span><span style="color:var(--text)">${p.clientContact||'—'}</span>
-        </div>
-        ${p.deliverables ? `<div style="margin-top:8px;font-size:11px;color:var(--text2)"><span style="color:var(--pink-light)">Deliverables:</span> ${p.deliverables.slice(0,200)}${p.deliverables.length>200?'…':''}</div>` : ''}
-        ${p.consultant ? `<div style="margin-top:8px;padding:8px 10px;background:rgba(0,232,187,.08);border:1px solid rgba(0,232,187,.25);border-radius:6px;font-size:11px;color:var(--teal)">✓ Aurora found: <strong>${p.consultant}</strong> — open the project to confirm assignment and trigger briefing email</div>` : ''}
-        ${(p.flightsRequired&&p.flightsRequired.toLowerCase()!=='no'&&p.flightsRequired!=='')||
-          (p.accommodationRequired&&p.accommodationRequired.toLowerCase()!=='no'&&p.accommodationRequired!=='') ?
-          `<div style="margin-top:8px;font-size:11px;color:var(--amber)">⚠ Flights: ${p.flightsRequired||'N/A'} · Accommodation: ${p.accommodationRequired||'N/A'}</div>` : ''}
-        ${data.briefingPrepared ? `<div style="margin-top:8px;padding:8px 10px;background:rgba(0,232,187,.08);border:1px solid rgba(0,232,187,.25);border-radius:6px;font-size:11px;color:var(--teal)">✓ Consultant briefing email drafted and saved to Outlook drafts — review in Comms Drafts before sending</div>` : ''}
-        ${p.consultant && !data.briefingPrepared ? `<div style="margin-top:8px;font-size:11px;color:var(--text3)">No consultant email found — briefing not sent. Add email manually if needed.</div>` : ''}
-        <div class="arow" style="margin-top:10px">
-          <button class="btn btn-t" onclick="nav('projects',document.querySelector('[onclick*=projects]'))">View projects ↗</button>
-          <button class="btn btn-g btn-sm" onclick="nav('comms',document.querySelector('[onclick*=comms]'))">Review comms drafts ↗</button>
-          <button class="btn btn-g btn-sm" onclick="document.getElementById('contract-status').style.display='none'">Close</button>
-        </div>
-      </div>`;
-    } else {
-      status.innerHTML = `<div class="card" style="border-color:rgba(255,96,128,.3);color:var(--rose)">Error: ${data.error||'Could not read contract'}</div>`;
-    }
-  } catch (e) {
-    status.innerHTML = `<div class="card" style="color:var(--rose)">Error: ${e.message}</div>`;
-  }
-}
-
-function handleContractDrop(e) {
-  e.preventDefault();
-  document.getElementById('contract-upzone').classList.remove('over');
-  if (e.dataTransfer.files[0]) uploadContract(e.dataTransfer.files[0]);
-}
-
-// ── Deliverables ──────────────────────────────────────────────────────────────
-function renderMilestones() {
-  const active = projects.filter(p => p.type === 'standard' && !isCompleted(p));
-  if (!active.length) { document.getElementById('milestones-list').innerHTML = '<div style="color:var(--text3);font-size:12px">No active projects.</div>'; return; }
-  let html = '';
-  active.forEach(p => {
-    html += `<div style="margin-bottom:12px">
-      <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:6px">
-        <div style="width:26px;height:26px;border-radius:6px;background:rgba(232,25,122,.12);color:var(--pink-light);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${ini(p.clientName)}</div>
-        <div style="flex:1"><div style="font-size:12px;font-weight:500">${p.clientName}</div><div style="font-size:11px;color:var(--text3)">${p.projectName||''}</div></div>
-        <span class="badge bg">${PHASES[p.phase||0]}</span>
-        ${p.dueDate?`<span class="badge ${daysUntil(p.dueDate)<=7?'br':'bg'}">📅 ${p.dueDate}</span>`:''}
-      </div>
-      <div style="padding-left:6px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
-        ${p.summary?`<div class="card" style="cursor:pointer;border-left:3px solid var(--teal)" onclick="openMilestoneDetail('${p.id}','summary')">
-          <div style="font-size:10px;color:var(--teal);font-family:var(--fm);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Service provision</div>
-          <div style="font-size:12px;color:var(--text);line-height:1.55">${p.summary.slice(0,130)}${p.summary.length>130?'…':''}</div>
-          <div style="font-size:10px;color:var(--text3);margin-top:6px">Click for full detail ↗</div>
-        </div>`:''}
-        ${p.deliverables?`<div class="card" style="cursor:pointer;border-left:3px solid var(--pink)" onclick="openMilestoneDetail('${p.id}','deliverables')">
-          <div style="font-size:10px;color:var(--pink-light);font-family:var(--fm);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Deliverables</div>
-          <div style="font-size:12px;color:var(--text);line-height:1.55">${p.deliverables.slice(0,130)}${p.deliverables.length>130?'…':''}</div>
-          <div style="font-size:10px;color:var(--text3);margin-top:6px">Click for full detail ↗</div>
-        </div>`:''}
-        ${!p.summary&&!p.deliverables?`<div class="card" style="grid-column:1/-1;color:var(--text3);font-size:11px;text-align:center;padding:16px">No deliverables found. Upload the contract to populate automatically.</div>`:''}
-      </div>
-      <div style="padding-left:6px;margin-top:6px">
-        <div class="arow">
-          <button class="btn btn-p btn-sm" onclick="generateDraft('${p.id}','status_email','Draft a Monitoring and Review weekly update email for ${(p.projectName||p.clientName).replace(/'/g,"\\'")} at ${p.clientName.replace(/'/g,"\\'")}. Cover progress, what has been done, what is next, and any actions needed.')">Draft weekly update ↗</button>
-        </div>
-      </div>
-    </div>`;
-  });
-  document.getElementById('milestones-list').innerHTML = html;
-}
-
-function fmtNumberedModal(text) {
-  if (!text) return '<span style="color:var(--text3)">—</span>';
-  const lines = text
-    .split(/\n|(?<=\d\.)\s+/)
-    .map(l => l.trim().replace(/^[•\-\*]\s*/, '').replace(/^\d+\.\s*/, ''))
-    .filter(l => l.length > 3);
-  if (lines.length <= 1) return `<div style="font-size:13px;color:var(--text);line-height:1.65">${text}</div>`;
-  return lines.map((l,i) => `<div style="display:flex;gap:8px;margin-bottom:6px"><span style="color:var(--teal);font-family:var(--fm);font-size:11px;flex-shrink:0;min-width:20px">${i+1}.</span><span style="font-size:13px;color:var(--text);line-height:1.5">${l}</span></div>`).join('');
-}
-
-function openMilestoneDetail(id, type) {
-  const p = projects.find(x => x.id === id);
-  if (!p) return;
-  const isSrv = type === 'summary';
-  document.getElementById('modal-title').textContent = p.clientName;
-  document.getElementById('modal-sub').textContent   = p.projectName || '';
-  document.getElementById('modal-body').innerHTML = `
-    <div style="background:var(--card2);border:1px solid var(--border);border-left:3px solid ${isSrv?'var(--teal)':'var(--pink)'};border-radius:9px;padding:14px;margin-bottom:14px">
-      <div style="font-size:10px;color:${isSrv?'var(--teal)':'var(--pink-light)'};font-family:var(--fm);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">${isSrv?'Service provision':'Deliverables'}</div>
-      ${fmtNumberedModal(isSrv?p.summary:p.deliverables)}
-    </div>
-    <div class="info-grid">
-      <div class="info-item"><div class="info-label">Current phase</div><div class="info-val">${PHASES[p.phase||0]}</div></div>
-      <div class="info-item"><div class="info-label">Contract value</div><div class="info-val" style="color:var(--teal);font-family:var(--fm)">${p.value||(p.value?'$'+p.value:'—')}</div></div>
-      <div class="info-item"><div class="info-label">Due date</div><div class="info-val">${p.dueDate||'—'}</div></div>
-      <div class="info-item"><div class="info-label">Contact</div><div class="info-val">${p.clientContact||'—'}</div></div>
-    </div>
-    <div class="arow">
-      <button class="btn btn-p" onclick="closeModal();generateDraft('${p.id}','status_email','')">Draft update ↗</button>
-      <button class="btn btn-g" onclick="closeModal();openProject('${p.id}')">View project ↗</button>
-    </div>`;
-  document.getElementById('modal-bg').classList.add('open');
-}
-
-// ── Risks ─────────────────────────────────────────────────────────────────────
-function renderRisks() {
-  const risky = projects.filter(p => p.type === 'standard' && !isCompleted(p) && isAtRisk(p));
-  if (!risky.length) { document.getElementById('risks-list').innerHTML = '<div style="color:var(--text3);font-size:12px">No at-risk projects. All projects on track.</div>'; return; }
-  let html = '';
-  risky.forEach(p => {
-    const days = daysUntil(p.dueDate);
-    html += `<div style="margin-bottom:10px">
-      <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:6px">
-        <div style="width:26px;height:26px;border-radius:6px;background:rgba(255,96,128,.12);color:var(--rose);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${ini(p.clientName)}</div>
-        <div style="flex:1;font-size:12px;font-weight:500">${p.clientName} · ${p.projectName||''}</div>
-        <span class="badge br">${days !== null && days >= 0 ? `Due in ${days}d` : 'At risk'}</span>
-      </div>
-      <div style="padding-left:6px"><div class="card" style="border-left:3px solid var(--rose)">
-        <div style="font-size:12px;font-weight:500;margin-bottom:4px">Status: ${p.status||'Unknown'}</div>
-        <div style="font-size:11px;color:var(--text2);margin-bottom:8px">Phase: ${PHASES[p.phase||0]}${p.dueDate?` · Due ${p.dueDate}`:''}</div>
-        <div class="arow">
-          <button class="btn btn-r btn-sm" onclick="generateDraft('${p.id}','escalation_email','')">Draft escalation ↗</button>
-          <button class="btn btn-g btn-sm" onclick="openProject('${p.id}')">Update project ↗</button>
-        </div>
-      </div></div>
-    </div>`;
-  });
-  document.getElementById('risks-list').innerHTML = html;
-}
-
-// ── Stakeholders ──────────────────────────────────────────────────────────────
-function renderStakeholders() {
-  const active = projects.filter(p => p.type === 'standard' && !isCompleted(p));
-  if (!active.length) { document.getElementById('stakeholders-list').innerHTML = '<div style="color:var(--text3);font-size:12px">No active projects.</div>'; return; }
-  let html = '';
-  active.forEach(p => {
-    html += `<div style="margin-bottom:10px">
-      <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:6px">
-        <div style="width:26px;height:26px;border-radius:6px;background:rgba(0,232,187,.12);color:var(--teal);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${ini(p.clientName)}</div>
-        <div style="flex:1;font-size:12px;font-weight:500">${p.clientName} · ${p.projectName||''}</div>
-      </div>
-      <div style="padding-left:6px"><div class="card">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-          <div style="width:30px;height:30px;border-radius:50%;background:rgba(0,232,187,.12);color:var(--teal);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">${ini(p.clientContact||p.clientName)}</div>
-          <div><div style="font-size:12px;font-weight:500">${p.clientContact||'Contact not set'}</div><div style="font-size:11px;color:var(--text3)">${p.clientEmail||''}</div></div>
-        </div>
-        <div class="arow">
-          <button class="btn btn-p btn-sm" onclick="generateDraft('${p.id}','checkin_email','')">Draft check-in ↗</button>
-          <button class="btn btn-g btn-sm" onclick="generateDraft('${p.id}','status_email','')">Status email ↗</button>
-        </div>
-      </div></div>
-    </div>`;
-  });
-  document.getElementById('stakeholders-list').innerHTML = html;
-}
-
-// ── Invoicing ─────────────────────────────────────────────────────────────────
-function parseValue(valStr) {
-  if (!valStr) return 0;
-  const match = (valStr+'').replace(/[$,AUD]/gi,'').match(/[\d.]+/);
-  return match ? parseFloat(match[0]) : 0;
-}
-
-function renderInvoicing() {
-  const withVal = projects.filter(p => p.type === 'standard' && p.value);
-  if (!withVal.length) { document.getElementById('invoicing-list').innerHTML = '<div style="color:var(--text3);font-size:12px">No contract values found. Upload contracts to populate.</div>'; return; }
-
-  // ── Projection calculation ──────────────────────────────────────────────────
-  const active    = withVal.filter(p => !isCompleted(p));
-  const completed = withVal.filter(p => isCompleted(p));
-  const totalActive    = active.reduce((s, p) => s + parseValue(p.value), 0);
-  const totalCompleted = completed.reduce((s, p) => s + parseValue(p.value), 0);
-  const totalPortfolio = totalActive + totalCompleted;
-
-  // Rough monthly projection — spread active contracts across remaining months this year
+// ── Daily batch (6am AEST = 8pm UTC) ─────────────────────────────────────────
+async function runBatch() {
   const now = new Date();
-  const monthsLeft = 12 - now.getMonth();
-  const monthlyProjection = monthsLeft > 0 ? totalActive / monthsLeft : totalActive;
-  const annualProjection  = totalActive + totalCompleted;
+  const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon ... 5=Fri, 6=Sat
+  const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
+  const isMonday  = dayOfWeek === 1;
 
-  const fmt = n => '$' + Math.round(n).toLocaleString('en-AU');
+  console.log('\n[Batch] ═══ Aurora daily batch starting ═══');
+  const projects = await db.getProjects();
+  const standard = projects.filter(p => p.type === 'standard');
+  const ongoing  = projects.filter(p => p.type === 'ongoing');
+  console.log(`[Batch] ${standard.length} standard | ${ongoing.length} ongoing (skipped)`);
 
-  let html = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
-    <div class="card" style="padding:10px 12px">
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Active portfolio</div>
-      <div style="font-size:18px;font-family:var(--fs);font-weight:600;color:var(--teal)">${fmt(totalActive)}</div>
-      <div style="font-size:10px;color:var(--text3);margin-top:2px">${active.length} active project${active.length!==1?'s':''}</div>
-    </div>
-    <div class="card" style="padding:10px 12px">
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Monthly projection</div>
-      <div style="font-size:18px;font-family:var(--fs);font-weight:600;color:var(--pink-light)">${fmt(monthlyProjection)}</div>
-      <div style="font-size:10px;color:var(--text3);margin-top:2px">Avg over ${monthsLeft} remaining months</div>
-    </div>
-    <div class="card" style="padding:10px 12px">
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Annual projection</div>
-      <div style="font-size:18px;font-family:var(--fs);font-weight:600;color:var(--blue)">${fmt(annualProjection)}</div>
-      <div style="font-size:10px;color:var(--text3);margin-top:2px">Active + completed ${now.getFullYear()}</div>
-    </div>
-  </div>`;
-
-  withVal.forEach(p => {
-    const comp = isCompleted(p);
-    const val = parseValue(p.value);
-    html += `<div style="margin-bottom:10px">
-      <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:6px">
-        <div style="width:26px;height:26px;border-radius:6px;background:rgba(255,96,128,.12);color:var(--rose);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${ini(p.clientName)}</div>
-        <div style="flex:1;font-size:12px;font-weight:500">${p.clientName} · ${p.projectName||''}</div>
-        ${comp?'<span class="badge bt">Completed</span>':'<span class="badge bg">Active</span>'}
-      </div>
-      <div style="padding-left:6px"><div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <span style="font-size:15px;font-weight:600;font-family:var(--fs);color:var(--teal)">${val ? '$'+Math.round(val).toLocaleString('en-AU') : p.value}</span>
-          ${p.dueDate?`<span class="badge bg">Due ${p.dueDate}</span>`:''}
-        </div>
-        ${p.invoicingNotes?`<div style="font-size:11px;color:var(--text2);margin-bottom:8px">${p.invoicingNotes}</div>`:''}
-        <div class="arow"><button class="btn btn-r btn-sm" onclick="generateDraft('${p.id}','invoice_reminder','')">Draft invoice reminder ↗</button></div>
-      </div></div>
-    </div>`;
-  });
-
-  document.getElementById('invoicing-list').innerHTML = html;
-}
-
-// ── Comms ─────────────────────────────────────────────────────────────────────
-async function loadDrafts() {
-  const data = await api('/api/drafts');
-  drafts = data.drafts || [];
-  renderDrafts();
-}
-
-function renderDrafts() {
-  if (!drafts.length) {
-    document.getElementById('drafts-list').innerHTML = `<div class="card" style="color:var(--text3);font-size:12px;text-align:center;padding:20px">No drafts waiting. Aurora generates drafts during the 6am daily batch or when triggered from a project.</div>`;
-    return;
-  }
-  const grouped = {};
-  drafts.forEach(d => { if (!grouped[d.clientName||'Unknown']) grouped[d.clientName||'Unknown'] = []; grouped[d.clientName||'Unknown'].push(d); });
-  let html = '';
-  Object.entries(grouped).forEach(([client, items]) => {
-    html += `<div style="margin-bottom:14px">
-      <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:6px">
-        <div style="width:26px;height:26px;border-radius:6px;background:rgba(232,25,122,.12);color:var(--pink-light);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${ini(client)}</div>
-        <div style="flex:1;font-size:12px;font-weight:500">${client}</div>
-        <span class="badge bg">${items.length} draft${items.length>1?'s':''}</span>
-      </div>
-      <div style="padding-left:6px;display:flex;flex-direction:column;gap:6px">`;
-    items.forEach(d => {
-      html += `<div class="card" id="draft-${d.id}">
-        <div style="display:flex;justify-content:space-between;margin-bottom:5px">
-          <span style="font-size:11px;color:var(--text2)">To: ${d.toName||d.toEmail||'client'}</span>
-          <span class="badge ${d.urgency==='urgent'?'br':'bg'}">${(d.type||'').replace(/_/g,' ')}</span>
-        </div>
-        <div style="font-size:13px;font-weight:500;margin-bottom:6px;font-family:var(--fs)">${d.subject||d.projectName||''}</div>
-        <div style="font-size:11px;color:var(--text2);line-height:1.6;border-left:2px solid var(--border2);padding-left:10px;margin-bottom:8px">${(d.body||'').slice(0,220)}…</div>
-        <div class="arow">
-          <button class="btn btn-p btn-sm" onclick="approveDraft('${d.id}')">✓ Approve & send</button>
-          <button class="btn btn-g btn-sm" onclick="rejectDraft('${d.id}')">Reject</button>
-        </div>
-      </div>`;
-    });
-    html += '</div></div>';
-  });
-  document.getElementById('drafts-list').innerHTML = html;
-}
-
-async function generateDraft(projectId, taskType, customPrompt) {
-  const p = projects.find(x => x.id === projectId);
-  if (!p) return;
-  const btn = event?.target;
-  if (btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
-  const prompt = customPrompt || `Draft a ${taskType.replace(/_/g,' ')} for ${p.projectName||p.clientName} at ${p.clientName}.`;
-  const data = await api('/api/drafts/generate', { method: 'POST', body: JSON.stringify({ projectId, taskType, prompt }) });
-  if (btn) { btn.textContent = '✓ Draft ready — check Comms'; btn.disabled = false; setTimeout(() => { btn.textContent = taskType.replace(/_/g,' ') + ' ↗'; btn.disabled = false; }, 3000); }
-  if (data.draft) drafts.unshift(data.draft);
-}
-
-async function approveDraft(id) {
-  await api(`/api/drafts/${id}/approve`, { method: 'POST' });
-  drafts = drafts.filter(d => d.id !== id);
-  renderDrafts();
-}
-
-async function rejectDraft(id) {
-  await api(`/api/drafts/${id}/reject`, { method: 'POST' });
-  drafts = drafts.filter(d => d.id !== id);
-  renderDrafts();
-}
-
-// ── Documents ─────────────────────────────────────────────────────────────────
-async function deleteDoc(id) {
-  if (!confirm('Remove this document from the library?')) return;
-  await api('/api/documents/' + id, { method: 'DELETE' });
-  renderDocs();
-}
-
-async function renderDocs() {
-  const data = await api('/api/documents');
-  const allDocs = data.documents || [];
-
-  // Show ALL documents but mark contract extracts clearly so Diane can dismiss them
-  // Contracts have type='contract_extract' or no type but were auto-uploaded
-  const isContractExtract = (d) => {
-    if (d.type === 'contract_extract') return true;
-    if (d.source === 'contract') return true;
-    // Heuristic — if it has an extract field it was auto-processed from a contract
-    if (d.extract && d.extract.length > 100 && !d.type) return true;
-    return false;
-  };
-
-  const typeLabel = (d) => {
-    const labels = { session_report:'Session report', signed_agreement:'Signed agreement', closeout_report:'Close-out report', feedback:'Client feedback', risk_register:'Risk register', quality_checklist:'Quality checklist', contract_extract:'Contract extract (auto)' };
-    return labels[d.type] || (isContractExtract(d) ? 'Contract extract (auto)' : 'Document');
-  };
-
-  let html = '';
-
-  if (allDocs.length) {
-    const grouped = {};
-    allDocs.forEach(d => {
-      const key = d.project_id || d.projectId || 'general';
-      if (!grouped[key]) grouped[key] = [];
-      grouped[key].push(d);
-    });
-
-    Object.entries(grouped).forEach(([pid, items]) => {
-      const p = projects.find(x => x.id === pid);
-      const name = p ? `${p.clientName} · ${p.projectName||p.clientName}` : (pid === 'general' ? 'General' : pid);
-      html += `<div style="margin-bottom:10px">
-        <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:6px">
-          <div style="width:26px;height:26px;border-radius:6px;background:rgba(0,232,187,.12);color:var(--teal);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${ini(name)}</div>
-          <div style="flex:1;font-size:12px;font-weight:500">${name}</div>
-          <span class="badge bg">${items.length} file${items.length!==1?'s':''}</span>
-        </div>
-        <div style="background:var(--card2);border:1px solid var(--border);border-radius:9px;overflow:hidden">`;
-      items.forEach((d,i) => {
-        const isContract = isContractExtract(d);
-        const lbl = typeLabel(d);
-        html += `<div style="display:flex;align-items:center;gap:9px;padding:9px 12px;border-bottom:${i<items.length-1?'1px solid var(--border)':'none'};font-size:11px;${isContract?'opacity:.75':''}">
-          <span style="font-size:14px">${isContract?'🗂':'📄'}</span>
-          <div style="flex:1">
-            <div style="color:var(--text)">${d.name}</div>
-            <div style="font-size:10px;color:${isContract?'var(--text3)':'var(--teal)'};margin-top:1px">${lbl}</div>
-          </div>
-          ${isContract ? '<span class="badge bg" style="font-size:9px">Extracted</span>' : '<span class="badge bt">Saved</span>'}
-          <button onclick="deleteDoc('${d.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:0 4px" title="Remove from library">✕</button>
-        </div>`;
-      });
-      html += '</div></div>';
-    });
-  }
-
-  if (!allDocs.length) {
-    html = `<div class="card" style="text-align:center;padding:20px;color:var(--text2)">
-      <div style="font-size:20px;margin-bottom:8px">📁</div>
-      <div style="font-size:12px;font-weight:500;margin-bottom:4px">No documents saved</div>
-      <div style="font-size:11px;color:var(--text3)">Session reports, signed agreements, and close-out reports will appear here.</div>
-      <div style="font-size:11px;color:var(--text3);margin-top:4px">Contract data is extracted and stored — the original file is deleted to save space.</div>
-    </div>`;
-  }
-
-  document.getElementById('docs-list').innerHTML = html;
-}
-
-async function handleDocFiles(files) {
-  const projectId = prompt('Paste the project ID to attach to (visible in browser URL when you open a project), or leave blank for general library:') || 'general';
-  for (const file of files) {
-    const fd = new FormData();
-    fd.append('file', file);
-    fd.append('projectId', projectId);
-    await fetch('/api/contracts/upload', { method: 'POST', body: fd, headers: { 'Authorization': 'Bearer ' + (sessionStorage.getItem('aurora_token') || '') } });
-  }
-  renderDocs();
-}
-
-function handleDocDrop(e) {
-  e.preventDefault();
-  document.querySelector('#pg-docs .upzone').classList.remove('over');
-  handleDocFiles(e.dataTransfer.files);
-}
-
-// ── Reports ───────────────────────────────────────────────────────────────────
-function populateReportSelects() {
-  const sel = document.getElementById('rep-client');
-  const std = projects.filter(p => p.type === 'standard');
-  const clients = [...new Set(std.map(p => p.clientName))];
-  sel.innerHTML = '<option value="">All clients</option>' + clients.map(c => `<option value="${c}">${c}</option>`).join('');
-  updateRepProjects();
-}
-
-function updateRepProjects() {
-  const client = document.getElementById('rep-client').value;
-  const sel = document.getElementById('rep-project');
-  const opts = projects.filter(p => p.type === 'standard' && (!client || p.clientName === client));
-  sel.innerHTML = '<option value="">All projects</option>' + opts.map(p => `<option value="${p.id}">${p.projectName||p.clientName}</option>`).join('');
-}
-
-async function generateReport(type) {
-  const projectId = document.getElementById('rep-project').value || undefined;
-  const excelTypes = ['milestones','risks','invoices'];
-  const ext = excelTypes.includes(type) ? 'csv' : 'doc';
-  const label = excelTypes.includes(type) ? 'Excel spreadsheet' : 'Word document';
-
-  // Show loading state on the card
-  const cards = document.querySelectorAll('.rep-card');
-  cards.forEach(c => c.style.opacity = '0.5');
-
-  // Show status
-  const existing = document.getElementById('report-status');
-  if (existing) existing.remove();
-  const status = document.createElement('div');
-  status.id = 'report-status';
-  status.style.cssText = 'margin-top:12px;font-size:12px;color:var(--text2);text-align:center';
-  status.textContent = 'Aurora is generating your ' + label + '…';
-  document.getElementById('pg-reports').appendChild(status);
-
+  // ── 0. Generate Aurora suggestions ──────────────────────────────────────────
   try {
-    const token = sessionStorage.getItem('aurora_token') || '';
-    const res = await fetch('/api/reports', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({ reportType: type, projectId }),
-    });
+    const newSuggestions = await generateSuggestions();
+    const pending = newSuggestions.filter(s => s.status === 'pending');
+    if (pending.length > 0) {
+      console.log(`[Suggestions] ${pending.length} suggestion(s) generated`);
+    }
+  } catch (err) { console.error('[Suggestions] Error:', err.message); }
 
-    if (!res.ok) {
-      const err = await res.json();
-      status.textContent = 'Error: ' + (err.error || 'Failed to generate report');
-      status.style.color = 'var(--rose)';
-      return;
+  // ── 1. Daily portal prompt to Diane (weekdays only) ───────────────────────
+  if (isWeekday) {
+    const activeCount = standard.filter(p => !['Completed','Terminated'].includes(p.status)).length;
+    const draftCount  = (await db.getDrafts()).length;
+    await sendEmail('diane.k@risk2solution.com',
+      '[Aurora] Good morning — daily project check',
+      `Good morning Diane,
+
+Aurora here with your daily project summary.
+
+Active projects: ${activeCount}
+Drafts awaiting your review: ${draftCount}
+
+Please log into Aurora to review any pending drafts and check project status.
+
+${process.env.FRONTEND_URL ? `Aurora portal: ${process.env.FRONTEND_URL}` : ''}
+
+Aurora
+R2S Project Management Intelligence`,
+      true
+    );
+  }
+
+  // ── 2. Due date reminders ─────────────────────────────────────────────────
+  await checkDueDateReminders();
+
+  // Email polling runs on its own hourly schedule — not in the daily batch
+
+  // ── 3. Check for stuck phases + monitor risks ───────────────────────────────
+  try { await monitorRisks(standard); } catch(e) { console.error('[Risks]', e.message); }
+  // ── 3. Check for stuck phases ─────────────────────────────────────────────
+  await checkStuckPhases(standard);
+
+  // ── 4. SOP-TRN-001: Materials submission & session report reminders ────────
+  await checkMaterialsSubmissionReminders(standard);
+
+  // ── 5. Weekly actions (Mondays only) ─────────────────────────────────────
+  if (isMonday) {
+    // 5a. Weekly client status email drafts
+    for (const p of standard) {
+      if (['Completed','Terminated','On Hold'].includes(p.status)) continue;
+      try {
+        const context = buildContext(p);
+        const text = await aurora('status_email',
+          `Draft a short weekly status update email to ${p.clientContact || 'the client'} at ${p.clientName} for the ${p.projectName || p.clientName} project. Current phase: ${PHASES[p.phase||0]}. 3-4 sentences: what happened this week, what is next, anything needed from the client. Professional and concise.`,
+          context
+        );
+        const draft = {
+          id: `d_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+          projectId: p.id, clientName: p.clientName, projectName: p.projectName,
+          type: 'status_email', urgency: 'routine',
+          toName: p.clientContact, toEmail: p.clientEmail,
+          subject: `${p.projectName || p.clientName} — Weekly update`,
+          body: text, source: 'batch',
+        };
+        await db.saveDraft(draft);
+        await saveDraftEmail(draft);
+      } catch (err) {
+        if (err.message === 'MONTHLY_CAP_REACHED') break;
+        console.error(`[Batch] Status email error on ${p.clientName}:`, err.message);
+      }
     }
 
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    // 5b. Weekly consultant check-in drafts
+    const checkinCount = await generateWeeklyConsultantCheckins(standard);
+
+    // 5c. Monday reminder to Diane to review and send check-in drafts
+    await sendEmail('diane.k@risk2solution.com',
+      '[Aurora] Weekly action — please review and send check-in emails',
+      `Good morning Diane,
+
+Aurora has prepared your weekly emails for review. Please log into Aurora to review and send:
+
+• ${standard.filter(p => !['Completed','Terminated'].includes(p.status)).length} client status update emails
+• ${checkinCount} consultant/trainer check-in emails
+
+All drafts are in the info@risk2solution.com Outlook shared mailbox Drafts folder and visible in the Aurora portal under Comms Drafts.
+
+Please review each one for accuracy before sending.
+
+${process.env.FRONTEND_URL ? `Aurora portal: ${process.env.FRONTEND_URL}` : ''}
+
+Aurora
+R2S Project Management Intelligence`,
+      true
+    );
+
+    // 5d. Read and analyse consultant reply emails
+    await readConsultantReplies();
+  }
+
+  // ── 6. At-risk project summary ────────────────────────────────────────────
+  const atRisk = standard.filter(p => {
+    if (!p.dueDate) return false;
+    const days = Math.round((new Date(p.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
+    return days <= 14 && days >= 0;
+  });
+
+  if (atRisk.length > 0) {
+    const summary = atRisk.map(p => {
+      const days = Math.round((new Date(p.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
+      return `• ${p.clientName} (${p.projectName || 'project'}) — due in ${days} days — Phase: ${PHASES[p.phase||0]}`;
+    }).join('\n');
+    await sendInternalEmail(
+      '[Aurora] Projects due within 14 days',
+      `Good morning,\n\nAurora has identified ${atRisk.length} project(s) due within the next 14 days:\n\n${summary}\n\nPlease log into Aurora to review and action.\n\nAurora\nR2S Project Management Intelligence`
+    );
+  }
+
+  console.log('[Batch] ═══ Complete ═══\n');
+}
+
+// ── Read consultant calendar availability ────────────────────────────────────
+async function getConsultantAvailability() {
+  const token = await getOutlookToken();
+  if (!token) return null;
+  const calendarName = 'R2S Training & Education';
+  const mailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+
+  try {
+    // Get events in the next 30 days from the training calendar
+    const start = new Date();
+    const end   = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+    // First find the calendar ID
+    const calsRes = await axios.get(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/calendars`,
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
+    );
+    const cal = calsRes.data?.value?.find(c =>
+      c.name?.toLowerCase().includes('training') ||
+      c.name?.toLowerCase().includes('education') ||
+      c.name === calendarName
+    );
+
+    if (!cal) return null;
+
+    // Get events from that calendar
+    const eventsRes = await axios.get(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/calendars/${cal.id}/events?$filter=start/dateTime ge '${start.toISOString()}' and start/dateTime le '${end.toISOString()}'&$select=subject,start,end&$top=50`,
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
+    );
+
+    const busySlots = (eventsRes.data?.value || []).map(e => ({
+      subject: e.subject,
+      start: new Date(e.start.dateTime),
+      end: new Date(e.end.dateTime),
+    }));
+
+    // Find 3 available weekday morning slots in next 30 days
+    const available = [];
+    const checkDate = new Date();
+    checkDate.setDate(checkDate.getDate() + 3); // start 3 days from now
+
+    while (available.length < 3 && checkDate < end) {
+      const dow = checkDate.getDay();
+      if (dow >= 1 && dow <= 5) { // weekdays only
+        // Check 9am and 10am slots
+        for (const hour of [9, 10, 14]) {
+          const slotStart = new Date(checkDate);
+          slotStart.setHours(hour, 0, 0, 0);
+          const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
+
+          const isBusy = busySlots.some(b =>
+            slotStart < b.end && slotEnd > b.start
+          );
+
+          if (!isBusy && available.length < 3) {
+            available.push(slotStart);
+          }
+        }
+      }
+      checkDate.setDate(checkDate.getDate() + 1);
+    }
+
+    return available;
+  } catch (err) {
+    console.error('[Calendar] Availability check failed:', err.message);
+    return null;
+  }
+}
+
+// ── Kick-off meeting agenda generation ────────────────────────────────────────
+async function generateKickoffAgenda(project) {
+  const context = buildContext(project);
+  const agenda = await aurora('consultant_briefing',
+    `Write a professional kick-off meeting agenda for the ${project.projectName || project.clientName} project.
+
+FORMAT RULES:
+- Plain text only. No asterisks, no bold markdown, no long dashes, no lines.
+- Use numbered sections and bullet points (use the bullet character •).
+- R2S branding: professional, clear, human-centred tone.
+- This is a formal agenda document.
+
+Write the agenda with these sections:
+
+RISK 2 SOLUTION GROUP
+Kick-off Meeting Agenda
+${project.clientName} — ${project.projectName || 'Project Engagement'}
+Date: [To be confirmed]
+Location: [To be confirmed — virtual or on-site]
+Attendees: ${project.clientContact || '[Client contact]'} (${project.clientName}), ${project.consultant || '[R2S Consultant]'} (R2S), Diane Kruger (R2S)
+Duration: 60-90 minutes
+
+1. Welcome and Introductions (10 minutes)
+• Purpose and format of meeting
+• Attendee introductions
+
+2. Project Overview (15 minutes)
+• Scope of engagement as per proposal
+• Objectives and expected outcomes
+• What success looks like for ${project.clientName}
+
+3. Deliverables and Timeline (20 minutes)
+• Confirmed deliverables (list each one from the project scope)
+• Proposed timeline and key milestones
+• Phasing and scheduling
+
+4. Roles and Responsibilities (10 minutes)
+• R2S team responsibilities
+• ${project.clientName} team responsibilities
+• Key contacts and escalation points
+
+5. Communication and Reporting (10 minutes)
+• Reporting frequency and format
+• Primary communication channels
+• How updates will be shared
+
+6. Risk and Issue Management (10 minutes)
+• How risks will be identified and managed
+• Escalation process if issues arise
+• Change request process
+
+7. Next Steps and Close (10 minutes)
+• Confirm immediate next steps
+• Confirm dates for next check-in
+• Any questions
+
+Prepared by Aurora, R2S Project Management Intelligence
+For review by Diane Kruger before distribution`,
+    context
+  );
+  return agenda;
+}
+
+// ── Full kick-off system ───────────────────────────────────────────────────────
+async function sendKickoffPrompt(project) {
+  const DIANE = 'diane.k@risk2solution.com';
+
+  // 1. Get consultant availability from training calendar
+  let availabilityText = 'Aurora was unable to read the training calendar. Please check availability manually.';
+  let availableDates = null;
+  try {
+    availableDates = await getConsultantAvailability();
+    if (availableDates && availableDates.length > 0) {
+      const opts = availableDates.map((d, i) => {
+        const dateStr = d.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+        const timeStr = d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Australia/Brisbane' });
+        return `Option ${i+1}: ${dateStr} at ${timeStr} AEST`;
+      }).join('\n');
+      availabilityText = 'Based on the R2S Training and Education calendar, the following slots appear available:\n\n' + opts + '\n\nPlease confirm with ' + (project.consultant || 'the consultant') + ' that these work before sending to the client.';
+    }
+  } catch (err) {
+    console.error('[Kickoff] Calendar check failed:', err.message);
+  }
+
+  // 2. Generate kick-off agenda
+  let agendaText = '';
+  try {
+    agendaText = await generateKickoffAgenda(project);
+  } catch (err) {
+    console.error('[Kickoff] Agenda generation failed:', err.message);
+  }
+
+  // 3. Save agenda as Outlook draft for Diane to review
+  if (agendaText) {
+    const agendaDraft = {
+      id: `d_${Date.now()}_agenda`,
+      projectId: project.id, clientName: project.clientName,
+      projectName: project.projectName, type: 'kickoff_agenda',
+      urgency: 'routine', toName: project.clientContact,
+      toEmail: project.clientEmail,
+      subject: `Kick-off Meeting Agenda — ${project.clientName} — ${project.projectName || 'Project'}`,
+      body: agendaText, source: 'auto',
+    };
+    await db.saveDraft(agendaDraft);
+    await saveDraftEmail(agendaDraft);
+  }
+
+  // 4. Draft client onboarding email
+  await draftClientOnboarding(project);
+
+  // 5. Email Diane with availability options and next steps
+  await sendEmail(DIANE,
+    `[Aurora] Schedule kick-off meeting: ${project.clientName}`,
+    `Hi Diane,
+
+The consultant briefing for ${project.projectName || project.clientName} has been sent to ${project.consultant || 'the consultant'}.
+
+The next step is to schedule the kick-off meeting with the client and consultant.
+
+${availabilityText}
+
+To schedule:
+• Confirm the date with ${project.consultant || 'the consultant'}
+• Send the meeting invite to ${project.clientContact || 'the client'} (${project.clientEmail || ''})
+• The kick-off agenda has been saved to the info@risk2solution.com Outlook drafts for your review
+
+Client contact: ${project.clientContact || 'See project record'}
+Client email: ${project.clientEmail || 'See project record'}
+Consultant: ${project.consultant || 'See project record'}
+
+Once the kick-off meeting is confirmed, update the project phase to Deployment in Aurora.
+
+${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}
+
+Aurora
+R2S Project Management Intelligence`,
+    true
+  );
+
+  console.log('[Kickoff] Prompt sent to Diane with availability and agenda');
+}
+
+// ── Client onboarding email ───────────────────────────────────────────────────
+async function draftClientOnboarding(project) {
+  try {
+    const context = buildContext(project);
+    const onboardingBody = await aurora('consultant_briefing',
+      `Write a professional client welcome and onboarding email from R2S to ${project.clientContact || 'the client'} at ${project.clientName}.
+
+FORMAT RULES:
+- Plain text only. No asterisks, no bold markdown, no long dashes.
+- Professional, warm, and human-centred tone.
+- Concise — this is a welcome email, not a report.
+
+Write the email starting with "Hi ${(project.clientContact || 'there').split(' ')[0]}," and covering:
+
+1. A warm welcome to the R2S engagement (1-2 sentences)
+
+2. Brief confirmation of what R2S will be delivering (1-2 sentences referencing the project scope)
+
+3. Your key R2S contacts:
+   Project managed by: Diane Kruger, Corporate Operations Lead
+   Email: diane.k@risk2solution.com | Phone: 1300 459 970
+   ${project.consultant ? 'Assigned consultant/trainer: ' + project.consultant : ''}
+
+4. What happens next (3 bullet points covering: kick-off meeting to be scheduled, scope and timeline to be confirmed, regular updates throughout)
+
+5. A note that Diane is available for any questions
+
+Sign off as:
+Kind regards,
+
+Diane Kruger
+Corporate Operations Lead
+Risk 2 Solution Group
+P: 1300 459 970 | M: +61 415 748 747
+E: diane.k@risk2solution.com
+W: www.risk2solution.com
+Queensland, Australia`,
+      context
+    );
+
+    const draft = {
+      id: `d_${Date.now()}_onboard`,
+      projectId: project.id, clientName: project.clientName,
+      projectName: project.projectName, type: 'client_onboarding',
+      urgency: 'routine', toName: project.clientContact,
+      toEmail: project.clientEmail,
+      subject: `Welcome to R2S — ${project.projectName || project.clientName}`,
+      body: onboardingBody, source: 'auto',
+    };
+    await db.saveDraft(draft);
+    await saveDraftEmail(draft);
+    console.log(`[Onboarding] Client welcome email drafted for ${project.clientName}`);
+  } catch (err) {
+    if (err.message === 'MONTHLY_CAP_REACHED') throw err;
+    console.error('[Onboarding] Draft failed:', err.message);
+  }
+}
+
+// ── Risk escalation drafter ───────────────────────────────────────────────────
+async function draftRiskEscalation(project, riskDescription) {
+  const DIANE = 'diane.k@risk2solution.com';
+  try {
+    const context = buildContext(project);
+
+    // Draft escalation email to client (for Diane to review — NOT auto-sent)
+    const escalationBody = await aurora('escalation_email',
+      `Write a professional risk escalation email from R2S to ${project.clientContact || 'the client'} at ${project.clientName}.
+
+FORMAT RULES:
+- Plain text only. No asterisks, no bold markdown, no long dashes.
+- Professional and measured tone — serious but not alarming.
+- Keep it factual and solution-focused.
+
+Risk description: ${riskDescription}
+Project: ${project.projectName || project.clientName}
+Current phase: ${PHASES[project.phase || 0]}
+
+Write starting with "Hi ${(project.clientContact || 'there').split(' ')[0]},"
+
+Cover:
+1. Reason for the escalation (clear and factual, 2-3 sentences)
+2. Current impact or risk to the project
+3. Proposed actions or next steps (bullet points)
+4. Request for a brief call or response to agree on the path forward
+
+Sign off as Diane Kruger with full signature.`,
+      context
+    );
+
+    const draft = {
+      id: `d_${Date.now()}_escalation`,
+      projectId: project.id, clientName: project.clientName,
+      projectName: project.projectName, type: 'escalation_email',
+      urgency: 'urgent', toName: project.clientContact,
+      toEmail: project.clientEmail,
+      subject: `Project Update — ${project.projectName || project.clientName} — Action Required`,
+      body: escalationBody, source: 'auto',
+    };
+    await db.saveDraft(draft);
+    await saveDraftEmail(draft);
+
+    // Also notify Diane internally
+    await sendEmail(DIANE,
+      `[Aurora] Risk escalation draft ready: ${project.clientName}`,
+      `Aurora has identified a risk on the ${project.clientName} project and drafted an escalation email for your review.
+
+Risk: ${riskDescription}
+Project: ${project.projectName || project.clientName}
+Phase: ${PHASES[project.phase || 0]}
+Client contact: ${project.clientContact || 'See project record'}
+
+The draft escalation email is waiting in the Comms Drafts section of Aurora and in the info@risk2solution.com Outlook shared mailbox drafts folder.
+
+Please review before sending.
+
+${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}
+
+Aurora
+R2S Project Management Intelligence`,
+      true
+    );
+    console.log(`[Escalation] Draft created for ${project.clientName}`);
+  } catch (err) {
+    if (err.message === 'MONTHLY_CAP_REACHED') throw err;
+    console.error('[Escalation] Draft failed:', err.message);
+  }
+}
+
+// ── Client satisfaction / feedback email (triggered on close-out) ─────────────
+async function draftClientFeedback(project) {
+  try {
+    const context = buildContext(project);
+    const feedbackBody = await aurora('status_email',
+      `Write a professional post-project feedback request email from R2S to ${project.clientContact || 'the client'} at ${project.clientName}.
+
+FORMAT RULES:
+- Plain text only. No asterisks, no markdown, no long dashes.
+- Warm, genuine, and brief.
+
+Write starting with "Hi ${(project.clientContact || 'there').split(' ')[0]},"
+
+Cover:
+1. Thank the client for the engagement (1-2 sentences)
+2. Brief note on what was delivered
+3. A genuine request for feedback — how did R2S perform, what could be improved, would they recommend R2S
+4. Optional: mention R2S would welcome the opportunity to continue supporting them
+5. Offer to arrange a brief debrief call if they would find it useful
+
+Sign off as Diane Kruger with full signature.`,
+      context
+    );
+
+    const draft = {
+      id: `d_${Date.now()}_feedback`,
+      projectId: project.id, clientName: project.clientName,
+      projectName: project.projectName, type: 'feedback_request',
+      urgency: 'routine', toName: project.clientContact,
+      toEmail: project.clientEmail,
+      subject: `Thank you — ${project.projectName || project.clientName} — Your feedback`,
+      body: feedbackBody, source: 'auto',
+    };
+    await db.saveDraft(draft);
+    await saveDraftEmail(draft);
+    console.log(`[Feedback] Draft created for ${project.clientName}`);
+  } catch (err) {
+    console.error('[Feedback] Draft failed:', err.message);
+  }
+}
+
+// ── Cron schedules ───────────────────────────────────────────────────────────
+
+// Daily batch: 6am AEST (UTC+10) = 8pm UTC previous day
+cron.schedule('0 20 * * *', () => runBatch().catch(console.error), { timezone: 'UTC' });
+
+// Email polling: every hour from 7am to 7pm AEST (9pm to 9am UTC)
+// AEST is UTC+10, so 7am AEST = 9pm UTC previous day, 7pm AEST = 9am UTC
+// Run every hour: 21,22,23,0,1,2,3,4,5,6,7,8,9 UTC = 7am-7pm AEST
+cron.schedule('0 21-23,0-9 * * *', async () => {
+  const now = new Date();
+  const dayOfWeek = now.getDay();
+  const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
+  if (!isWeekday) return; // weekdays only
+  console.log('[Poll] Checking inbox...');
+  try { await readConsultantReplies(); } catch(e) { console.error('[Poll] Error:', e.message); }
+}, { timezone: 'UTC' });
+
+// ── API Routes ────────────────────────────────────────────────────────────────
+app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Aurora R2S v3', db: !!process.env.DATABASE_URL ? 'postgres' : 'json' }));
+
+// Projects
+app.get('/api/projects', async (req, res) => {
+  try { res.json({ projects: await db.getProjects() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/projects', express.json(), async (req, res) => {
+  try {
+    const p = req.body;
+    if (!p.clientName) return res.status(400).json({ error: 'clientName required' });
+    p.id = p.id || `p_${Date.now()}`;
+    p.type = p.type || 'standard';
+    p.phase = p.phase || 0;
+    await db.upsertProject(p);
+    res.json({ project: p });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/projects/:id', express.json(), async (req, res) => {
+  try {
+    const before = await db.getProject(req.params.id);
+    const updated = await db.updateProjectField(req.params.id, req.body);
+    // Log manual updates
+    if (req.body.phase !== undefined && before && req.body.phase !== before.phase) {
+      await db.logActivity(req.params.id, { type: 'phase_change', summary: `Phase updated to ${PHASES[req.body.phase]} by Diane` });
+    }
+    if (req.body.status !== undefined && before && req.body.status !== before.status) {
+      await db.logActivity(req.params.id, { type: 'status_change', summary: `Status updated to ${req.body.status} by Diane` });
+    }
+    if (req.body.consultant !== undefined && before && req.body.consultant !== before.consultant) {
+      await db.logActivity(req.params.id, { type: 'consultant_assigned', summary: `Consultant/trainer updated to: ${req.body.consultant}` });
+    }
+    if (req.body.dueDate !== undefined && before && req.body.dueDate !== before.dueDate) {
+      await db.logActivity(req.params.id, { type: 'manual_note', summary: `Due date updated to: ${req.body.dueDate}` });
+    }
+    // If phase changed to Close-out (4), set 1yr and 2yr follow-up reminders
+    if (req.body.phase === 4 || req.body.status === 'Completed') {
+      const p = await db.getProject(req.params.id);
+      if (p) {
+        const yr1 = new Date(); yr1.setFullYear(yr1.getFullYear() + 1);
+        const yr2 = new Date(); yr2.setFullYear(yr2.getFullYear() + 2);
+        await createCalendarReminder(
+          `1-year follow-up: ${p.clientName}`,
+          `Check in with ${p.clientName} (${p.clientContact || ''}) — explore new service needs, pain points, and opportunities for R2S.`,
+          yr1.toISOString().slice(0,10)
+        );
+        await createCalendarReminder(
+          `2-year follow-up: ${p.clientName}`,
+          `2-year relationship check-in with ${p.clientName}. Review their current situation and how R2S can help.`,
+          yr2.toISOString().slice(0,10)
+        );
+        await sendInternalEmail(
+          `[Aurora] Project closed: ${p.clientName}`,
+          `The ${p.projectName || p.clientName} project has been marked complete.\n\nAurora has set 1-year and 2-year follow-up reminders in the Outlook calendar.\n\nAurora\nR2S Project Management Intelligence`
+        );
+        // Draft client feedback email
+        try { await draftClientFeedback(p); } catch(e) { console.error('[Feedback]', e.message); }
+      }
+    }
+    res.json({ project: updated });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/projects/:id', async (req, res) => {
+  try { await db.deleteProject(req.params.id); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Trigger consultant briefing for a specific consultant on a project
+app.post('/api/projects/:id/briefing', express.json(), async (req, res) => {
+  try {
+    const project = await db.getProject(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    // Allow specifying a single consultant name (for multi-consultant support)
+    const consultantName  = req.body?.consultantName || project.consultant;
+    if (!consultantName) return res.status(400).json({ error: 'No consultant assigned to this project' });
+
+    const CONSULTANT_EMAILS = {
+      'Mick Harran':'info@risk2solution.com','Paul Johnston':'info@risk2solution.com',
+      'Dave Cohen':'dave.c@risk2solution.com','Ross Mackenzie':'info@risk2solution.com',
+      'Lawrence Phillips':'info@risk2solution.com','Marina Toailoa':'info@risk2solution.com',
+      'Gavriel Schneider':'info@risk2solution.com','Pierre Andipatin':'info@risk2solution.com',
+      'Daniel Du Plessis':'info@risk2solution.com','Gavriel Guriel':'info@risk2solution.com',
+    };
+
+    const docs    = await db.getDocuments(req.params.id);
+    const context = buildContext(project, docs);
+
+    // Build a single-consultant version of the project for the briefing
+    const briefProject = { ...project, consultant: consultantName, consultantEmail: CONSULTANT_EMAILS[consultantName] || project.consultantEmail || 'info@risk2solution.com' };
+    const extracted = {
+      consultant: consultantName,
+      consultantEmail: briefProject.consultantEmail,
+      flightsRequired: project.flightsRequired,
+      accommodationRequired: project.accommodationRequired,
+    };
+
+    const draft = await sendConsultantBriefing(briefProject, extracted, context);
+    res.json({ success: true, draft });
+  } catch (err) {
+    if (err.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
+    console.error('[Briefing endpoint]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Monday sync (backup)
+app.post('/api/projects/sync', async (req, res) => {
+  try { res.json({ projects: await syncMonday() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Contract upload — auto-creates project
+app.post('/api/contracts/upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const spend = await db.getSpend();
+    if (spend.total >= CAP_USD) return res.status(429).json({ error: 'Monthly cap reached' });
+
+    console.log(`[Contract] Reading ${req.file.originalname}...`);
+    const rawText = await extractTextFromFile(req.file.path, req.file.mimetype);
+    if (!rawText || rawText.trim().length < 100) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Could not extract text from this file. Try a different format.' });
+    }
+
+    // ── Duplicate detection — do a quick name scan before full extraction ──────
+    // Extract just client/project name cheaply using Haiku before full Sonnet extraction
+    if (!req.body.forceCreate) {
+      try {
+        const quickScan = await aurora('status_email',
+          `Read the first 2000 characters of this document and extract ONLY:
+1. The client or organisation name
+2. The project or engagement name or title
+
+Return as JSON only: {"clientName": "...", "projectName": "..."}
+If not found use empty string.
+
+Document start:
+${rawText.slice(0, 2000)}`,
+          null
+        );
+        const quickData = JSON.parse(quickScan.replace(/\`\`\`json|\`\`\`/g,'').trim());
+        const existingProjects = await db.getProjects();
+
+        // Check for similar existing projects
+        const duplicates = existingProjects.filter(p => {
+          const clientMatch = quickData.clientName &&
+            p.clientName?.toLowerCase().includes(quickData.clientName.toLowerCase().slice(0,8)) ||
+            quickData.clientName?.toLowerCase().includes((p.clientName||'').toLowerCase().slice(0,8));
+          const projectMatch = quickData.projectName &&
+            p.projectName?.toLowerCase().includes(quickData.projectName.toLowerCase().slice(0,10)) ||
+            quickData.projectName?.toLowerCase().includes((p.projectName||'').toLowerCase().slice(0,10));
+          return clientMatch || projectMatch;
+        });
+
+        if (duplicates.length > 0) {
+          // Don't delete the file yet — return duplicate warning so Diane can decide
+          return res.status(409).json({
+            duplicate: true,
+            message: `A similar project may already exist in Aurora.`,
+            existingProjects: duplicates.map(p => ({
+              id: p.id,
+              clientName: p.clientName,
+              projectName: p.projectName,
+              status: p.status,
+              phase: p.phase,
+            })),
+            detectedClient: quickData.clientName,
+            detectedProject: quickData.projectName,
+            fileStillUploaded: true,
+          });
+        }
+      } catch (scanErr) {
+        // If quick scan fails, continue with full extraction
+        console.log('[Contract] Quick scan failed, proceeding with full extraction:', scanErr.message);
+      }
+    }
+
+    const extracted = await analyseContract(rawText, req.file.originalname);
+    console.log(`[Contract] Extracted: ${extracted.clientName} — ${extracted.projectName}`);
+
+    // Create project from extracted data
+    const projectId = req.body.projectId || `p_${Date.now()}`;
+    const project = {
+      id:                   projectId,
+      clientName:           extracted.organisationName || extracted.clientName || req.body.clientName || 'Unknown client',
+      projectName:          extracted.projectName || req.file.originalname,
+      clientContact:        extracted.clientContact || '',
+      clientEmail:          extracted.clientEmail || '',
+      clientPhone:          extracted.clientPhone || '',
+      value:                extracted.value || '',
+      contractStart:        extracted.contractStart || '',
+      dueDate:              extracted.dueDate || '',
+      summary:              extracted.summary || '',
+      deliverables:         extracted.deliverables || '',
+      milestones:           extracted.milestones || '',
+      timeline:             extracted.timeline || '',
+      invoicingNotes:       extracted.invoicingNotes || '',
+      consultant:           extracted.consultant || '',
+      consultantEmail:      extracted.consultantEmail || '',
+      flightsRequired:      extracted.flightsRequired || '',
+      accommodationRequired:extracted.accommodationRequired || '',
+      notes:                extracted.notes || '',
+      status:               'In Progress',
+      phase:                0,
+      type:                 'standard',
+    };
+
+    if (!req.body.projectId) {
+      await db.upsertProject(project);
+    } else {
+      await db.updateProjectField(projectId, {
+        summary: extracted.summary, deliverables: extracted.deliverables,
+        milestones: extracted.milestones, timeline: extracted.timeline,
+        value: extracted.value, dueDate: extracted.dueDate,
+        contractStart: extracted.contractStart, invoicingNotes: extracted.invoicingNotes,
+        consultant: extracted.consultant, consultantEmail: extracted.consultantEmail,
+        clientContact: extracted.clientContact, clientEmail: extracted.clientEmail,
+        clientPhone: extracted.clientPhone,
+        flightsRequired: extracted.flightsRequired,
+        accommodationRequired: extracted.accommodationRequired,
+      });
+    }
+
+    // Save document extract (text only — delete the original file to save space)
+    await db.saveDocument({
+      id: `doc_${Date.now()}`,
+      projectId, name: req.file.originalname,
+      extract: rawText.slice(0, 8000),
+      type: 'contract_extract',
+    });
+
+    // Delete the uploaded file immediately — we only need the extracted text
+    try {
+      fs.unlinkSync(req.file.path);
+      console.log(`[Upload] Contract file deleted after extraction: ${req.file.originalname}`);
+    } catch (unlinkErr) {
+      console.error('[Upload] Could not delete file:', unlinkErr.message);
+    }
+
+    // Don't auto-send briefing on upload — consultant is pre-filled but Diane confirms via dropdown
+    // The briefingPrepared flag tells the UI which consultants were found so Diane can confirm
+    // Draft client onboarding email when project is first created
+    if (!req.body.projectId) {
+      try { await draftClientOnboarding(project); } catch(e) { console.error('[Onboarding]', e.message); }
+      // Log project creation
+      await db.logActivity(projectId, { type: 'project_created', summary: `Project created from contract upload — ${project.clientName} ${project.projectName || ''}` });
+      if (project.consultant) await db.logActivity(projectId, { type: 'consultant_assigned', summary: `${project.consultant} identified as consultant/trainer from proposal` });
+      if (project.value) await db.logActivity(projectId, { type: 'contract', summary: `Contract value extracted: ${project.value}` });
+    }
+
+    res.json({ project, extracted, briefingPrepared: false, suggestedConsultants: extracted.consultant ? extracted.consultant.split(/[,;&]+/).map(s => s.trim()).filter(Boolean) : [] });
+  } catch (e) {
+    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
+    console.error('[Contract] Error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Drafts
+app.get('/api/drafts', async (req, res) => {
+  try { res.json({ drafts: await db.getDrafts() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/drafts/generate', express.json(), async (req, res) => {
+  try {
+    const { projectId, taskType, prompt } = req.body;
+    const p = await db.getProject(projectId);
+    if (!p) return res.status(404).json({ error: 'Project not found' });
+    if (p.type === 'ongoing') return res.status(400).json({ error: 'Ongoing projects do not use Aurora automation' });
+
+    const docs = await db.getDocuments(projectId);
+    const context = buildContext(p, docs);
+    const text = await aurora(taskType || 'status_email', prompt || `Draft a ${(taskType||'status email').replace(/_/g,' ')} for ${p.projectName||p.clientName} at ${p.clientName}.`, context);
+
+    const draft = {
+      id: `d_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+      projectId, clientName: p.clientName, projectName: p.projectName,
+      type: taskType || 'status_email', urgency: taskType?.includes('escalat') ? 'urgent' : 'routine',
+      toName: p.clientContact, toEmail: p.clientEmail,
+      subject: `${p.projectName || p.clientName}`, body: text, source: 'manual',
+    };
+    await db.saveDraft(draft);
+    await saveDraftEmail(draft);
+    res.json({ draft });
+  } catch (e) {
+    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/drafts/:id/approve', async (req, res) => {
+  try {
+    const drafts = db.readJSON('drafts.json');
+    const draft  = drafts.find(d => d.id === req.params.id);
+    if (!draft) return res.status(404).json({ error: 'Not found' });
+
+    // Send via Outlook
+    const cc = draft.ccEmail ? [draft.ccEmail] : [];
+    await sendEmail(draft.toEmail || INTERNAL_EMAILS[1], draft.subject, draft.body, false, cc);
+    await db.updateDraft(req.params.id, { approved: true });
+
+    // Log the approval
+    if (draft.projectId) {
+      const typeLabels = { consultant_briefing: 'Consultant briefing email sent', client_onboarding: 'Client onboarding email sent', status_email: 'Client status update email sent', kickoff_agenda: 'Kick-off agenda sent', invoice_reminder: 'Invoice reminder email sent', escalation_email: 'Escalation email sent to client', feedback_request: 'Client feedback email sent', consultant_checkin: 'Consultant check-in email sent' };
+      const label = typeLabels[draft.type] || `${draft.type} email approved and sent`;
+      await db.logActivity(draft.projectId, { type: 'draft_sent', summary: `${label} to ${draft.toName || draft.toEmail}` });
+    }
+
+    // If this was a consultant briefing, send kick-off meeting prompt to Diane
+    if (draft.type === 'consultant_briefing' && draft.projectId) {
+      const project = await db.getProject(draft.projectId);
+      if (project) {
+        await sendKickoffPrompt(project);
+        console.log(`[Approve] Kick-off prompt sent for ${project.clientName}`);
+      }
+    }
+
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/drafts/:id/reject', async (req, res) => {
+  try { await db.updateDraft(req.params.id, { rejected: true }); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/drafts/:id', express.json(), async (req, res) => {
+  try { await db.updateDraft(req.params.id, req.body); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Chat
+app.post('/api/chat', express.json(), async (req, res) => {
+  try {
+    const { message, projectId, history } = req.body;
+    if (!message) return res.status(400).json({ error: 'message required' });
+    let context = null;
+    if (projectId) {
+      const p    = await db.getProject(projectId);
+      const docs = await db.getDocuments(projectId);
+      if (p && p.type !== 'ongoing') context = buildContext(p, docs);
+    }
+    const turns = (history || []).slice(-6);
+    const fullMessage = turns.length
+      ? turns.map(t => `${t.role === 'user' ? 'User' : 'Aurora'}: ${t.content}`).join('\n') + `\nUser: ${message}`
+      : message;
+    const reply = await aurora('chat', fullMessage, context);
+    res.json({ reply });
+  } catch (e) {
+    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Documents
+app.get('/api/documents', async (req, res) => {
+  try { res.json({ documents: await db.getDocuments(req.query.projectId) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Reports — generate and stream as downloadable files
+app.post('/api/reports', express.json(), async (req, res) => {
+  try {
+    const { reportType, projectId } = req.body;
+    const allProjects = await db.getProjects();
+    const targets = projectId
+      ? allProjects.filter(p => p.id === projectId && p.type !== 'ongoing')
+      : allProjects.filter(p => p.type !== 'ongoing');
+    if (!targets.length) return res.status(404).json({ error: 'No projects found' });
+
+    const contextBlock = (await Promise.all(targets.map(async p => {
+      const docs = await db.getDocuments(p.id);
+      return buildContext(p, docs);
+    }))).filter(Boolean).join('\n\n---\n\n');
+
+    // Determine format
+    const excelTypes = ['milestones','risks','invoices'];
+    const isExcel = excelTypes.includes(reportType);
+
+    const prompts = {
+      status:    `Write a clear project status report. Use bullet points and numbered lists. No asterisks, no long dashes, no markdown symbols.
+For each project write:
+Project name and client
+Current phase (one of: Kick-off, Deployment, Monitoring & Review, Reporting, Close-out)
+Status: On Track / At Risk / On Hold
+Delivered so far (bullet points)
+Outstanding (bullet points)
+Risks or blockers (bullet points if any)
+Next steps (bullet points)`,
+
+      milestones:`Generate a deliverables tracker. Return as tab-separated values with these exact columns:
+Client\tProject\tDeliverable\tPhase\tDue Date\tStatus\tNotes
+One row per deliverable. Status must be one of: Complete, In Progress, Outstanding, Overdue.
+No extra text, no asterisks, no dashes. Just the data rows after the header.`,
+
+      risks:     `Generate a risk register. Return as tab-separated values with these exact columns:
+Client\tProject\tRisk Description\tLikelihood\tImpact\tRisk Level\tMitigation Action\tOwner
+Likelihood and Impact: High/Medium/Low. Risk Level: High/Medium/Low.
+No extra text, no asterisks, no dashes. Just data rows after the header.`,
+
+      closeout:  `Write a project close-out report. Use bullet points and numbered lists. No asterisks, no markdown.
+Include: Project summary, Deliverables completed (numbered list), Key outcomes, Invoicing summary, Lessons learned (bullet points), Recommendations for the client (numbered list).`,
+
+      invoices:  `Generate an invoice summary. Return as tab-separated values with these exact columns:
+Client\tProject\tContract Value\tInvoicing Terms\tInvoiced To Date\tOutstanding\tNext Invoice Due\tNotes
+No extra text, no asterisks, no dashes. Just data rows after the header.`,
+
+      portfolio: `Write a portfolio overview for R2S leadership. Use bullet points and numbered lists. No asterisks, no markdown.
+Lead with anything needing immediate attention. Then list each active project: client, project name, phase, status, contract value, key date.
+End with a 3-month revenue forecast based on contract values.`,
+    };
+
+    const taskType = ['portfolio','closeout'].includes(reportType) ? 'portfolio_report' : 'status_report';
+    const reportContent = await aurora(taskType, prompts[reportType] || prompts.status, contextBlock);
+
     const now = new Date().toISOString().slice(0,10);
-    a.href = url;
-    a.download = `R2S_${type}_${now}.${ext}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const safeName = reportType.replace(/[^a-z0-9]/gi,'_');
 
-    status.textContent = '✓ ' + label + ' downloaded — check your Downloads folder';
-    status.style.color = 'var(--teal)';
-  } catch(e) {
-    status.textContent = 'Error generating report: ' + e.message;
-    status.style.color = 'var(--rose)';
-  } finally {
-    cards.forEach(c => c.style.opacity = '1');
-    setTimeout(() => { const s = document.getElementById('report-status'); if(s) s.remove(); }, 5000);
-  }
-}
-
-// ── Chat ──────────────────────────────────────────────────────────────────────
-function qs(t) { document.getElementById('cin').value = t; sendChat(); }
-
-function addMsg(role, text) {
-  const msgs = document.getElementById('chat-msgs');
-  const div  = document.createElement('div');
-  div.className = `msg ${role === 'user' ? 'u' : ''}`;
-  div.innerHTML = `<div class="av av-${role==='user'?'u':'a'}">${role==='user'?'U':'A'}</div><div class="bub">${text}</div>`;
-  msgs.appendChild(div);
-  msgs.scrollTop = msgs.scrollHeight;
-  return div;
-}
-
-async function sendChat() {
-  const cin = document.getElementById('cin');
-  const msg = cin.value.trim();
-  if (!msg) return;
-  cin.value = '';
-  addMsg('user', msg);
-  chatHistory.push({ role: 'user', content: msg });
-  const typing = addMsg('aurora', '<span class="tdots"><span></span><span></span><span></span></span>');
-  const data = await api('/api/chat', { method: 'POST', body: JSON.stringify({ message: msg, history: chatHistory.slice(-6) }) });
-  const reply = data.reply || 'Sorry, something went wrong. Please try again.';
-  typing.querySelector('.bub').textContent = reply;
-  chatHistory.push({ role: 'assistant', content: reply });
-  document.getElementById('chat-msgs').scrollTop = 99999;
-}
-
-function askAbout(id) {
-  const p = projects.find(x => x.id === id);
-  if (!p) return;
-  document.getElementById('cin').value = `Give me a full briefing on the ${p.projectName||p.clientName} project for ${p.clientName} — current phase, deliverables, what Aurora should be doing right now, and any risks.`;
-  nav('ask', document.querySelector('[onclick*="ask"]'));
-  sendChat();
-}
-
-// ── Suggestions ──────────────────────────────────────────────────────────────
-let suggestions = [];
-
-async function loadSuggestions() {
-  const data = await api('/api/suggestions');
-  suggestions = data.suggestions || [];
-  renderSuggestions();
-  updateSuggestionBanner();
-}
-
-async function generateSuggestions() {
-  document.getElementById('suggestions-list').innerHTML = '<div style="color:var(--text3);font-size:12px">Aurora is analysing your projects…</div>';
-  const data = await api('/api/suggestions/generate', { method: 'POST' });
-  suggestions = data.suggestions || [];
-  renderSuggestions();
-  updateSuggestionBanner();
-}
-
-function sugCardClass(type) {
-  if (type === 'escalate' || type === 'status_change') return 'urgent';
-  if (type === 'close_out') return 'closeout';
-  if (type === 'phase_advance') return 'phase';
-  return '';
-}
-
-function sugIcon(type) {
-  const icons = {
-    phase_advance: '→',
-    phase_regress: '←',
-    status_change: '⚠',
-    escalate: '🔴',
-    close_out: '🏁',
-    schedule_kickoff: '📅',
-    send_client_update: '✉',
-    request_report: '📄',
-  };
-  return icons[type] || '◈';
-}
-
-function renderSuggestions() {
-  const el = document.getElementById('suggestions-list');
-  if (!el) return;
-  if (!suggestions.length) {
-    el.innerHTML = `<div class="card" style="text-align:center;padding:24px;color:var(--text2)">
-      <div style="font-size:24px;margin-bottom:8px">✓</div>
-      <div style="font-size:13px;font-weight:500;margin-bottom:4px">All clear</div>
-      <div style="font-size:12px;color:var(--text3)">Aurora has no pending suggestions. Check back tomorrow or click Generate to analyse now.</div>
-    </div>`;
-    return;
-  }
-
-  const byType = { urgent: [], phase: [], closeout: [], other: [] };
-  suggestions.forEach(s => {
-    const cls = sugCardClass(s.type);
-    if (byType[cls]) byType[cls].push(s);
-    else byType.other.push(s);
-  });
-
-  let html = '';
-  [...byType.urgent, ...byType.closeout, ...byType.phase, ...byType.other].forEach(s => {
-    const cls = sugCardClass(s.type);
-    html += `<div class="sug-card ${cls}" id="sug-${s.id}">
-      <div class="sug-title">${sugIcon(s.type)} ${s.title}</div>
-      <div class="sug-reason">${s.reason}</div>
-      <div class="sug-meta">Project: ${s.projectName || s.clientName} · Generated by Aurora</div>
-      <div class="arow">
-        <button class="btn btn-p btn-sm" onclick="approveSuggestion('${s.id}')">${s.confirmLabel || 'Approve'}</button>
-        <button class="btn btn-g btn-sm" onclick="dismissSuggestion('${s.id}')">${s.dismissLabel || 'Dismiss'}</button>
-        <button class="btn btn-b btn-sm" onclick="openProject('${s.projectId}')">View project ↗</button>
-      </div>
-    </div>`;
-  });
-  el.innerHTML = html;
-}
-
-function updateSuggestionBanner() {
-  const banner = document.getElementById('suggestions-banner');
-  if (!banner) return;
-  if (!suggestions.length) { banner.style.display = 'none'; return; }
-
-  const urgent = suggestions.filter(s => sugCardClass(s.type) === 'urgent').length;
-  const cls = urgent > 0 ? 'br' : 'ba';
-  const color = urgent > 0 ? 'var(--rose)' : 'var(--amber)';
-
-  banner.style.display = 'block';
-  banner.innerHTML = `<div style="background:rgba(196,168,255,.08);border:1px solid rgba(196,168,255,.25);border-radius:9px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer" onclick="nav('suggestions',document.querySelector('[onclick*=suggestions]'))">
-    <div style="display:flex;align-items:center;gap:10px">
-      <span style="font-size:18px">◈</span>
-      <div>
-        <div style="font-size:12px;font-weight:500;color:var(--text)">Aurora has ${suggestions.length} suggestion${suggestions.length!==1?'s':''} for you</div>
-        <div style="font-size:11px;color:var(--text2)">Click to review — approve or dismiss each one</div>
-      </div>
-    </div>
-    <span class="badge ${cls}">${suggestions.length} pending</span>
-  </div>`;
-}
-
-async function approveSuggestion(id) {
-  const card = document.getElementById('sug-' + id);
-  if (card) { card.style.opacity = '0.5'; card.querySelectorAll('button').forEach(b => b.disabled = true); }
-  try {
-    await api('/api/suggestions/' + id + '/approve', { method: 'POST' });
-    suggestions = suggestions.filter(s => s.id !== id);
-    if (card) card.remove();
-    renderSuggestions();
-    updateSuggestionBanner();
-    await loadProjects(); // refresh project list in case phase changed
-  } catch (e) {
-    if (card) { card.style.opacity = '1'; card.querySelectorAll('button').forEach(b => b.disabled = false); }
-    alert('Error: ' + e.message);
-  }
-}
-
-async function dismissSuggestion(id) {
-  await api('/api/suggestions/' + id + '/dismiss', { method: 'POST' });
-  suggestions = suggestions.filter(s => s.id !== id);
-  const card = document.getElementById('sug-' + id);
-  if (card) card.remove();
-  renderSuggestions();
-  updateSuggestionBanner();
-}
-
-// ── Project tabs ─────────────────────────────────────────────────────────────
-function switchProjTab(el, contentId) {
-  const modal = document.getElementById('modal-body') || el.closest('.modal');
-  modal.querySelectorAll('.proj-tab').forEach(t => t.classList.remove('on'));
-  modal.querySelectorAll('.proj-tab-content').forEach(c => c.classList.remove('on'));
-  el.classList.add('on');
-  const target = document.getElementById(contentId);
-  if (target) target.classList.add('on');
-}
-
-// ── Deliverables tracker ──────────────────────────────────────────────────────
-function delStatusClass(status) {
-  const s = (status||'').toLowerCase();
-  if (s === 'complete') return 'complete';
-  if (s === 'in progress') return 'inprogress';
-  if (s === 'overdue') return 'overdue';
-  if (s.includes('due soon')) return 'duesoon';
-  return 'outstanding';
-}
-
-function delBadgeStyle(status) {
-  const s = (status||'').toLowerCase();
-  if (s === 'complete')    return 'background:rgba(0,232,187,.15);color:var(--teal)';
-  if (s === 'in progress') return 'background:rgba(106,163,255,.15);color:var(--blue)';
-  if (s === 'overdue')     return 'background:rgba(255,96,128,.15);color:var(--rose)';
-  if (s.includes('due soon')) return 'background:rgba(255,179,64,.15);color:var(--amber)';
-  return 'background:var(--card);color:var(--text3)';
-}
-
-async function loadDeliverables(projectId) {
-  const el = document.getElementById('del-content-' + projectId);
-  if (!el) return;
-  const token = sessionStorage.getItem('aurora_token');
-  if (!token) { el.innerHTML = '<div style="color:var(--rose);font-size:12px">Session expired — please log in again.</div>'; document.getElementById('login-screen').style.display='flex'; return; }
-  el.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading…</div>';
-
-  try {
-    const data = await api('/api/projects/' + projectId + '/deliverables');
-    let items = data.deliverables || [];
-
-    if (!items.length) {
-      // Auto-generate if none exist
-      el.innerHTML = '<div style="color:var(--text3);font-size:12px;margin-bottom:10px">Generating deliverables tracker from project data…</div>';
-      const gen = await api('/api/projects/' + projectId + '/deliverables/generate', { method: 'POST' });
-      items = gen.deliverables || [];
+    // If this was a risk or deliverable report for a specific project, save it
+    if (projectId) {
+      try {
+        if (reportType === 'risks') {
+          const risks = parseRiskRegister(reportContent, projectId);
+          if (risks.length > 0) await db.saveRiskRegister(projectId, risks);
+        } else if (reportType === 'milestones') {
+          const deliverables = parseDeliverables(reportContent, projectId);
+          if (deliverables.length > 0) await db.saveDeliverables(projectId, deliverables);
+        }
+      } catch (saveErr) {
+        console.error('[Reports] Save to project failed:', saveErr.message);
+      }
     }
 
-    if (!items.length) {
-      el.innerHTML = '<div style="color:var(--text3);font-size:12px">No deliverables found. Add project scope via contract upload.</div>';
-      return;
-    }
+    if (isExcel) {
+      // Return as CSV (opens in Excel when saved as .csv)
+      const lines = reportContent.split('\n').filter(l => l.trim());
+      const csv = lines.map(line =>
+        line.split('\t').map(cell => {
+          const c = (cell || '').replace(/"/g, '""').trim();
+          return c.includes(',') || c.includes('"') || c.includes('\n') ? `"${c}"` : c;
+        }).join(',')
+      ).join('\r\n');
 
-    const complete  = items.filter(d => d.status === 'Complete').length;
-    const overdue   = items.filter(d => d.status === 'Overdue').length;
-    const inprog    = items.filter(d => d.status === 'In Progress').length;
-
-    let html = `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-      <span style="font-size:12px;color:var(--text2)">${items.length} deliverables</span>
-      ${complete ? `<span class="badge bt">${complete} complete</span>` : ''}
-      ${inprog   ? `<span class="badge bb">${inprog} in progress</span>` : ''}
-      ${overdue  ? `<span class="badge br">${overdue} overdue</span>` : ''}
-    </div>
-    <div class="del-grid">`;
-
-    items.forEach(d => {
-      const cls = delStatusClass(d.status);
-      html += `<div class="del-tile ${cls}">
-        <div class="del-num">Deliverable ${d.number}</div>
-        <div class="del-name">${d.name}</div>
-        ${d.dueDate ? `<div class="del-due">📅 ${d.dueDate}</div>` : ''}
-        ${d.calendarEvent ? `<div style="font-size:10px;color:var(--teal);margin-bottom:4px">📆 ${d.calendarEvent}</div>` : ''}
-        <span class="del-badge" style="${delBadgeStyle(d.status)}">${d.status}</span>
-        ${d.notes ? `<div style="font-size:10px;color:var(--text3);margin-top:6px">${d.notes}</div>` : ''}
-        <div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap">
-          ${['Complete','In Progress','Outstanding','Overdue'].map(s =>
-            `<button class="btn btn-g" style="font-size:9px;padding:2px 6px;${d.status===s?'background:var(--teal);color:#07090f':''}" onclick="setDelStatus('${projectId}','${d.id}','${s}',this)">${s}</button>`
-          ).join('')}
-          <button class="btn btn-b" style="font-size:9px;padding:2px 6px" onclick="toggleBookingForm('${projectId}','${d.id}')">📅 Book</button>
-        </div>
-        <div id="booking-form-${d.id}" class="booking-form" style="display:none">
-          <div style="font-size:11px;font-weight:500;color:var(--teal);margin-bottom:10px">Schedule this deliverable</div>
-          <div class="booking-row">
-            <div><label>Date</label><input type="date" id="bk-date-${d.id}"/></div>
-            <div><label>Time</label><input type="time" id="bk-time-${d.id}" value="09:00"/></div>
-          </div>
-          <div class="booking-row">
-            <div><label>Duration (minutes)</label><input type="number" id="bk-dur-${d.id}" value="60" min="15" step="15"/></div>
-            <div><label>Format</label><select id="bk-online-${d.id}"><option value="false">On-site</option><option value="true">Online</option></select></div>
-          </div>
-          <label>Location (optional)</label>
-          <input type="text" id="bk-loc-${d.id}" placeholder="e.g. Client office, Zoom"/>
-          <div class="arow" style="margin-top:6px">
-            <button class="btn btn-t btn-sm" onclick="confirmBooking('${projectId}','${d.id}','${d.name.replace(/'/g,"\\'")}',this)">✓ Book & send invites</button>
-            <button class="btn btn-g btn-sm" onclick="toggleBookingForm('${projectId}','${d.id}')">Cancel</button>
-          </div>
-          <div id="bk-status-${d.id}" style="font-size:11px;color:var(--text3);margin-top:6px"></div>
-        </div>
-      </div>`;
-    });
-
-    html += `</div><div class="arow" style="margin-top:10px">
-      <button class="btn btn-g btn-sm" onclick="loadDeliverables('${projectId}')">↻ Refresh</button>
-    </div>`;
-    el.innerHTML = html;
-  } catch (e) {
-    el.innerHTML = '<div style="color:var(--rose);font-size:12px">Error: ' + e.message + '</div>';
-  }
-}
-
-async function setDelStatus(projectId, delId, status, btn) {
-  btn.textContent = '…';
-  await api('/api/projects/' + projectId + '/deliverables/' + delId, {
-    method: 'PUT', body: JSON.stringify({ status })
-  });
-  await loadDeliverables(projectId);
-}
-
-function toggleBookingForm(projectId, delId) {
-  const form = document.getElementById('booking-form-' + delId);
-  if (form) form.style.display = form.style.display === 'none' ? 'block' : 'none';
-}
-
-async function confirmBooking(projectId, delId, delName, btn) {
-  const date     = document.getElementById('bk-date-' + delId)?.value;
-  const time     = document.getElementById('bk-time-' + delId)?.value;
-  const duration = document.getElementById('bk-dur-' + delId)?.value;
-  const online   = document.getElementById('bk-online-' + delId)?.value;
-  const location = document.getElementById('bk-loc-' + delId)?.value;
-  const status   = document.getElementById('bk-status-' + delId);
-
-  if (!date || !time) { if (status) { status.textContent = 'Please enter a date and time.'; status.style.color = 'var(--rose)'; } return; }
-
-  const origText = btn.textContent;
-  btn.textContent = 'Booking…';
-  btn.disabled = true;
-  if (status) { status.textContent = 'Creating calendar event and sending invites…'; status.style.color = 'var(--text3)'; }
-
-  try {
-    const data = await api('/api/projects/' + projectId + '/deliverables/' + delId + '/book', {
-      method: 'POST',
-      body: JSON.stringify({ date, time, durationMinutes: parseInt(duration), online: online === 'true', location, title: delName }),
-    });
-
-    if (data.success) {
-      if (status) { status.textContent = '✓ Booked and invites sent to all attendees'; status.style.color = 'var(--teal)'; }
-      btn.textContent = '✓ Booked';
-      setTimeout(() => { loadDeliverables(projectId); }, 2000);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="R2S_${safeName}_${now}.csv"`);
+      res.send('\uFEFF' + csv); // UTF-8 BOM so Excel opens correctly
     } else {
-      throw new Error(data.error || 'Booking failed');
+      // Return as plain text formatted for Word (.txt that Word can open)
+      const wordContent = reportContent
+        .replace(/\*\*?/g, '')       // remove asterisks
+        .replace(/^-{3,}$/gm, '')    // remove horizontal rules
+        .replace(/\u2014|\u2013/g, '-') // replace em/en dashes with hyphen
+        .replace(/_{2,}/g, '')        // remove underscores used as dividers
+        .trim();
+
+      const header = `R2S PROJECT MANAGEMENT
+${reportType.toUpperCase().replace(/_/g,' ')} REPORT
+Generated: ${new Date().toLocaleDateString('en-AU')}
+${targets.length > 1 ? 'Portfolio — All projects' : targets[0]?.clientName || ''}
+
+${'='.repeat(60)}
+
+`;
+      res.setHeader('Content-Type', 'application/msword');
+      res.setHeader('Content-Disposition', `attachment; filename="R2S_${safeName}_${now}.doc"`);
+      res.send(header + wordContent);
     }
+
   } catch (e) {
-    if (status) { status.textContent = 'Error: ' + e.message; status.style.color = 'var(--rose)'; }
-    btn.textContent = origText;
-    btn.disabled = false;
+    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
+    res.status(500).json({ error: e.message });
   }
-}
+});
 
-// ── Risk register ─────────────────────────────────────────────────────────────
-function riskLevelClass(level) {
-  const l = (level||'').toLowerCase();
-  if (l === 'high') return 'high';
-  if (l === 'low')  return 'low';
-  return 'medium';
-}
-
-async function loadRisks(projectId) {
-  const el = document.getElementById('risk-content-' + projectId);
-  if (!el) return;
-  const token = sessionStorage.getItem('aurora_token');
-  if (!token) { el.innerHTML = '<div style="color:var(--rose);font-size:12px">Session expired — please log in again.</div>'; document.getElementById('login-screen').style.display='flex'; return; }
-  el.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading…</div>';
-
+// Suggestions
+app.get('/api/suggestions', async (req, res) => {
   try {
-    const data = await api('/api/projects/' + projectId + '/risks');
-    let risks = data.risks || [];
+    const suggestions = await db.getSuggestions();
+    res.json({ suggestions });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
-    if (!risks.length) {
-      el.innerHTML = '<div style="color:var(--text3);font-size:12px;margin-bottom:10px">Generating risk register from project data…</div>';
-      const gen = await api('/api/projects/' + projectId + '/risks/generate', { method: 'POST' });
-      risks = gen.risks || [];
+app.post('/api/suggestions/generate', async (req, res) => {
+  try {
+    await generateSuggestions();
+    const suggestions = await db.getSuggestions();
+    res.json({ suggestions });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/suggestions/:id/approve', express.json(), async (req, res) => {
+  try {
+    const allSuggestions = await db.getSuggestions();
+    const allWithDismissed = await (async () => { try { return JSON.parse(require('fs').readFileSync(require('path').join(db.DATA,'suggestions.json'),'utf8')); } catch { return []; } })();
+    const suggestions = allWithDismissed;
+    const suggestion = suggestions.find(s => s.id === req.params.id);
+    if (!suggestion) return res.status(404).json({ error: 'Not found' });
+    await applySuggestion(suggestion);
+    await db.updateSuggestion(req.params.id, 'approved');
+    res.json({ success: true });
+  } catch (e) {
+    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/suggestions/:id/dismiss', async (req, res) => {
+  try {
+    await db.updateSuggestion(req.params.id, 'dismissed');
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Risk Register routes ─────────────────────────────────────────────────────
+app.get('/api/projects/:id/risks', async (req, res) => {
+  try { res.json({ risks: await db.getRiskRegister(req.params.id) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/projects/:id/risks/generate', async (req, res) => {
+  try {
+    const project = await db.getProject(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const docs = await db.getDocuments(req.params.id);
+    const context = buildContext(project, docs);
+
+    const tsvContent = await aurora('status_report',
+      `Generate a risk register for this project. Return as tab-separated values with these exact columns:
+Client\tProject\tRisk Description\tLikelihood\tImpact\tRisk Level\tMitigation Action\tOwner
+Likelihood and Impact: High/Medium/Low. Risk Level: High/Medium/Low.
+Owner should be Diane Kruger unless a consultant is clearly responsible.
+Include 5-8 realistic risks for this type of engagement.
+No extra text, no asterisks, no dashes. Just data rows after the header.`,
+      context
+    );
+
+    const risks = parseRiskRegister(tsvContent, req.params.id);
+    await db.saveRiskRegister(req.params.id, risks);
+    res.json({ risks });
+  } catch (e) {
+    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/projects/:id/risks/:riskId', express.json(), async (req, res) => {
+  try {
+    const risk = await db.updateRisk(req.params.id, req.params.riskId, req.body);
+    res.json({ risk });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Also generate and save risk register when report is downloaded
+// (handled by hooking into the reports endpoint — see reports endpoint update below)
+
+// ── Deliverables Tracker routes ───────────────────────────────────────────────
+app.get('/api/projects/:id/deliverables', async (req, res) => {
+  try { res.json({ deliverables: await db.getDeliverables(req.params.id) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/projects/:id/deliverables/generate', async (req, res) => {
+  try {
+    const project = await db.getProject(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const docs = await db.getDocuments(req.params.id);
+    const context = buildContext(project, docs);
+
+    const tsvContent = await aurora('status_report',
+      `Generate a deliverables tracker for this project. Return as tab-separated values with these exact columns:
+Client\tProject\tDeliverable\tPhase\tDue Date\tStatus\tAssigned To\tNotes
+Status must be one of: Complete, In Progress, Outstanding, Overdue.
+Extract specific deliverables from the project scope and contract details.
+Assigned To should be the consultant/trainer if known, otherwise Diane Kruger.
+No extra text, no asterisks, no dashes. Just data rows after the header.`,
+      context
+    );
+
+    const deliverables = parseDeliverables(tsvContent, req.params.id);
+    await db.saveDeliverables(req.params.id, deliverables);
+    res.json({ deliverables });
+  } catch (e) {
+    if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/projects/:id/deliverables/:delId', express.json(), async (req, res) => {
+  try {
+    const del = await db.updateDeliverable(req.params.id, req.params.delId, req.body);
+    res.json({ deliverable: del });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Activity log ─────────────────────────────────────────────────────────────
+app.get('/api/projects/:id/activity', async (req, res) => {
+  try {
+    let activity = await db.getActivityLog(req.params.id);
+    console.log(`[Activity] Project ${req.params.id}: ${activity.length} entries found`);
+
+    // If empty, auto-generate historical log from project data
+    if (!activity.length) {
+      console.log(`[Activity] Auto-generating history for project ${req.params.id}`);
+      const project = await db.getProject(req.params.id);
+      if (project) {
+        const base = project.createdAt || project.updatedAt || new Date().toISOString();
+        const entries = [
+          { type: 'project_created', summary: `Project created — ${project.clientName}${project.projectName ? ': ' + project.projectName : ''}`, timestamp: base },
+          ...(project.consultant ? [{ type: 'consultant_assigned', summary: `${project.consultant} assigned as consultant/trainer`, timestamp: base }] : []),
+          ...(project.value ? [{ type: 'contract', summary: `Contract value: ${project.value}`, timestamp: base }] : []),
+          ...(project.dueDate ? [{ type: 'contract', summary: `Project due date: ${project.dueDate}`, timestamp: base }] : []),
+          { type: 'phase_change', summary: `Current phase: ${PHASES[project.phase || 0]}`, timestamp: project.updatedAt || base },
+          ...(project.flightsRequired === 'yes' ? [{ type: 'manual_note', summary: 'Flights required for this engagement', timestamp: base }] : []),
+          ...(project.accommodationRequired === 'yes' ? [{ type: 'manual_note', summary: 'Accommodation required for this engagement', timestamp: base }] : []),
+        ];
+        for (const e of entries) {
+          await db.logActivity(req.params.id, e);
+        }
+        activity = await db.getActivityLog(req.params.id);
+        console.log(`[Activity] Generated ${activity.length} historical entries`);
+      }
     }
 
-    if (!risks.length) {
-      el.innerHTML = '<div style="color:var(--text3);font-size:12px">No risks found. Upload contract to generate risk register.</div>';
-      return;
-    }
+    res.json({ activity });
+  } catch (e) {
+    console.error('[Activity] Error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
-    const triggered = risks.filter(r => r.triggered).length;
-    const high = risks.filter(r => (r.level||'').toLowerCase() === 'high').length;
+app.post('/api/projects/:id/activity', express.json(), async (req, res) => {
+  try {
+    const entry = await db.logActivity(req.params.id, req.body);
+    res.json({ entry });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
-    let html = `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
-      <span style="font-size:12px;color:var(--text2)">${risks.length} risks documented</span>
-      ${high ? `<span class="badge br">${high} high</span>` : ''}
-      ${triggered ? `<span class="badge br">${triggered} triggered</span>` : ''}
-      <div style="flex:1"></div>
-      <button class="btn btn-g btn-sm" onclick="regenerateRisks('${projectId}')">↻ Regenerate</button>
-    </div>`;
-
-    risks.forEach(r => {
-      const cls = r.triggered ? 'triggered' : riskLevelClass(r.level);
-      html += `<div class="risk-card ${cls}">
-        <div class="risk-header">
-          <span class="risk-num">Risk ${r.number}</span>
-          <span class="risk-desc">${r.description}</span>
-          <span class="badge ${r.level?.toLowerCase()==='high'?'br':r.level?.toLowerCase()==='low'?'bt':'ba'}">${r.level||'Medium'}</span>
-          ${r.triggered ? '<span class="badge br">Triggered</span>' : ''}
-        </div>
-        <div style="display:flex;gap:10px;font-size:10px;color:var(--text3);margin-bottom:6px">
-          <span>Likelihood: ${r.likelihood||'Medium'}</span>
-          <span>Impact: ${r.impact||'Medium'}</span>
-          <span>Owner: ${r.owner||'Diane Kruger'}</span>
-        </div>
-        ${r.mitigation ? `<div class="risk-mitigation">Mitigation: ${r.mitigation}</div>` : ''}
-        ${r.triggeredAt ? `<div style="font-size:10px;color:var(--rose);margin-top:6px">Triggered: ${new Date(r.triggeredAt).toLocaleDateString('en-AU')} — ${r.triggerReason||''}</div>` : ''}
-        <div style="margin-top:8px;display:flex;gap:4px">
-          <button class="btn btn-g btn-sm" style="font-size:10px" onclick="setRiskStatus('${projectId}','${r.id}','Closed',this)">Mark resolved</button>
-          ${r.triggered ? `<button class="btn btn-r btn-sm" style="font-size:10px" onclick="setRiskStatus('${projectId}','${r.id}','Monitoring',this)">Monitoring</button>` : ''}
-        </div>
-      </div>`;
+// ── Debug email reader — shows what Aurora sees without processing ────────────
+app.get('/api/debug/emails', async (req, res) => {
+  try {
+    const token = await getOutlookToken();
+    if (!token) return res.json({ error: 'No Outlook token — check Azure app credentials' });
+    const mailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const url = `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/inbox/messages?$select=id,subject,from,receivedDateTime,isRead,categories&$top=20&$orderby=receivedDateTime desc`;
+    const res2 = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 });
+    const msgs = res2.data?.value || [];
+    const sinceDate = new Date(since);
+    res.json({
+      mailbox,
+      totalFound: msgs.length,
+      since: since,
+      messages: msgs.map(m => ({
+        subject: m.subject,
+        from: m.from?.emailAddress?.address,
+        received: m.receivedDateTime,
+        isRead: m.isRead,
+        categories: m.categories || [],
+        withinWindow: new Date(m.receivedDateTime) >= sinceDate,
+        alreadyTagged: (m.categories || []).includes('Aurora Processed'),
+      }))
     });
-
-    html += `<div class="arow" style="margin-top:10px">
-      <button class="btn btn-t btn-sm" onclick="downloadRiskRegister('${projectId}')">⬇ Download risk register</button>
-    </div>`;
-    el.innerHTML = html;
-  } catch (e) {
-    el.innerHTML = '<div style="color:var(--rose);font-size:12px">Error: ' + e.message + '</div>';
+  } catch(e) {
+    res.json({ error: e.response?.data?.error?.message || e.message });
   }
-}
+});
 
-function activityDotClass(type) {
-  const map = { email_processed:'email', phase_change:'phase', status_change:'status', calendar_booking:'booking', draft_sent:'email', draft_created:'email', project_created:'phase', consultant_assigned:'status', contract:'manual' };
-  return map[type] || 'manual';
-}
-
-function activityIcon(type) {
-  const map = { email_processed:'✉', phase_change:'→', status_change:'⚑', calendar_booking:'📅', draft_sent:'📤', project_created:'✦', consultant_assigned:'👤', contract:'📄', manual_note:'📝' };
-  return map[type] || '•';
-}
-
-async function loadActivity(projectId) {
-  const el = document.getElementById('activity-content-' + projectId);
-  if (!el) return;
-  el.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading activity log…</div>';
+// ── Data backup / export ─────────────────────────────────────────────────────
+app.get('/api/backup', async (req, res) => {
   try {
-    const data = await api('/api/projects/' + projectId + '/activity');
-    const items = data.activity || [];
+    const projects     = await db.getProjects();
+    const drafts       = await db.getDrafts();
+    const documents    = await db.getDocuments();
+    const suggestions  = await db.getSuggestions();
+    const spend        = await db.getSpend();
 
-    let html = '<div style="padding:4px 0">';
+    const backup = {
+      exportedAt: new Date().toISOString(),
+      version: '3.0',
+      projects,
+      drafts,
+      documents: documents.map(d => ({ ...d, extract: d.extract?.slice(0, 500) })), // trim extracts
+      suggestions,
+      spend,
+    };
 
-    if (items.length) {
-      items.forEach(item => {
-        const date = new Date(item.timestamp);
-        const dateStr = date.toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' });
-        const timeStr = date.toLocaleTimeString('en-AU', { hour:'numeric', minute:'2-digit', hour12:true });
-        const actionsHtml = item.actions?.length
-          ? '<div class="activity-actions">' + item.actions.map(a => '• ' + a).join('<br>') + '</div>'
-          : '';
-        html += `<div class="activity-item">
-          <div><div class="activity-dot ${activityDotClass(item.type)}"></div></div>
-          <div class="activity-body">
-            <div class="activity-summary">${activityIcon(item.type)} ${item.summary || item.type}</div>
-            ${item.source && item.source !== 'Diane' ? `<div style="font-size:10px;color:var(--text3)">Source: ${item.source}</div>` : ''}
-            ${actionsHtml}
-            <div class="activity-time">${dateStr}${timeStr ? ' at ' + timeStr : ''}</div>
-          </div>
-        </div>`;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="aurora-backup-${new Date().toISOString().slice(0,10)}.json"`);
+    res.json(backup);
+    console.log(`[Backup] Exported ${projects.length} projects, ${drafts.length} drafts`);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Data restore from backup ──────────────────────────────────────────────────
+app.post('/api/restore', express.json({ limit: '50mb' }), async (req, res) => {
+  try {
+    const { projects, drafts, documents } = req.body;
+    let restored = 0;
+    if (projects?.length) {
+      for (const p of projects) { await db.upsertProject(p); restored++; }
+    }
+    if (drafts?.length) {
+      for (const d of drafts) { try { await db.saveDraft(d); } catch(e) {} }
+    }
+    if (documents?.length) {
+      for (const d of documents) { try { await db.saveDocument(d); } catch(e) {} }
+    }
+    console.log(`[Restore] Restored ${restored} projects`);
+    res.json({ success: true, projectsRestored: restored });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Cost
+app.get('/api/cost', async (req, res) => {
+  try {
+    const spend = await db.getSpend();
+    res.json({
+      month: spend.month, totalUSD: spend.total.toFixed(4),
+      totalAUD: (spend.total * 1.55).toFixed(2),
+      calls: spend.calls, capUSD: CAP_USD,
+      percentUsed: ((spend.total / CAP_USD) * 100).toFixed(1),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Manual batch + reminder triggers
+app.post('/api/batch', async (req, res) => {
+  try { await runBatch(); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Manual calendar booking from deliverable tile
+app.post('/api/projects/:id/deliverables/:delId/book', express.json(), async (req, res) => {
+  try {
+    const project = await db.getProject(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const { date, time, durationMinutes, title, location, online } = req.body;
+    if (!date || !time) return res.status(400).json({ error: 'Date and time are required' });
+
+    const deliverables = await db.getDeliverables(req.params.id);
+    const del = deliverables.find(d => d.id === req.params.delId);
+
+    const booking = {
+      title: title || (del ? del.name : 'Meeting') + ` — ${project.clientName}`,
+      description: del ? `Deliverable: ${del.name}
+Project: ${project.projectName || project.clientName}
+Client: ${project.clientName}` : '',
+      startDateTime: `${date}T${time}:00`,
+      durationMinutes: parseInt(durationMinutes) || 60,
+      location: location || project.clientName,
+      online: online || false,
+      clientName: project.clientName,
+      clientEmail: project.clientEmail,
+      consultantName: project.consultant,
+      consultantEmail: project.consultantEmail || 'info@risk2solution.com',
+      projectId: project.id,
+    };
+
+    // Create confirmed booking (not tentative — Diane is manually scheduling this)
+    const eventId = await createCalendarBooking(booking, false);
+    if (!eventId) return res.status(500).json({ error: 'Calendar booking failed — check Outlook connection' });
+
+    // Send meeting invites immediately
+    await sendMeetingInvite(booking, eventId);
+
+    // Update deliverable status
+    if (del) {
+      await db.updateDeliverable(req.params.id, req.params.delId, {
+        status: 'In Progress',
+        calendarEvent: booking.title,
+        calendarDate: date,
       });
-    } else {
-      html += '<div style="color:var(--text3);font-size:12px;padding:12px 0">No activity recorded yet.</div>';
     }
 
-    html += '</div>';
-    html += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-      <div style="font-size:11px;color:var(--text2);margin-bottom:6px">Add a note</div>
-      <div style="display:flex;gap:6px">
-        <input id="activity-note-${projectId}" placeholder="e.g. Spoke with client — confirmed delivery date" style="flex:1;font-size:12px"/>
-        <button class="btn btn-t btn-sm" onclick="addActivityNote('${projectId}')">+ Add</button>
-      </div>
-    </div>`;
+    // Notify Diane
+    await sendEmail('diane.k@risk2solution.com',
+      `[Aurora] Meeting booked: ${booking.title}`,
+      `A meeting has been booked in the R2S Training & Education calendar and invites sent.
 
-    el.innerHTML = html;
-  } catch(e) {
-    el.innerHTML = '<div style="color:var(--rose);font-size:12px">Error loading activity log: ' + e.message + '</div>';
-  }
-}
+Event: ${booking.title}
+Date: ${date}
+Time: ${time}
+Duration: ${durationMinutes || 60} minutes
+Location: ${location || 'TBC'}
+${online ? 'Format: Online\n' : ''}Attendees:\n${project.consultant ? '• ' + project.consultant + '\n' : ''}${project.clientContact ? '• ' + project.clientContact + ' (' + project.clientName + ')\n' : ''}• Diane Kruger
 
-async function addActivityNote(projectId) {
-  const input = document.getElementById('activity-note-' + projectId);
-  const note = input?.value?.trim();
-  if (!note) return;
-  await api('/api/projects/' + projectId + '/activity', {
-    method: 'POST',
-    body: JSON.stringify({ type: 'manual_note', summary: note, source: 'Diane' }),
-  });
-  input.value = '';
-  await loadActivity(projectId);
-}
+Aurora
+R2S Project Management Intelligence`,
+      true
+    );
 
-async function setRiskStatus(projectId, riskId, status, btn) {
-  btn.textContent = '…';
-  await api('/api/projects/' + projectId + '/risks/' + riskId, {
-    method: 'PUT', body: JSON.stringify({ status, triggered: false })
-  });
-  await loadRisks(projectId);
-}
-
-async function regenerateRisks(projectId) {
-  const el = document.getElementById('risk-content-' + projectId);
-  if (el) el.innerHTML = '<div style="color:var(--text3);font-size:12px">Regenerating…</div>';
-  const gen = await api('/api/projects/' + projectId + '/risks/generate', { method: 'POST' });
-  await loadRisks(projectId);
-}
-
-async function downloadRiskRegister(projectId) {
-  const p = projects.find(x => x.id === projectId);
-  const projectName = document.getElementById('rep-project');
-  if (projectName) projectName.value = projectId;
-  const clientSel = document.getElementById('rep-client');
-  if (clientSel && p) clientSel.value = p.clientName;
-  generateReport('risks');
-}
-
-async function downloadBackup() {
-  const token = sessionStorage.getItem('aurora_token') || '';
-  const res = await fetch('/api/backup', { headers: { 'Authorization': 'Bearer ' + token } });
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'aurora-backup-' + new Date().toISOString().slice(0,10) + '.json';
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-async function pollNow(btn) {
-  const orig = btn.textContent;
-  btn.textContent = '⟳ Polling…';
-  btn.disabled = true;
-  btn.style.opacity = '0.7';
-  try {
-    const data = await api('/api/emails/read', { method: 'POST' });
-    btn.textContent = '✓ Done';
-    btn.style.opacity = '1';
-    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000);
-    await loadSuggestions();
-    loadDrafts();
-  } catch(e) {
-    btn.textContent = 'Error';
-    btn.style.opacity = '1';
-    btn.disabled = false;
-    setTimeout(() => { btn.textContent = orig; }, 3000);
-  }
-}
-
-async function triggerInboxCheck(el) {
-  const label = document.getElementById('inbox-label');
-  const sub   = document.getElementById('inbox-sub');
-  const icon  = document.getElementById('inbox-icon');
-  if (label) label.textContent = 'Checking inbox…';
-  if (icon)  icon.textContent = '⟳';
-  el.style.opacity = '0.7';
-  try {
-    await api('/api/emails/read', { method: 'POST' });
-    if (label) label.textContent = '✓ Inbox checked';
-    if (sub)   sub.textContent = 'All new emails processed. Check Comms Drafts and Suggestions.';
-    if (icon)  icon.textContent = '✓';
-    el.style.opacity = '1';
-    setTimeout(() => {
-      if (label) label.textContent = 'Check inbox';
-      if (sub)   sub.textContent = 'Aurora polls info@ every hour 7am–7pm. Click to check now.';
-      if (icon)  icon.textContent = '✉';
-    }, 5000);
-    await loadSuggestions();
-    loadDrafts();
-  } catch(e) {
-    if (label) label.textContent = 'Error — try again';
-    el.style.opacity = '1';
-  }
-}
-
-async function forceUploadContract() {
-  const file = window._pendingUploadFile;
-  if (!file) return;
-  window._pendingUploadFile = null;
-  const fd = new FormData();
-  fd.append('file', file);
-  fd.append('forceCreate', 'true');
-  await uploadContract(file, true);
-}
-
-// ── Init ──────────────────────────────────────────────────────────────────────
-
-// Auth
-async function doLogin() {
-  const pwd = document.getElementById('login-pwd').value;
-  const err = document.getElementById('login-error');
-  err.textContent = '';
-  if (!pwd) { err.textContent = 'Please enter the password.'; return; }
-  try {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: pwd }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      sessionStorage.setItem('aurora_token', data.token);
-      document.getElementById('login-screen').style.display = 'none';
-      loadProjects();
-    } else {
-      err.textContent = 'Incorrect password. Please try again.';
-      document.getElementById('login-pwd').value = '';
-      document.getElementById('login-pwd').focus();
-    }
+    res.json({ success: true, eventId, booking });
   } catch (e) {
-    err.textContent = 'Connection error. Please try again.';
+    console.error('[Booking]', e.message);
+    res.status(500).json({ error: e.message });
   }
+});
+
+app.post('/api/emails/read', async (req, res) => {
+  try {
+    await readConsultantReplies();
+    res.json({ success: true, message: 'Inbox checked and processed' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Delete a document from the library
+app.delete('/api/documents/:id', async (req, res) => {
+  try {
+    await db.deleteDocument(req.params.id);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/reminders/check', async (req, res) => {
+  try { await checkDueDateReminders(); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+async function start() {
+  await db.initDB();
+  await db.ensureSpendConstraint();
+  app.listen(PORT, () => {
+    console.log(`\n╔══════════════════════════════════════╗`);
+    console.log(`║  Aurora R2S v3 — port ${PORT}          ║`);
+    console.log(`╚══════════════════════════════════════╝`);
+    console.log(`DB: ${process.env.DATABASE_URL ? 'PostgreSQL' : 'JSON files'}`);
+    console.log(`Spend cap: $${CAP_USD} USD/month`);
+    console.log(`Internal emails: ${INTERNAL_EMAILS.join(', ')}`);
+    console.log(`Reminders: 14, 7, 3 days before due date\n`);
+  });
 }
 
-// Auth handled inline in api()
-
-</script>
-
-<!-- LOGIN SCREEN -->
-<div class="login-screen" id="login-screen">
-  <div class="login-box">
-    <div class="login-logo">A</div>
-    <div class="login-title">Aurora</div>
-    <div class="login-sub">R2S Project Management Intelligence</div>
-    <input class="login-input" id="login-pwd" type="password" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()"/>
-    <button class="login-btn" onclick="doLogin()">Sign in</button>
-    <div class="login-error" id="login-error"></div>
-  </div>
-  <div class="login-brand">Risk 2 Solution · Confidential</div>
-</div>
-
-<script>
-// Init — runs after DOM is fully loaded
-(function() {
-  const token = sessionStorage.getItem('aurora_token') || '';
-  if (token) {
-    document.getElementById('login-screen').style.display = 'none';
-    loadProjects();
-  } else {
-    setTimeout(() => {
-      const el = document.getElementById('login-pwd');
-      if (el) el.focus();
-    }, 100);
-  }
-})();
-</script>
-</body>
-</html>
+start().catch(console.error);
