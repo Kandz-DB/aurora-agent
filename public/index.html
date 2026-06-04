@@ -228,6 +228,9 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
     <div class="mark">A</div>
     <div><div class="bname">Aurora</div><div class="bsub">R2S Project Management Intelligence</div></div>
   </div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <button class="btn btn-b btn-sm" onclick="pollNow(this)" style="font-size:11px">▶ Poll inbox now</button>
+  </div>
   <div class="pills">
     <div class="pill"><div class="dot" style="background:var(--teal)"></div>Projects</div>
     <div class="pill"><div class="dot" style="background:var(--teal)"></div>Contracts</div>
@@ -277,7 +280,7 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
         <div class="card" style="cursor:pointer" onclick="nav('comms',document.querySelector('[onclick*=comms]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--teal)">✉</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Comms drafts</div><div style="font-size:11px;color:var(--text2)">Review and approve Aurora's drafted emails.</div></div>
         <div class="card" style="cursor:pointer" onclick="nav('projects',document.querySelector('[onclick*=projects]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--blue)">💼</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">View projects</div><div style="font-size:11px;color:var(--text2)">See all projects, update phases, and manage status.</div></div>
         <div class="card" style="cursor:pointer" onclick="nav('ask',document.querySelector('[onclick*=ask]'))"><div style="font-size:16px;margin-bottom:6px;color:var(--violet)">✦</div><div style="font-size:12px;font-weight:500;margin-bottom:3px">Ask Aurora</div><div style="font-size:11px;color:var(--text2)">Get a briefing, draft a report, or ask anything.</div></div>
-        <div class="card" style="cursor:pointer" onclick="triggerInboxCheck(this)"><div style="font-size:16px;margin-bottom:6px;color:var(--blue)" id="inbox-icon">✉</div><div style="font-size:12px;font-weight:500;margin-bottom:3px" id="inbox-label">Check inbox</div><div style="font-size:11px;color:var(--text2)" id="inbox-sub">Aurora polls info@ every hour 7am–7pm. Click to check now.</div></div>
+        <div class="card" style="cursor:pointer" onclick="triggerInboxCheck(this)"><div style="font-size:16px;margin-bottom:6px;color:var(--blue)" id="inbox-icon">✉</div><div style="font-size:12px;font-weight:500;margin-bottom:3px" id="inbox-label">Poll inbox now</div><div style="font-size:11px;color:var(--text2)" id="inbox-sub">Aurora polls every hour 7am–7pm. Click to run immediately.</div><div style="margin-top:8px"><span class="btn btn-b btn-sm" style="pointer-events:none">▶ Run now</span></div></div>
       </div>
     </div>
 
@@ -1883,6 +1886,26 @@ async function downloadRiskRegister(projectId) {
   const clientSel = document.getElementById('rep-client');
   if (clientSel && p) clientSel.value = p.clientName;
   generateReport('risks');
+}
+
+async function pollNow(btn) {
+  const orig = btn.textContent;
+  btn.textContent = '⟳ Polling…';
+  btn.disabled = true;
+  btn.style.opacity = '0.7';
+  try {
+    const data = await api('/api/emails/read', { method: 'POST' });
+    btn.textContent = '✓ Done';
+    btn.style.opacity = '1';
+    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000);
+    await loadSuggestions();
+    loadDrafts();
+  } catch(e) {
+    btn.textContent = 'Error';
+    btn.style.opacity = '1';
+    btn.disabled = false;
+    setTimeout(() => { btn.textContent = orig; }, 3000);
+  }
 }
 
 async function triggerInboxCheck(el) {
