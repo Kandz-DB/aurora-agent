@@ -716,8 +716,8 @@ async function readConsultantReplies() {
     // Ensure the Aurora Processed category exists in Outlook
     await ensureOutlookCategory(token, mailbox);
 
-    // Get unread emails from last 24 hours (polling catches them quickly)
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    // Get unread emails NOT already tagged with Aurora Processed — last 7 days
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
     // Check both inbox and sent items
     const folders = ['inbox', 'sentitems'];
@@ -725,26 +725,32 @@ async function readConsultantReplies() {
 
     for (const folder of folders) {
       try {
-        // Get recent messages — use $top and $orderby, filter in code to avoid OData date type issues
-        const url = `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${folder}/messages?$select=id,subject,from,toRecipients,body,receivedDateTime,sentDateTime,isRead&$top=50&$orderby=receivedDateTime desc`;
+        // Fetch recent messages — filter in code to avoid OData type issues
+        const url = `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${folder}/messages?$select=id,subject,from,toRecipients,body,receivedDateTime,sentDateTime,isRead,categories&$top=50&$orderby=receivedDateTime desc`;
         const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 });
         const sinceDate = new Date(since);
         const msgs = (res.data?.value || [])
           .filter(m => {
-            if (m.isRead) return false; // skip already read
             const msgDate = new Date(m.receivedDateTime || m.sentDateTime || 0);
-            return msgDate >= sinceDate;
+            if (msgDate < sinceDate) return false; // too old
+            // Skip if already tagged Aurora Processed
+            const cats = m.categories || [];
+            if (cats.includes('Aurora Processed')) return false;
+            return true; // include read AND unread (Aurora may not have tagged it)
           })
           .map(m => ({ ...m, folder }));
         allMessages = allMessages.concat(msgs);
-        console.log(`[Poll] ${folder}: ${msgs.length} new unread email(s) in last 24hrs`);
+        console.log(`[Poll] ${folder}: ${msgs.length} email(s) to process (last 7 days, not yet tagged)`);
       } catch(folderErr) {
         console.error(`[Poll] Error reading ${folder}:`, folderErr.response?.data?.error?.message || folderErr.message);
       }
     }
 
-    if (!allMessages.length) { console.log('[Poll] No new emails'); return; }
-    console.log(`[Poll] Processing ${allMessages.length} new email(s)`);
+    if (!allMessages.length) {
+      console.log('[Poll] No new emails to process — all recent emails already tagged Aurora Processed');
+      return;
+    }
+    console.log(`[Poll] Processing ${allMessages.length} email(s) total`);
 
     const projects = await db.getProjects();
     // Accept emails from any R2S staff, consultants, or forwarded from R2S addresses
@@ -755,7 +761,14 @@ async function readConsultantReplies() {
 
     for (const msg of allMessages) {
       const fromEmail = msg.from?.emailAddress?.address || '';
-      if (!isFromConsultant(fromEmail)) continue;
+      console.log(`[Poll] Checking: "${msg.subject}" from ${fromEmail}`);
+
+      if (!isFromConsultant(fromEmail)) {
+        console.log(`[Poll] Skipping — not from R2S: ${fromEmail}`);
+        // Tag it so we don't check again
+        try { await axios.patch(`https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`, { categories: ['Aurora Processed'] }, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }); } catch(e) {}
+        continue;
+      }
 
       const subject = msg.subject || '';
       const bodyText = msg.body?.content?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 3000) || '';
@@ -771,6 +784,8 @@ async function readConsultantReplies() {
           bodyLower.includes((p.projectName || '').toLowerCase().slice(0, 12))
         )
       );
+
+      console.log(`[Poll] Project match: ${matchedProject ? matchedProject.clientName : 'NONE — will send general alert to Diane'}`);
 
       // If no specific project match, send general update to Diane
       if (!matchedProject) {
