@@ -2504,6 +2504,55 @@ app.put('/api/projects/:id/deliverables/:delId', express.json(), async (req, res
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Data backup / export ─────────────────────────────────────────────────────
+app.get('/api/backup', async (req, res) => {
+  try {
+    const projects     = await db.getProjects();
+    const drafts       = await db.getDrafts();
+    const documents    = await db.getDocuments();
+    const suggestions  = await db.getSuggestions();
+    const spend        = await db.getSpend();
+
+    const backup = {
+      exportedAt: new Date().toISOString(),
+      version: '3.0',
+      projects,
+      drafts,
+      documents: documents.map(d => ({ ...d, extract: d.extract?.slice(0, 500) })), // trim extracts
+      suggestions,
+      spend,
+    };
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="aurora-backup-${new Date().toISOString().slice(0,10)}.json"`);
+    res.json(backup);
+    console.log(`[Backup] Exported ${projects.length} projects, ${drafts.length} drafts`);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Data restore from backup ──────────────────────────────────────────────────
+app.post('/api/restore', express.json({ limit: '50mb' }), async (req, res) => {
+  try {
+    const { projects, drafts, documents } = req.body;
+    let restored = 0;
+    if (projects?.length) {
+      for (const p of projects) { await db.upsertProject(p); restored++; }
+    }
+    if (drafts?.length) {
+      for (const d of drafts) { try { await db.saveDraft(d); } catch(e) {} }
+    }
+    if (documents?.length) {
+      for (const d of documents) { try { await db.saveDocument(d); } catch(e) {} }
+    }
+    console.log(`[Restore] Restored ${restored} projects`);
+    res.json({ success: true, projectsRestored: restored });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Cost
 app.get('/api/cost', async (req, res) => {
   try {
