@@ -511,7 +511,7 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
 </div>
 
 <script>
-const PHASES = ['Kick-off','Deployment','Monitoring & Review','Reporting','Close-out'];
+const PHASES = ['Kick-off','Deployment','Monitoring & Review','Reporting','Close-out','Completed'];
 const PHASE_DESC = {
   0: 'Initial project meeting with client and R2S. Confirm scope, contacts, timelines, and expectations.',
   1: 'Active service delivery. The contracted work is underway — assessments, training, audits, or consulting as per the SOW.',
@@ -600,7 +600,7 @@ function isAtRisk(p) {
 }
 
 function isCompleted(p) {
-  return ['Completed','Terminated','Closed'].includes(p.status);
+  return ['Completed','Terminated','Closed'].includes(p.status) || (p.phase || 0) === 5;
 }
 
 function alertLabel(p) {
@@ -657,8 +657,9 @@ function tileHTML(p) {
     `<div style="flex:1;font-size:8px;text-align:center;color:${i===phase?'var(--pink-light)':i<phase?'rgba(0,232,187,.7)':'var(--text3)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--fm)">${ph.split(' ')[0]}</div>`
   ).join('');
 
-  return `<div class="tile" onclick="openProject('${p.id}')">
-    ${alert ? `<div class="tile-alert ${alert.cls}">${alert.label}</div>` : ''}
+  const isCompleted2 = p.status === 'Completed' || p.phase === 5;
+  return `<div class="tile" onclick="openProject('${p.id}')" style="${isCompleted2 ? 'opacity:0.7;border-color:rgba(0,232,187,.2)' : ''}">
+    ${isCompleted2 ? `<div class="tile-alert ba">✓ Completed</div>` : alert ? `<div class="tile-alert ${alert.cls}">${alert.label}</div>` : ''}
     <div class="tile-client">${p.clientName}</div>
     <div class="tile-project" style="margin-bottom:8px">${p.projectName || ''}</div>
     ${summaryHTML}
@@ -675,8 +676,9 @@ function tileHTML(p) {
 }
 
 function renderProjects() {
-  const active    = projects.filter(p => p.type === 'standard' && !isCompleted(p));
-  const completed = projects.filter(p => p.type === 'standard' && isCompleted(p));
+  // Phase 5 = Completed — goes to completed folder
+  const active    = projects.filter(p => p.type === 'standard' && !isCompleted(p) && (p.phase || 0) < 5);
+  const completed = projects.filter(p => p.type === 'standard' && (isCompleted(p) || (p.phase || 0) === 5));
   const ongoing   = projects.filter(p => p.type === 'ongoing');
   let html = '';
 
@@ -1904,65 +1906,60 @@ async function loadRisks(projectId) {
   }
 }
 
+function activityDotClass(type) {
+  const map = { email_processed:'email', phase_change:'phase', status_change:'status', calendar_booking:'booking', draft_sent:'email', draft_created:'email', project_created:'phase', consultant_assigned:'status', contract:'manual' };
+  return map[type] || 'manual';
+}
+
+function activityIcon(type) {
+  const map = { email_processed:'✉', phase_change:'→', status_change:'⚑', calendar_booking:'📅', draft_sent:'📤', project_created:'✦', consultant_assigned:'👤', contract:'📄', manual_note:'📝' };
+  return map[type] || '•';
+}
+
 async function loadActivity(projectId) {
   const el = document.getElementById('activity-content-' + projectId);
   if (!el) return;
-  el.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading…</div>';
+  el.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading activity log…</div>';
   try {
     const data = await api('/api/projects/' + projectId + '/activity');
     const items = data.activity || [];
 
-    if (!items.length) {
-      el.innerHTML = `<div style="color:var(--text3);font-size:12px;text-align:center;padding:20px">
-        No activity recorded yet. Aurora will log emails, phase changes, bookings, and actions here automatically.
-      </div>`;
-      return;
+    let html = '<div style="padding:4px 0">';
+
+    if (items.length) {
+      items.forEach(item => {
+        const date = new Date(item.timestamp);
+        const dateStr = date.toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' });
+        const timeStr = date.toLocaleTimeString('en-AU', { hour:'numeric', minute:'2-digit', hour12:true });
+        const actionsHtml = item.actions?.length
+          ? '<div class="activity-actions">' + item.actions.map(a => '• ' + a).join('<br>') + '</div>'
+          : '';
+        html += `<div class="activity-item">
+          <div><div class="activity-dot ${activityDotClass(item.type)}"></div></div>
+          <div class="activity-body">
+            <div class="activity-summary">${activityIcon(item.type)} ${item.summary || item.type}</div>
+            ${item.source && item.source !== 'Diane' ? `<div style="font-size:10px;color:var(--text3)">Source: ${item.source}</div>` : ''}
+            ${actionsHtml}
+            <div class="activity-time">${dateStr}${timeStr ? ' at ' + timeStr : ''}</div>
+          </div>
+        </div>`;
+      });
+    } else {
+      html += '<div style="color:var(--text3);font-size:12px;padding:12px 0">No activity recorded yet.</div>';
     }
 
-    const dotClass = (type) => ({
-      email_processed: 'email', phase_change: 'phase', status_change: 'status',
-      calendar_booking: 'booking', draft_created: 'email',
-    }[type] || 'manual');
-
-    const icon = (type) => ({
-      email_processed: '✉', phase_change: '→', status_change: '⚑',
-      calendar_booking: '📅', draft_created: '📝',
-    }[type] || '•');
-
-    let html = `<div style="padding:4px 0">`;
-    items.forEach(item => {
-      const date = new Date(item.timestamp);
-      const dateStr = date.toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' });
-      const timeStr = date.toLocaleTimeString('en-AU', { hour:'numeric', minute:'2-digit', hour12:true });
-      const actionsText = item.actions?.length
-        ? `<div class="activity-actions">${item.actions.map(a => '• ' + a).join('<br>')}</div>`
-        : '';
-      html += `<div class="activity-item">
-        <div>
-          <div class="activity-dot ${dotClass(item.type)}"></div>
-        </div>
-        <div class="activity-body">
-          <div class="activity-summary">${icon(item.type)} ${item.summary || item.type}</div>
-          ${item.source ? `<div style="font-size:10px;color:var(--text3)">From: ${item.source}</div>` : ''}
-          ${actionsText}
-          <div class="activity-time">${dateStr} at ${timeStr}</div>
-        </div>
-      </div>`;
-    });
     html += '</div>';
-
-    // Add manual note option
     html += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-      <div style="font-size:11px;color:var(--text2);margin-bottom:6px">Add manual note</div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:6px">Add a note</div>
       <div style="display:flex;gap:6px">
-        <input id="activity-note-${projectId}" placeholder="e.g. Called client to confirm dates…" style="flex:1;font-size:12px"/>
-        <button class="btn btn-t btn-sm" onclick="addActivityNote('${projectId}')">Add</button>
+        <input id="activity-note-${projectId}" placeholder="e.g. Spoke with client — confirmed delivery date" style="flex:1;font-size:12px"/>
+        <button class="btn btn-t btn-sm" onclick="addActivityNote('${projectId}')">+ Add</button>
       </div>
     </div>`;
 
     el.innerHTML = html;
   } catch(e) {
-    el.innerHTML = '<div style="color:var(--rose);font-size:12px">Error: ' + e.message + '</div>';
+    el.innerHTML = '<div style="color:var(--rose);font-size:12px">Error loading activity log: ' + e.message + '</div>';
   }
 }
 
