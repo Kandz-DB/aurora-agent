@@ -733,10 +733,10 @@ async function readConsultantReplies() {
           .filter(m => {
             const msgDate = new Date(m.receivedDateTime || m.sentDateTime || 0);
             if (msgDate < sinceDate) return false; // too old
-            // Skip if already tagged Aurora Processed
+            // Skip only if already tagged Aurora Processed
             const cats = m.categories || [];
             if (cats.includes('Aurora Processed')) return false;
-            return true; // include read AND unread (Aurora may not have tagged it)
+            return true; // process ALL emails not yet tagged — read or unread
           })
           .map(m => ({ ...m, folder }));
         allMessages = allMessages.concat(msgs);
@@ -753,116 +753,108 @@ async function readConsultantReplies() {
     console.log(`[Poll] Processing ${allMessages.length} email(s) total`);
 
     const projects = await db.getProjects();
-    // Accept emails from any R2S staff, consultants, or forwarded from R2S addresses
-    const isFromConsultant = (email) => email && (
-      email.toLowerCase().endsWith('@risk2solution.com') ||
-      email.toLowerCase().endsWith('@presilience.com')
-    );
 
     for (const msg of allMessages) {
       const fromEmail = msg.from?.emailAddress?.address || '';
-      console.log(`[Poll] Checking: "${msg.subject}" from ${fromEmail}`);
+      const fromName  = msg.from?.emailAddress?.name || fromEmail;
+      const subject   = msg.subject || '';
+      const bodyText  = msg.body?.content?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 3000) || '';
 
-      if (!isFromConsultant(fromEmail)) {
-        console.log(`[Poll] Skipping — not from R2S: ${fromEmail}`);
-        // Tag it so we don't check again
-        try { await axios.patch(`https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`, { categories: ['Aurora Processed'] }, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }); } catch(e) {}
-        continue;
-      }
+      console.log(`[Poll] Checking: "${subject}" from ${fromEmail}`);
 
-      const subject = msg.subject || '';
-      const bodyText = msg.body?.content?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 3000) || '';
+      // Determine if this is internal R2S or external (client/other)
+      const isInternal = fromEmail.toLowerCase().endsWith('@risk2solution.com') ||
+                         fromEmail.toLowerCase().endsWith('@presilience.com');
 
-      // Find matching project by subject or body content
-      const bodyLower = bodyText.toLowerCase();
+      // Find ALL matching projects — email may mention multiple
+      const bodyLower    = bodyText.toLowerCase();
       const subjectLower = subject.toLowerCase();
-      const matchedProject = projects.find(p =>
+      const matchedProjects = projects.filter(p =>
         p.type === 'standard' && p.clientName && (
           subjectLower.includes(p.clientName.toLowerCase()) ||
           subjectLower.includes((p.projectName || '').toLowerCase().slice(0, 12)) ||
           bodyLower.includes(p.clientName.toLowerCase()) ||
-          bodyLower.includes((p.projectName || '').toLowerCase().slice(0, 12))
+          bodyLower.includes((p.projectName || '').toLowerCase().slice(0, 12)) ||
+          (p.clientEmail && fromEmail.toLowerCase() === p.clientEmail.toLowerCase())
         )
       );
 
-      console.log(`[Poll] Project match: ${matchedProject ? matchedProject.clientName : 'NONE — will send general alert to Diane'}`);
+      console.log(`[Poll] Project matches: ${matchedProjects.length > 0 ? matchedProjects.map(p => p.clientName).join(', ') : 'NONE'}  Internal: ${isInternal}`);
 
-      // If no specific project match, send general update to Diane
-      if (!matchedProject) {
-        // Still notify Diane of any R2S staff email with project content
-        if (bodyText.length > 100) {
+
+      // If no project match — tag and optionally alert Diane
+      if (!matchedProjects.length) {
+        const isNoise = /remittance|payment|invoice|survey|notification|enquiry form|abandoned call|tender|digest|order|fmclarity|localbuy|vendorpanel/i.test(subject);
+        if (isInternal && bodyText.length > 100 && !isNoise) {
           await sendEmail('diane.k@risk2solution.com',
-            `[Aurora] R2S staff update received: ${subject}`,
-            `Aurora received an email from ${fromEmail} that may contain project updates.
-
-Subject: ${subject}
-
-Summary:
-${bodyText.slice(0, 800)}
-
-Please review and update Aurora project records as needed.
-
-Aurora
-R2S Project Management Intelligence`,
+            `[Aurora] R2S staff email — no project match: ${subject}`,
+            `Aurora received an email from ${fromName} (${fromEmail}) that could not be matched to any existing project.\n\nSubject: ${subject}\n\nContent summary:\n${bodyText.slice(0, 600)}\n\nIf this relates to a project, please create it in Aurora.\n\nAurora\nR2S Project Management Intelligence`,
             true
           );
         }
-        // Mark as read and tag
         try {
           await axios.patch(
             `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
-            { isRead: true, categories: ['Aurora Processed'] },
+            { categories: ['Aurora Processed'] },
             { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
           );
-        } catch(e) { console.error('[Poll] Tag failed:', e.message); }
+        } catch(e) {}
         continue;
       }
 
-      // Full autonomous analysis — extract ALL actionable information from the email
+      // Process EACH matched project — one email may reference multiple projects
+      for (const matchedProject of matchedProjects) {
+        console.log(`[Poll] Processing for: ${matchedProject.clientName}`);
+
+      // Full autonomous analysis
       try {
-        const analysis = await aurora('consultant_briefing',
-          `You are Aurora, the R2S project management AI. Analyse this email thoroughly and extract ALL actionable information.
+        const analysis = await aurora('contract_extract',
+          `Analyse this email and return a JSON object. Return ONLY the JSON — no explanation, no preamble, no markdown, just the raw JSON object starting with { and ending with }.
 
-Project: ${matchedProject.projectName || matchedProject.clientName}
-Client: ${matchedProject.clientName}
-Current phase: ${PHASES[matchedProject.phase || 0]} (phase index: ${matchedProject.phase || 0})
-Current status: ${matchedProject.status}
-Consultant: ${matchedProject.consultant || 'Unknown'}
-Due date: ${matchedProject.dueDate || 'TBC'}
-Deliverables: ${matchedProject.deliverables || 'See project record'}
+Project context:
+- Project: ${matchedProject.projectName || matchedProject.clientName}
+- Client: ${matchedProject.clientName}
+- Current phase: ${PHASES[matchedProject.phase || 0]} (index: ${matchedProject.phase || 0})
+- Consultant: ${matchedProject.consultant || 'Unknown'}
+- Deliverables: ${(matchedProject.deliverables || '').slice(0, 200)}
 
-Email from: ${fromEmail}
+Email:
+From: ${fromEmail}
 Subject: ${subject}
-Full content: ${bodyText.slice(0, 3000)}
+Content: ${bodyText.slice(0, 2000)}
 
-Respond in JSON only with this exact structure:
-{
-  "phaseChange": true or false,
-  "newPhase": 0-4 (0=Kick-off, 1=Deployment, 2=Monitoring & Review, 3=Reporting, 4=Close-out),
-  "newStatus": "In Progress" or "On Hold" or "Completed" or "" if no change,
-  "statusSummary": "2-3 sentence summary of what the consultant reported and what has happened",
-  "completedDeliverables": ["list of deliverables mentioned as done or submitted"],
-  "inProgressDeliverables": ["list of deliverables mentioned as in progress"],
-  "invoiceTriggered": true or false,
-  "invoiceNote": "what invoice milestone was reached if any",
-  "needsKickoffScheduling": true or false,
-  "kickoffNote": "why kickoff needs scheduling if applicable",
-  "hasBookableEvent": true or false,
-  "eventDate": "YYYY-MM-DD or empty",
-  "eventTime": "HH:MM or empty",
-  "eventType": "training or workshop or meeting or presentation or empty",
-  "eventTitle": "short title for the event",
-  "eventDuration": 60,
-  "requiresAttention": true or false,
-  "attentionReason": "specific action needed from Diane if any",
-  "activityLogEntry": "one clear sentence describing what happened e.g. Ross confirmed final report submitted to WIC client on 3 June 2026"
-}`,
+Return this exact JSON structure (no other text):
+{"phaseChange":false,"newPhase":${matchedProject.phase || 0},"newStatus":"","statusSummary":"summary here","completedDeliverables":[],"inProgressDeliverables":[],"invoiceTriggered":false,"invoiceNote":"","needsKickoffScheduling":false,"kickoffNote":"","hasBookableEvent":false,"eventDate":"","eventTime":"","eventType":"","eventTitle":"","eventDuration":60,"requiresAttention":false,"attentionReason":"","activityLogEntry":"summary of what happened"}
+
+Fill in the values based on the email content. phaseChange should be true only if the email clearly indicates the project has moved to a new phase. newPhase: 0=Kick-off, 1=Deployment, 2=Monitoring and Review, 3=Reporting, 4=Close-out.`,
           buildContext(matchedProject)
         );
 
+        // Extract JSON from response — try multiple strategies
         let parsed;
-        try { parsed = JSON.parse(analysis.replace(/```json|```/g, '').trim()); }
-        catch { console.error('[Replies] JSON parse failed'); continue; }
+        try {
+          let clean = analysis.trim();
+          // Remove markdown code blocks
+          clean = clean.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+          // Find JSON object if surrounded by other text
+          const jsonMatch = clean.match(/\{[\s\S]*\}/);
+          if (jsonMatch) clean = jsonMatch[0];
+          console.log(`[Replies] Parsing analysis for ${matchedProject.clientName}:`, clean.slice(0, 150));
+          parsed = JSON.parse(clean);
+          console.log(`[Replies] Analysis: phaseChange=${parsed.phaseChange}, newPhase=${parsed.newPhase}, invoice=${parsed.invoiceTriggered}, kickoff=${parsed.needsKickoffScheduling}`);
+        } catch(jsonErr) {
+          console.error('[Replies] JSON parse failed. Raw:', analysis.slice(0, 400));
+          // Notify Diane manually
+          await sendEmail('diane.k@risk2solution.com',
+            `[Aurora] Email received — needs manual review: ${matchedProject.clientName}`,
+            `Aurora received an email from ${fromEmail} about ${matchedProject.projectName || matchedProject.clientName} but could not automatically analyse it.\n\nSubject: ${subject}\n\nContent:\n${bodyText.slice(0, 1000)}\n\nPlease review and update Aurora project record manually.\n\nAurora\nR2S Project Management Intelligence`,
+            true
+          );
+          await db.logActivity(matchedProject.id, { type: 'email_processed', source: fromEmail, subject, summary: `Email from ${fromEmail} received — manual review needed` });
+          continue;
+        }
+
+        console.log(`[Replies] Analysis complete for ${matchedProject.clientName}: phaseChange=${parsed.phaseChange}, newPhase=${parsed.newPhase}, invoiceTriggered=${parsed.invoiceTriggered}, needsKickoff=${parsed.needsKickoffScheduling}, hasEvent=${parsed.hasBookableEvent}`);
 
         const actions = [];
 
@@ -1033,6 +1025,8 @@ Write a brief, professional email notifying them that an invoice will be issued.
       } catch(patchErr) {
         console.error('[Poll] Mark read/tag failed:', patchErr.message);
       }
+
+      } // end for each matched project
 
     } // end for each message
   } catch (err) {
@@ -2676,6 +2670,36 @@ app.post('/api/projects/:id/activity', express.json(), async (req, res) => {
     const entry = await db.logActivity(req.params.id, req.body);
     res.json({ entry });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Debug email reader — shows what Aurora sees without processing ────────────
+app.get('/api/debug/emails', async (req, res) => {
+  try {
+    const token = await getOutlookToken();
+    if (!token) return res.json({ error: 'No Outlook token — check Azure app credentials' });
+    const mailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const url = `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/inbox/messages?$select=id,subject,from,receivedDateTime,isRead,categories&$top=20&$orderby=receivedDateTime desc`;
+    const res2 = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 });
+    const msgs = res2.data?.value || [];
+    const sinceDate = new Date(since);
+    res.json({
+      mailbox,
+      totalFound: msgs.length,
+      since: since,
+      messages: msgs.map(m => ({
+        subject: m.subject,
+        from: m.from?.emailAddress?.address,
+        received: m.receivedDateTime,
+        isRead: m.isRead,
+        categories: m.categories || [],
+        withinWindow: new Date(m.receivedDateTime) >= sinceDate,
+        alreadyTagged: (m.categories || []).includes('Aurora Processed'),
+      }))
+    });
+  } catch(e) {
+    res.json({ error: e.response?.data?.error?.message || e.message });
+  }
 });
 
 // ── Data backup / export ─────────────────────────────────────────────────────
