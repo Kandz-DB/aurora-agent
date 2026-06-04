@@ -205,6 +205,20 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
 .risk-desc{font-size:12px;font-weight:500;color:var(--text);flex:1}
 .risk-mitigation{font-size:11px;color:var(--text2);line-height:1.55;margin-top:4px;padding-left:8px;border-left:2px solid var(--border2)}
 
+/* Activity log */
+.activity-item{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.activity-item:last-child{border-bottom:none}
+.activity-dot{width:8px;height:8px;border-radius:50%;background:var(--teal);flex-shrink:0;margin-top:4px}
+.activity-dot.email{background:var(--blue)}
+.activity-dot.phase{background:var(--pink)}
+.activity-dot.status{background:var(--amber)}
+.activity-dot.booking{background:var(--violet)}
+.activity-dot.manual{background:var(--text3)}
+.activity-time{font-size:10px;color:var(--text3);font-family:var(--fm);white-space:nowrap;margin-top:2px}
+.activity-body{flex:1}
+.activity-summary{font-size:12px;color:var(--text);line-height:1.5;margin-bottom:2px}
+.activity-actions{font-size:10px;color:var(--text3);line-height:1.6}
+
 /* Booking form */
 .booking-form{background:var(--card2);border:1px solid var(--teal);border-radius:9px;padding:14px;margin-top:8px}
 .booking-form label{font-size:11px;color:var(--text2);margin-bottom:3px;display:block}
@@ -857,6 +871,7 @@ function openProject(id) {
       <div class="proj-tab on" onclick="switchProjTab(this,'tab-overview-${p.id}')">Overview</div>
       <div class="proj-tab" onclick="switchProjTab(this,'tab-deliverables-${p.id}');loadDeliverables('${p.id}')">Deliverables</div>
       <div class="proj-tab" onclick="switchProjTab(this,'tab-risks-${p.id}');loadRisks('${p.id}')">Risk Register</div>
+      <div class="proj-tab" onclick="switchProjTab(this,'tab-activity-${p.id}');loadActivity('${p.id}')">Activity log</div>
     </div>
 
     <!-- Overview tab -->
@@ -1008,16 +1023,40 @@ async function createProject() {
 }
 
 // Contract upload
-async function uploadContract(file) {
+async function uploadContract(file, forceCreate) {
   if (!file) return;
   const status = document.getElementById('contract-status');
   status.style.display = 'block';
   status.innerHTML = `<div class="card" style="color:var(--text2)"><div style="margin-bottom:6px">📄 Reading <strong>${file.name}</strong>…</div><div style="font-size:11px;color:var(--text3)">Aurora is extracting client, scope, deliverables, fees, and dates. This takes about 15–30 seconds.</div></div>`;
   const fd = new FormData();
   fd.append('file', file);
+  if (forceCreate) fd.append('forceCreate', 'true');
   try {
     const res = await fetch('/api/contracts/upload', { method: 'POST', body: fd, headers: { 'Authorization': 'Bearer ' + (sessionStorage.getItem('aurora_token') || '') } });
     const data = await res.json();
+
+    // Handle duplicate detection
+    if (res.status === 409 && data.duplicate) {
+      const existingList = data.existingProjects.map(p =>
+        `• ${p.clientName} — ${p.projectName || 'No project name'} (${p.status || 'Active'})`
+      ).join('\n');
+      status.innerHTML = `<div class="card" style="border-color:rgba(255,179,64,.4)">
+        <div style="color:var(--amber);font-weight:500;margin-bottom:8px">⚠ Possible duplicate detected</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Aurora found a similar project already in the system. Please review before proceeding.</div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Detected in this file:</div>
+        <div style="font-size:12px;color:var(--text);margin-bottom:10px"><strong>${data.detectedClient||'Unknown client'}</strong> — ${data.detectedProject||'Unknown project'}</div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Existing similar project(s):</div>
+        <div style="font-size:12px;color:var(--text);white-space:pre-line;margin-bottom:12px;padding:8px;background:var(--card2);border-radius:6px">${existingList}</div>
+        <div style="font-size:11px;color:var(--amber);margin-bottom:10px">Is this a new version of an existing contract, or a completely new project?</div>
+        <div class="arow">
+          <button class="btn btn-p btn-sm" onclick="uploadContract(window._pendingFile, true)">This is a new project — create it</button>
+          <button class="btn btn-g btn-sm" onclick="document.getElementById('contract-status').style.display='none'">Cancel</button>
+        </div>
+      </div>`;
+      window._pendingFile = file;
+      return;
+    }
+
     if (data.project) {
       projects.push(data.project);
       updateOverview();
@@ -1865,6 +1904,80 @@ async function loadRisks(projectId) {
   }
 }
 
+async function loadActivity(projectId) {
+  const el = document.getElementById('activity-content-' + projectId);
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading…</div>';
+  try {
+    const data = await api('/api/projects/' + projectId + '/activity');
+    const items = data.activity || [];
+
+    if (!items.length) {
+      el.innerHTML = `<div style="color:var(--text3);font-size:12px;text-align:center;padding:20px">
+        No activity recorded yet. Aurora will log emails, phase changes, bookings, and actions here automatically.
+      </div>`;
+      return;
+    }
+
+    const dotClass = (type) => ({
+      email_processed: 'email', phase_change: 'phase', status_change: 'status',
+      calendar_booking: 'booking', draft_created: 'email',
+    }[type] || 'manual');
+
+    const icon = (type) => ({
+      email_processed: '✉', phase_change: '→', status_change: '⚑',
+      calendar_booking: '📅', draft_created: '📝',
+    }[type] || '•');
+
+    let html = `<div style="padding:4px 0">`;
+    items.forEach(item => {
+      const date = new Date(item.timestamp);
+      const dateStr = date.toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' });
+      const timeStr = date.toLocaleTimeString('en-AU', { hour:'numeric', minute:'2-digit', hour12:true });
+      const actionsText = item.actions?.length
+        ? `<div class="activity-actions">${item.actions.map(a => '• ' + a).join('<br>')}</div>`
+        : '';
+      html += `<div class="activity-item">
+        <div>
+          <div class="activity-dot ${dotClass(item.type)}"></div>
+        </div>
+        <div class="activity-body">
+          <div class="activity-summary">${icon(item.type)} ${item.summary || item.type}</div>
+          ${item.source ? `<div style="font-size:10px;color:var(--text3)">From: ${item.source}</div>` : ''}
+          ${actionsText}
+          <div class="activity-time">${dateStr} at ${timeStr}</div>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+
+    // Add manual note option
+    html += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text2);margin-bottom:6px">Add manual note</div>
+      <div style="display:flex;gap:6px">
+        <input id="activity-note-${projectId}" placeholder="e.g. Called client to confirm dates…" style="flex:1;font-size:12px"/>
+        <button class="btn btn-t btn-sm" onclick="addActivityNote('${projectId}')">Add</button>
+      </div>
+    </div>`;
+
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = '<div style="color:var(--rose);font-size:12px">Error: ' + e.message + '</div>';
+  }
+}
+
+async function addActivityNote(projectId) {
+  const input = document.getElementById('activity-note-' + projectId);
+  const note = input?.value?.trim();
+  if (!note) return;
+  await api('/api/projects/' + projectId + '/activity', {
+    method: 'POST',
+    body: JSON.stringify({ type: 'manual_note', summary: note, source: 'Diane' }),
+  });
+  input.value = '';
+  await loadActivity(projectId);
+}
+
 async function setRiskStatus(projectId, riskId, status, btn) {
   btn.textContent = '…';
   await api('/api/projects/' + projectId + '/risks/' + riskId, {
@@ -1945,6 +2058,16 @@ async function triggerInboxCheck(el) {
     if (label) label.textContent = 'Error — try again';
     el.style.opacity = '1';
   }
+}
+
+async function forceUploadContract() {
+  const file = window._pendingUploadFile;
+  if (!file) return;
+  window._pendingUploadFile = null;
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('forceCreate', 'true');
+  await uploadContract(file, true);
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
