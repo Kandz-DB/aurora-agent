@@ -121,12 +121,15 @@ async function aurora(taskType, userMessage, context) {
   return response.content.filter(b => b.type === 'text').map(b => b.text).join('');
 }
 
-// ── Email (Outlook via nodemailer / Graph API) ────────────────────────────────
+// ── Email (Outlook via Graph API) ─────────────────────────────────────────────
 async function getOutlookToken() {
   const tenantId     = process.env.OUTLOOK_TENANT_ID;
   const clientId     = process.env.OUTLOOK_CLIENT_ID;
   const clientSecret = process.env.OUTLOOK_CLIENT_SECRET;
-  if (!tenantId || !clientId || !clientSecret) return null;
+  if (!tenantId || !clientId || !clientSecret) {
+    console.error('[Email] Missing Outlook env vars — OUTLOOK_TENANT_ID:', !!tenantId, 'OUTLOOK_CLIENT_ID:', !!clientId, 'OUTLOOK_CLIENT_SECRET:', !!clientSecret);
+    return null;
+  }
   try {
     const res = await axios.post(
       `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
@@ -135,7 +138,7 @@ async function getOutlookToken() {
     );
     return res.data.access_token;
   } catch (err) {
-    console.error('[Email] Token failed:', err.message);
+    console.error('[Email] Token failed:', err.response?.data?.error_description || err.message);
     return null;
   }
 }
@@ -3001,14 +3004,22 @@ app.post('/api/reminders/check', async (req, res) => {
 async function start() {
   await db.initDB();
   await db.ensureSpendConstraint();
-  app.listen(PORT, () => {
+  app.listen(PORT, async () => {
     console.log(`\n╔══════════════════════════════════════╗`);
     console.log(`║  Aurora R2S v3 — port ${PORT}          ║`);
     console.log(`╚══════════════════════════════════════╝`);
-    console.log(`DB: ${process.env.DATABASE_URL ? 'PostgreSQL' : 'JSON files'}`);
+    console.log(`DB: ${process.env.AZURE_STORAGE_CONNECTION_STRING ? 'Azure Blob Storage' : 'JSON files'}`);
     console.log(`Spend cap: $${CAP_USD} USD/month`);
     console.log(`Internal emails: ${INTERNAL_EMAILS.join(', ')}`);
-    console.log(`Reminders: 14, 7, 3 days before due date\n`);
+    console.log(`Reminders: 14, 7, 3 days before due date`);
+
+    // Test Outlook connection on startup
+    const outlookToken = await getOutlookToken();
+    if (outlookToken) {
+      console.log(`[Outlook] ✓ Connected — emails send from ${process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com'}\n`);
+    } else {
+      console.error(`[Outlook] ✗ NOT CONNECTED — emails will be logged only. Check Azure env vars: OUTLOOK_TENANT_ID, OUTLOOK_CLIENT_ID, OUTLOOK_CLIENT_SECRET\n`);
+    }
   });
 }
 
