@@ -764,6 +764,15 @@ async function readConsultantReplies() {
 
       console.log(`[Poll] Checking: "${subject}" from ${fromEmail}`);
 
+      // Tag immediately as seen — prevents re-processing on next poll regardless of what happens below
+      try {
+        await axios.patch(
+          `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
+          { categories: ['Aurora Processed'] },
+          { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+        );
+      } catch(tagErr) { /* tag on first seen — best effort */ }
+
       // Determine if this is internal R2S or external (client/other)
       const isInternal = fromEmail.toLowerCase().endsWith('@risk2solution.com') ||
                          fromEmail.toLowerCase().endsWith('@presilience.com');
@@ -786,11 +795,29 @@ async function readConsultantReplies() {
 
       // If no project match — tag and optionally alert Diane
       if (!matchedProjects.length) {
-        const isNoise = /remittance|payment|invoice|survey|notification|enquiry form|abandoned call|tender|digest|order|fmclarity|localbuy|vendorpanel/i.test(subject);
-        if (isInternal && bodyText.length > 100 && !isNoise) {
+        // Expanded noise filter — anything that's clearly not a project update
+        const isNoise = /remittance|payment received|invoice|survey|notification|enquiry form|contact us form|abandoned call|missed call|tender|digest|purchase order|fmclarity|localbuy|vendorpanel|supabase|work order|unsubscribe|auto.?reply|out of office|no.?reply|donotreply|do.not.reply|statement|receipt|confirmation/i.test(subject) ||
+          /remittance|payment received|contact us form|enquiry form|abandoned call|missed call|work order/i.test(bodyText.slice(0, 200));
+
+        // Only alert Diane if: internal R2S sender + not noise + looks like genuine project content
+        const looksLikeProject = bodyText.length > 150 && (
+          /project|client|proposal|contract|deliverable|training|workshop|report|phase|scope|invoice milestone|consultant/i.test(bodyText)
+        );
+
+        if (isInternal && !isNoise && looksLikeProject) {
           await sendEmail('diane.k@risk2solution.com',
             `[Aurora] R2S staff email — no project match: ${subject}`,
-            `Aurora received an email from ${fromName} (${fromEmail}) that could not be matched to any existing project.\n\nSubject: ${subject}\n\nContent summary:\n${bodyText.slice(0, 600)}\n\nIf this relates to a project, please create it in Aurora.\n\nAurora\nR2S Project Management Intelligence`,
+            `Aurora received an email from ${fromName} (${fromEmail}) that may relate to a project but could not be matched.
+
+Subject: ${subject}
+
+Summary:
+${bodyText.slice(0, 400)}
+
+If this relates to a project, please create it in Aurora.
+
+Aurora
+R2S Project Management Intelligence`,
             true
           );
         }
@@ -1054,6 +1081,7 @@ Write a brief, professional email notifying them that an invoice will be issued.
       }
 
       } // end for each matched project
+      // Safety net — ensure email is tagged even if inner loop had issues
 
     } // end for each message
   } catch (err) {
