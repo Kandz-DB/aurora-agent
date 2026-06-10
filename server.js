@@ -180,17 +180,27 @@ async function sendInternalEmail(subject, body) {
 }
 
 async function saveDraftEmail(draft) {
-  // Save draft to Outlook shared mailbox drafts folder
+  const DIANE = 'diane.k@risk2solution.com';
   const token = await getOutlookToken();
   const fromMailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
   if (token) {
     try {
+      // Always CC Diane on all external drafts unless she IS the recipient
+      const ccList = [];
+      if (draft.toEmail && draft.toEmail.toLowerCase() !== DIANE.toLowerCase()) {
+        ccList.push({ emailAddress: { address: DIANE, name: 'Diane Kruger' } });
+      }
+      if (draft.ccEmail && draft.ccEmail.toLowerCase() !== DIANE.toLowerCase()) {
+        ccList.push({ emailAddress: { address: draft.ccEmail } });
+      }
+
       await axios.post(
         `https://graph.microsoft.com/v1.0/users/${fromMailbox}/messages`,
         {
           subject: draft.subject,
           body: { contentType: 'Text', content: draft.body },
           toRecipients: [{ emailAddress: { address: draft.toEmail || fromMailbox } }],
+          ...(ccList.length > 0 ? { ccRecipients: ccList } : {}),
         },
         { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 15000 }
       );
@@ -2246,6 +2256,7 @@ async function sendKickoffPrompt(project) {
       projectName: project.projectName, type: 'kickoff_agenda',
       urgency: 'routine', toName: project.clientContact,
       toEmail: project.clientEmail,
+      ccEmail: 'diane.k@risk2solution.com',
       subject: `Kick-off Meeting Agenda — ${project.clientName} — ${project.projectName || 'Project'}`,
       body: agendaText, source: 'auto',
     };
@@ -2314,6 +2325,40 @@ Write the email starting with "Hi ${(project.clientContact || 'there').split(' '
 4. What happens next (3 bullet points covering: kick-off meeting to be scheduled, scope and timeline to be confirmed, regular updates throughout)
 
 5. A note that Diane is available for any questions
+
+6. Then add this exact section as the final part of the email before the sign-off:
+
+To help us set up your project correctly, please complete and return the following onboarding form:
+
+ONBOARDING FORM — ${project.clientName}
+
+Primary contact person:
+Phone number:
+Email address:
+Position / Title:
+
+Update report frequency (please select one):
+[ ] Weekly
+[ ] Fortnightly
+[ ] Monthly
+
+Is a Purchase Order (PO) required for invoicing?
+[ ] Yes — PO number: ________________________________
+[ ] No
+
+Accounts payable contact name:
+Accounts payable email:
+Accounts payable phone:
+
+Preferred dates for kick-off meeting (please provide 3 options):
+Option 1:
+Option 2:
+Option 3:
+
+Any other information or requirements we should be aware of:
+
+
+Please return this form by reply email to diane.k@risk2solution.com at your earliest convenience so we can get your project started.
 
 Sign off as:
 Kind regards,
@@ -2733,7 +2778,18 @@ ${rawText.slice(0, 2000)}`,
       if (project.value) await db.logActivity(projectId, { type: 'contract', summary: `Contract value extracted: ${project.value}` });
     }
 
-    res.json({ project, extracted, briefingPrepared: false, suggestedConsultants: extracted.consultant ? extracted.consultant.split(/[,;&]+/).map(s => s.trim()).filter(Boolean) : [] });
+    res.json({ project, extracted, briefingPrepared: false, suggestedConsultants: (() => {
+      // Only suggest consultants actually named in the proposal
+      const KNOWN = ['Mick Harran','Paul Johnston','Dave Cohen','Ross Mackenzie','Lawrence Phillips','Marina Toailoa','Gavriel Schneider','Pierre Andipatin','Daniel Du Plessis','Gavriel Guriel'];
+      const raw = (extracted.consultant || '') + ' ' + (extracted.consultantEmail || '');
+      const found = KNOWN.filter(name => {
+        const [first, last] = name.toLowerCase().split(' ');
+        return raw.toLowerCase().includes(first) || (last && raw.toLowerCase().includes(last));
+      });
+      // If name from proposal doesn't match our list, include it directly
+      if (found.length === 0 && extracted.consultant) found.push(extracted.consultant.trim());
+      return found;
+    })() });
   } catch (e) {
     if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
     console.error('[Contract] Error:', e.message);
