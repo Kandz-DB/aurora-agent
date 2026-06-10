@@ -777,33 +777,32 @@ async function readConsultantReplies() {
         continue;
       }
 
-      // Tag immediately as seen — prevents re-processing on next poll regardless of what happens below
+      // Tag immediately as seen — prevents re-processing on next poll
       try {
         await axios.patch(
           `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
           { categories: ['Aurora Processed'] },
           { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
         );
-      } catch(tagErr) { /* tag on first seen — best effort */ }
+      } catch(tagErr) {}
 
       // Determine if this is internal R2S or external (client/other)
       const isInternal = fromEmail.toLowerCase().endsWith('@risk2solution.com') ||
                          fromEmail.toLowerCase().endsWith('@presilience.com');
-
-      // Check if email mentions an agreement, contract or proposal with attachment
-      const hasAttachment = msg.hasAttachments || false;
-      const isNewProjectEmail = /agreement|contract|proposal|signed|new client|new project|new engagement/i.test(subject + ' ' + bodyText);
       const isFromDiane = fromEmail.toLowerCase() === 'diane.k@risk2solution.com';
 
-      // Special case: Diane sending an agreement to info@ = new project prompt
-      if (isFromDiane && isNewProjectEmail && hasAttachment) {
+      // ── Special case: Diane forwarding a new agreement/contract ─────────────
+      // Catches: attachment + agreement keywords, OR body mentions a new client/org
+      const hasAttachment = msg.hasAttachments || false;
+      const mentionsNewProject = /agreement|contract|proposal|signed|new client|new project|new engagement/i.test(subject + ' ' + bodyText.slice(0, 500));
+
+      if (isFromDiane && (hasAttachment && mentionsNewProject || bodyText.toLowerCase().includes('see attached') && hasAttachment)) {
+        console.log(`[Poll] Agreement email from Diane detected — prompting to upload to Aurora`);
         await sendEmail('diane.k@risk2solution.com',
-          `[Aurora] New agreement detected — upload to Aurora: ${subject}`,
-          `Aurora noticed you forwarded what appears to be a new client agreement to the info@ inbox.\n\nSubject: ${subject}\n\nTo create a new project in Aurora, please upload the agreement document directly through the Aurora portal:\n${process.env.FRONTEND_URL || 'https://aurora-r2s.azurewebsites.net'}\n\nGo to: Projects → New Project → Upload Contract\n\nAurora will automatically extract the client details, scope, value, and deliverables from the document.\n\nAurora\nR2S Project Management Intelligence`,
+          `[Aurora] New agreement detected — please upload to Aurora`,
+          `Hi Diane,\n\nAurora noticed you sent what appears to be a new client agreement or contract to the info@ inbox.\n\nSubject: ${subject}\n\nTo create a new project in Aurora from this document, please:\n1. Open the Aurora portal\n2. Go to Projects → New Project\n3. Click Upload Contract and attach the agreement PDF\n\nAurora will automatically extract all the client details, project scope, contract value, and deliverables.\n\n${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}\n\nAurora\nR2S Project Management Intelligence`,
           true
         );
-        console.log(`[Poll] New agreement detected from Diane — prompted to upload to Aurora`);
-        // Tag and skip — no project matching needed
         try {
           await axios.patch(
             `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
