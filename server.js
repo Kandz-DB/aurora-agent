@@ -728,7 +728,7 @@ async function readConsultantReplies() {
     for (const folder of folders) {
       try {
         // Fetch recent messages — filter in code to avoid OData type issues
-        const url = `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${folder}/messages?$select=id,subject,from,toRecipients,body,receivedDateTime,sentDateTime,isRead,categories&$top=50&$orderby=receivedDateTime desc`;
+        const url = `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${folder}/messages?$select=id,subject,from,toRecipients,body,receivedDateTime,sentDateTime,isRead,categories,hasAttachments&$top=50&$orderby=receivedDateTime desc`;
         const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 });
         const sinceDate = new Date(since);
         const msgs = (res.data?.value || [])
@@ -776,6 +776,30 @@ async function readConsultantReplies() {
       // Determine if this is internal R2S or external (client/other)
       const isInternal = fromEmail.toLowerCase().endsWith('@risk2solution.com') ||
                          fromEmail.toLowerCase().endsWith('@presilience.com');
+
+      // Check if email mentions an agreement, contract or proposal with attachment
+      const hasAttachment = msg.hasAttachments || false;
+      const isNewProjectEmail = /agreement|contract|proposal|signed|new client|new project|new engagement/i.test(subject + ' ' + bodyText);
+      const isFromDiane = fromEmail.toLowerCase() === 'diane.k@risk2solution.com';
+
+      // Special case: Diane sending an agreement to info@ = new project prompt
+      if (isFromDiane && isNewProjectEmail && hasAttachment) {
+        await sendEmail('diane.k@risk2solution.com',
+          `[Aurora] New agreement detected — upload to Aurora: ${subject}`,
+          `Aurora noticed you forwarded what appears to be a new client agreement to the info@ inbox.\n\nSubject: ${subject}\n\nTo create a new project in Aurora, please upload the agreement document directly through the Aurora portal:\n${process.env.FRONTEND_URL || 'https://aurora-r2s.azurewebsites.net'}\n\nGo to: Projects → New Project → Upload Contract\n\nAurora will automatically extract the client details, scope, value, and deliverables from the document.\n\nAurora\nR2S Project Management Intelligence`,
+          true
+        );
+        console.log(`[Poll] New agreement detected from Diane — prompted to upload to Aurora`);
+        // Tag and skip — no project matching needed
+        try {
+          await axios.patch(
+            `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
+            { isRead: true, categories: ['Aurora Processed'] },
+            { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+          );
+        } catch(e) {}
+        continue;
+      }
 
       // Find ALL matching projects — email may mention multiple
       const bodyLower    = bodyText.toLowerCase();
@@ -2186,16 +2210,19 @@ Sign off as Diane Kruger with full signature.`,
 // Daily batch: 6am AEST (UTC+10) = 8pm UTC previous day
 cron.schedule('0 20 * * *', () => runBatch().catch(console.error), { timezone: 'UTC' });
 
-// Email polling: every hour from 7am to 7pm AEST (9pm to 9am UTC)
-// AEST is UTC+10, so 7am AEST = 9pm UTC previous day, 7pm AEST = 9am UTC
-// Run every hour: 21,22,23,0,1,2,3,4,5,6,7,8,9 UTC = 7am-7pm AEST
-cron.schedule('0 21-23,0-9 * * *', async () => {
-  const now = new Date();
-  const dayOfWeek = now.getDay();
-  const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
-  if (!isWeekday) return; // weekdays only
-  console.log('[Poll] Checking inbox...');
+// Email polling: every hour 7am-7pm AEST weekdays
+// AEST UTC+10: 7am=9pm UTC, 7pm=9am UTC
+cron.schedule('0 21-23,0-9 * * 1-5', async () => {
+  console.log('[Poll] Scheduled hourly check...');
   try { await readConsultantReplies(); } catch(e) { console.error('[Poll] Error:', e.message); }
+}, { timezone: 'UTC' });
+
+// Keepalive ping every 5 minutes — prevents Azure from sleeping the app
+cron.schedule('*/5 * * * *', async () => {
+  try {
+    const PORT = process.env.PORT || 8080;
+    await axios.get(`http://localhost:${PORT}/api/health`, { timeout: 5000 }).catch(() => {});
+  } catch(e) {}
 }, { timezone: 'UTC' });
 
 // ── API Routes ────────────────────────────────────────────────────────────────
