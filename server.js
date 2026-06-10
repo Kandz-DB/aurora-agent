@@ -764,6 +764,19 @@ async function readConsultantReplies() {
 
       console.log(`[Poll] Checking: "${subject}" from ${fromEmail}`);
 
+      // Skip Aurora's own emails — prevents infinite feedback loops
+      if (subject.startsWith('[Aurora]') || fromEmail.toLowerCase() === (process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com').toLowerCase()) {
+        console.log(`[Poll] Skipping — Aurora's own email or self-sent`);
+        try {
+          await axios.patch(
+            `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
+            { isRead: true, categories: ['Aurora Processed'] },
+            { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+          );
+        } catch(e) {}
+        continue;
+      }
+
       // Tag immediately as seen — prevents re-processing on next poll regardless of what happens below
       try {
         await axios.patch(
