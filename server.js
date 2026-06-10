@@ -1702,6 +1702,243 @@ function isCompleted(p) {
   return ['Completed','Terminated','Closed'].includes(p.status);
 }
 
+// ── Weekly executive status report ───────────────────────────────────────────
+async function sendWeeklyExecutiveReport(projects) {
+  const RECIPIENTS = [
+    'dave.c@risk2solution.com',
+    'kandia@risk2solution.com',
+    'diane.k@risk2solution.com',
+  ];
+
+  const standard = projects.filter(p => p.type === 'standard' && (p.phase || 0) < 5);
+  if (!standard.length) return;
+
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+
+  // ── Build project rows ────────────────────────────────────────────────────
+  const phaseColors = ['#6aa3ff','#ff608a','#ffd93d','#a8ff78','#00e8bb','#888'];
+  const statusBadge = (p) => {
+    if (!p.dueDate) return { label:'No date set', color:'#555' };
+    const days = Math.round((new Date(p.dueDate) - now) / (1000*60*60*24));
+    if (p.status === 'On Hold') return { label:'On Hold', color:'#ffd93d' };
+    if (days < 0) return { label:'Overdue', color:'#ff3860' };
+    if (days <= 7) return { label:`Due in ${days}d`, color:'#ff608a' };
+    if (days <= 14) return { label:'At Risk', color:'#ffd93d' };
+    return { label:'On Track', color:'#00e8bb' };
+  };
+
+  // Parse contract value to number
+  const parseVal = (v) => {
+    if (!v) return 0;
+    const m = (v+'').replace(/[$,AUD]/gi,'').match(/[\d.]+/);
+    return m ? parseFloat(m[0]) : 0;
+  };
+
+  // ── Invoice chart data ────────────────────────────────────────────────────
+  const chartProjects = standard.filter(p => parseVal(p.value) > 0).slice(0, 8);
+  const maxVal = Math.max(...chartProjects.map(p => parseVal(p.value)), 1);
+  const chartWidth = 560;
+  const barHeight = 28;
+  const barGap = 10;
+  const chartHeight = chartProjects.length * (barHeight + barGap) + 40;
+  const labelWidth = 120;
+  const barAreaWidth = chartWidth - labelWidth - 60;
+
+  let chartSvg = '';
+  if (chartProjects.length > 0) {
+    chartSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${chartWidth}" height="${chartHeight}" style="font-family:Arial,sans-serif;display:block;margin:0 auto">
+      <!-- Background -->
+      <rect width="${chartWidth}" height="${chartHeight}" fill="#1a1a2e" rx="8"/>
+      <!-- Title -->
+      <text x="${chartWidth/2}" y="20" text-anchor="middle" fill="#aaa" font-size="11">Invoicing per project — total contract value</text>
+      ${chartProjects.map((p, i) => {
+        const y = 35 + i * (barHeight + barGap);
+        const val = parseVal(p.value);
+        const barW = Math.max(2, Math.round((val / maxVal) * barAreaWidth));
+        // Assume ~33% invoiced per payment milestone (3 milestone model)
+        const invoicedPct = p.phase >= 3 ? 0.66 : p.phase >= 1 ? 0.33 : 0;
+        const invoicedW = Math.round(barW * invoicedPct);
+        const name = (p.clientName || '').slice(0, 14);
+        const valStr = '$' + Math.round(val/1000) + 'k';
+        return `
+          <text x="${labelWidth - 4}" y="${y + barHeight/2 + 4}" text-anchor="end" fill="#ccc" font-size="10">${name}</text>
+          <rect x="${labelWidth}" y="${y}" width="${barW}" height="${barHeight}" fill="#2a2a4a" rx="3"/>
+          <rect x="${labelWidth}" y="${y}" width="${invoicedW}" height="${barHeight}" fill="#00e8bb" rx="3" opacity="0.85"/>
+          <text x="${labelWidth + barW + 4}" y="${y + barHeight/2 + 4}" fill="#aaa" font-size="9">${valStr}</text>`;
+      }).join('')}
+      <!-- Legend -->
+      <rect x="${labelWidth}" y="${chartHeight - 14}" width="12" height="10" fill="#00e8bb" rx="2"/>
+      <text x="${labelWidth + 16}" y="${chartHeight - 5}" fill="#aaa" font-size="9">Invoiced (estimated)</text>
+      <rect x="${labelWidth + 130}" y="${chartHeight - 14}" width="12" height="10" fill="#2a2a4a" rx="2"/>
+      <text x="${labelWidth + 146}" y="${chartHeight - 5}" fill="#aaa" font-size="9">Outstanding</text>
+    </svg>`;
+  }
+
+  // ── Build project table rows ──────────────────────────────────────────────
+  const projectRows = standard.map((p, i) => {
+    const phase = PHASES[p.phase || 0];
+    const sb = statusBadge(p);
+    const val = parseVal(p.value);
+    const valStr = val ? '$' + val.toLocaleString('en-AU') : 'TBC';
+    const briefed = p.consultant ? 'Yes' : 'No';
+    const welcomed = p.clientEmail ? 'Pending review' : 'TBC';
+    const dueStr = p.dueDate || 'TBC';
+    const bgColor = i % 2 === 0 ? '#1a1a2e' : '#141428';
+
+    return `<tr style="background:${bgColor}">
+      <td style="padding:8px 10px;border-bottom:1px solid #2a2a4a;color:#e0e0e0;font-size:12px;vertical-align:top">
+        <div style="font-weight:600;color:#fff">${p.clientName}</div>
+        <div style="color:#aaa;font-size:11px">${p.projectName || ''}</div>
+      </td>
+      <td style="padding:8px 10px;border-bottom:1px solid #2a2a4a;vertical-align:top">
+        <span style="background:#2a2a4a;color:#6aa3ff;padding:2px 8px;border-radius:10px;font-size:11px;white-space:nowrap">${phase}</span>
+      </td>
+      <td style="padding:8px 10px;border-bottom:1px solid #2a2a4a;vertical-align:top">
+        <span style="background:${sb.color}22;color:${sb.color};padding:2px 8px;border-radius:10px;font-size:11px;border:1px solid ${sb.color}44;white-space:nowrap">${sb.label}</span>
+      </td>
+      <td style="padding:8px 10px;border-bottom:1px solid #2a2a4a;color:#aaa;font-size:11px;vertical-align:top">${valStr}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #2a2a4a;color:#aaa;font-size:11px;vertical-align:top">${dueStr}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #2a2a4a;vertical-align:top">
+        <div style="color:#ccc;font-size:11px">${p.consultant || '<span style="color:#ff608a">Not assigned</span>'}</div>
+        <div style="font-size:10px;color:${briefed==='Yes'?'#00e8bb':'#ff608a'}">${briefed === 'Yes' ? '✓ Briefed' : '✗ Not briefed'}</div>
+      </td>
+      <td style="padding:8px 10px;border-bottom:1px solid #2a2a4a;color:#aaa;font-size:11px;vertical-align:top">
+        ${p.clientContact || 'TBC'}${p.clientEmail ? '<br><span style="font-size:10px;color:#6aa3ff">' + p.clientEmail + '</span>' : ''}
+      </td>
+    </tr>`;
+  }).join('');
+
+  // ── Summary stats ─────────────────────────────────────────────────────────
+  const totalValue   = standard.reduce((s, p) => s + parseVal(p.value), 0);
+  const atRisk       = standard.filter(p => { const d = p.dueDate ? Math.round((new Date(p.dueDate)-now)/(1000*60*60*24)) : 99; return d <= 14 && d >= 0; }).length;
+  const noConsultant = standard.filter(p => !p.consultant).length;
+  const onHold       = standard.filter(p => p.status === 'On Hold').length;
+
+  // ── Generate AI narrative for the week ───────────────────────────────────
+  let narrative = '';
+  try {
+    const contextSummary = standard.map(p => {
+      const days = p.dueDate ? Math.round((new Date(p.dueDate)-now)/(1000*60*60*24)) : null;
+      return `${p.clientName} (${PHASES[p.phase||0]}, ${days !== null ? days + ' days until due' : 'no due date'}, consultant: ${p.consultant || 'unassigned'})`;
+    }).join('; ');
+
+    narrative = await aurora('status_report',
+      `Write a concise executive summary paragraph (4-6 sentences) for the R2S weekly project status report dated ${dateStr}.
+      
+Active projects: ${standard.length}
+Total portfolio value: $${Math.round(totalValue).toLocaleString('en-AU')}
+Projects at risk or due soon: ${atRisk}
+Projects without consultant: ${noConsultant}
+On hold: ${onHold}
+
+Project summaries: ${contextSummary}
+
+Write as if briefing the CEO, COO and PM. Highlight what needs attention this week. Plain text, no asterisks, no markdown, no bullet points in this paragraph — just clear professional prose.`,
+      null
+    );
+  } catch(e) { narrative = `Weekly project status report for the week of ${dateStr}. ${standard.length} active projects with a total portfolio value of $${Math.round(totalValue).toLocaleString('en-AU')}.`; }
+
+  // ── Build full HTML email ─────────────────────────────────────────────────
+  const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"/></head>
+<body style="margin:0;padding:0;background:#0f0f1a;font-family:Arial,sans-serif">
+<div style="max-width:700px;margin:0 auto;background:#0f0f1a;padding:24px">
+
+  <!-- Header -->
+  <div style="background:linear-gradient(135deg,#1a1a3e 0%,#0d1b2a 100%);border-radius:12px;padding:24px;margin-bottom:20px;border:1px solid #2a2a5a">
+    <div style="font-size:11px;color:#6aa3ff;text-transform:uppercase;letter-spacing:2px;margin-bottom:6px">Risk 2 Solution Group</div>
+    <div style="font-size:22px;font-weight:700;color:#fff;margin-bottom:4px">Weekly Project Status Report</div>
+    <div style="font-size:13px;color:#aaa">${dateStr} · Generated by Aurora</div>
+  </div>
+
+  <!-- Stats row -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px">
+    ${[
+      { label:'Active projects', value: standard.length, color:'#6aa3ff' },
+      { label:'Portfolio value', value: '$'+Math.round(totalValue/1000)+'k', color:'#00e8bb' },
+      { label:'At risk / due soon', value: atRisk, color: atRisk > 0 ? '#ffd93d' : '#00e8bb' },
+      { label:'Needs attention', value: noConsultant + onHold, color: (noConsultant+onHold) > 0 ? '#ff608a' : '#00e8bb' },
+    ].map(s => `<div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:12px;text-align:center">
+      <div style="font-size:22px;font-weight:700;color:${s.color};font-family:Georgia,serif">${s.value}</div>
+      <div style="font-size:10px;color:#888;margin-top:3px;text-transform:uppercase;letter-spacing:.5px">${s.label}</div>
+    </div>`).join('')}
+  </div>
+
+  <!-- Narrative -->
+  <div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:16px;margin-bottom:20px;color:#ccc;font-size:13px;line-height:1.7">
+    <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Executive Summary</div>
+    ${narrative}
+  </div>
+
+  <!-- Invoice chart -->
+  ${chartSvg ? `<div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:16px;margin-bottom:20px">
+    <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Invoicing Overview</div>
+    ${chartSvg}
+    <div style="font-size:10px;color:#666;margin-top:8px;text-align:center">Teal = estimated invoiced to date based on phase · Grey = outstanding</div>
+  </div>` : ''}
+
+  <!-- Project table -->
+  <div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;overflow:hidden;margin-bottom:20px">
+    <div style="padding:12px 16px;border-bottom:1px solid #2a2a4a">
+      <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:1px">Active Projects</div>
+    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+      <thead>
+        <tr style="background:#141428">
+          <th style="padding:8px 10px;text-align:left;font-size:10px;color:#666;font-weight:500;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #2a2a4a">Client / Project</th>
+          <th style="padding:8px 10px;text-align:left;font-size:10px;color:#666;font-weight:500;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #2a2a4a">Phase</th>
+          <th style="padding:8px 10px;text-align:left;font-size:10px;color:#666;font-weight:500;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #2a2a4a">Status</th>
+          <th style="padding:8px 10px;text-align:left;font-size:10px;color:#666;font-weight:500;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #2a2a4a">Value</th>
+          <th style="padding:8px 10px;text-align:left;font-size:10px;color:#666;font-weight:500;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #2a2a4a">Due date</th>
+          <th style="padding:8px 10px;text-align:left;font-size:10px;color:#666;font-weight:500;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #2a2a4a">Consultant</th>
+          <th style="padding:8px 10px;text-align:left;font-size:10px;color:#666;font-weight:500;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #2a2a4a">Client contact</th>
+        </tr>
+      </thead>
+      <tbody>${projectRows}</tbody>
+    </table>
+  </div>
+
+  <!-- This week section -->
+  <div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:16px;margin-bottom:20px">
+    <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Actions Required This Week</div>
+    ${standard.filter(p => {
+      const days = p.dueDate ? Math.round((new Date(p.dueDate)-now)/(1000*60*60*24)) : 99;
+      return !p.consultant || days <= 14 || p.status === 'On Hold';
+    }).map(p => {
+      const items = [];
+      if (!p.consultant) items.push(`Assign consultant/trainer to <strong>${p.clientName}</strong>`);
+      const days = p.dueDate ? Math.round((new Date(p.dueDate)-now)/(1000*60*60*24)) : 99;
+      if (days <= 7 && days >= 0) items.push(`<strong>${p.clientName}</strong> due in ${days} day${days!==1?'s':''} — review deliverables`);
+      else if (days <= 14 && days >= 0) items.push(`<strong>${p.clientName}</strong> due in ${days} days — prepare for close-out`);
+      if (p.status === 'On Hold') items.push(`<strong>${p.clientName}</strong> is On Hold — review with team`);
+      return items;
+    }).flat().map(item => `<div style="padding:5px 0;color:#ccc;font-size:12px;border-bottom:1px solid #2a2a4a22">→ ${item}</div>`).join('') || '<div style="color:#00e8bb;font-size:12px">No urgent actions — all projects on track</div>'}
+  </div>
+
+  <!-- Footer -->
+  <div style="text-align:center;color:#444;font-size:11px;padding-top:10px">
+    Aurora · R2S Project Management Intelligence · Confidential — internal use only<br>
+    ${process.env.FRONTEND_URL ? '<a href="' + process.env.FRONTEND_URL + '" style="color:#6aa3ff">Open Aurora portal</a>' : ''}
+  </div>
+
+</div>
+</body>
+</html>`;
+
+  // Send to all recipients
+  for (const recipient of RECIPIENTS) {
+    try {
+      await sendEmail(recipient, `R2S Weekly Project Status — ${now.toLocaleDateString('en-AU', { day:'numeric', month:'short' })}`, html, false, [], true);
+      console.log(`[WeeklyReport] Sent to ${recipient}`);
+    } catch(e) {
+      console.error(`[WeeklyReport] Failed to send to ${recipient}:`, e.message);
+    }
+  }
+  console.log('[WeeklyReport] Weekly executive report complete');
+}
+
 // ── Daily batch (6am AEST = 8pm UTC) ─────────────────────────────────────────
 async function runBatch() {
   const now = new Date();
@@ -1762,7 +1999,10 @@ R2S Project Management Intelligence`,
 
   // ── 5. Weekly actions (Mondays only) ─────────────────────────────────────
   if (isMonday) {
-    // 5a. Weekly client status email drafts
+    // 5a. Weekly executive report to Dave, Kandia, Diane
+    try { await sendWeeklyExecutiveReport(standard); } catch(e) { console.error('[WeeklyReport]', e.message); }
+
+    // 5b. Weekly client status email drafts
     for (const p of standard) {
       if (['Completed','Terminated','On Hold'].includes(p.status)) continue;
       try {
