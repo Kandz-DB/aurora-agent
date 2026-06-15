@@ -143,9 +143,11 @@ async function getOutlookToken() {
   }
 }
 
-async function sendEmail(to, subject, body, isInternal = false, cc = []) {
+async function sendEmail(to, subject, body, isInternal = false, cc = [], isHtml = false) {
   const token = await getOutlookToken();
   const fromMailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+  // Auto-detect HTML if not explicitly set
+  const htmlContent = isHtml || body.trimStart().startsWith('<!DOCTYPE') || body.trimStart().startsWith('<html') || body.trimStart().startsWith('<div');
 
   if (token) {
     try {
@@ -153,7 +155,7 @@ async function sendEmail(to, subject, body, isInternal = false, cc = []) {
       const ccArray = Array.isArray(cc) ? cc : (cc ? [cc] : []);
       const message = {
         subject,
-        body: { contentType: 'Text', content: body },
+        body: { contentType: htmlContent ? 'HTML' : 'Text', content: body },
         toRecipients: toArray.map(addr => ({ emailAddress: { address: addr } })),
       };
       if (ccArray.length > 0) {
