@@ -873,6 +873,7 @@ function openProject(id) {
       <div class="proj-tab on" onclick="switchProjTab(this,'tab-overview-${p.id}')">Overview</div>
       <div class="proj-tab" onclick="switchProjTab(this,'tab-deliverables-${p.id}');loadDeliverables('${p.id}')">Deliverables</div>
       <div class="proj-tab" onclick="switchProjTab(this,'tab-risks-${p.id}');loadRisks('${p.id}')">Risk Register</div>
+      <div class="proj-tab" onclick="switchProjTab(this,'tab-invoicing-${p.id}');loadProjectInvoices('${p.id}')">Invoicing</div>
       <div class="proj-tab" onclick="switchProjTab(this,'tab-activity-${p.id}');loadActivity('${p.id}')">Activity log</div>
     </div>
 
@@ -892,6 +893,11 @@ function openProject(id) {
     <!-- Risk register tab -->
     <div id="tab-risks-${p.id}" class="proj-tab-content">
       <div id="risk-content-${p.id}"><div style="color:var(--text3);font-size:12px">Loading risk register…</div></div>
+    </div>
+
+    <!-- Invoicing tab -->
+    <div id="tab-invoicing-${p.id}" class="proj-tab-content">
+      <div id="invoicing-content-${p.id}"><div style="color:var(--text3);font-size:12px">Loading invoices…</div></div>
     </div>
 
     <!-- Activity log tab -->
@@ -1759,8 +1765,8 @@ async function loadDeliverables(projectId) {
       const cls = delStatusClass(d.status);
       html += `<div class="del-tile ${cls}">
         <div class="del-num">Deliverable ${d.number}</div>
-        <div class="del-name">${d.name}</div>
-        ${d.dueDate ? `<div class="del-due">📅 ${d.dueDate}</div>` : ''}
+        <div class="del-name" style="cursor:pointer" onclick="editDeliverable('${projectId}','${d.id}','name','${d.name.replace(/'/g,"\'")}')" title="Click to edit">${d.name} <span style="color:var(--text3);font-size:10px">✎</span></div>
+        ${d.dueDate ? `<div class="del-due" style="cursor:pointer" onclick="editDeliverable('${projectId}','${d.id}','dueDate','${d.dueDate}')" title="Click to edit due date">📅 ${d.dueDate} <span style="color:var(--text3);font-size:9px">✎</span></div>` : `<div class="del-due" style="cursor:pointer;color:var(--text3)" onclick="editDeliverable('${projectId}','${d.id}','dueDate','')" title="Add due date">+ Add due date</div>`}
         ${d.calendarEvent ? `<div style="font-size:10px;color:var(--teal);margin-bottom:4px">📆 ${d.calendarEvent}</div>` : ''}
         <span class="del-badge" style="${delBadgeStyle(d.status)}">${d.status}</span>
         ${d.notes ? `<div style="font-size:10px;color:var(--text3);margin-top:6px">${d.notes}</div>` : ''}
@@ -2105,6 +2111,126 @@ async function forceUploadContract() {
   fd.append('file', file);
   fd.append('forceCreate', 'true');
   await uploadContract(file, true);
+}
+
+// ── Editable project fields ──────────────────────────────────────────────────
+async function editField(projectId, field, linkEl) {
+  const displayEl = document.getElementById('field-' + field + '-' + projectId);
+  if (!displayEl) return;
+  const current = displayEl.textContent.trim().replace('—','');
+  const input = document.createElement('input');
+  input.value = current;
+  input.style.cssText = 'width:100%;font-size:12px;padding:4px 6px;border-radius:5px;background:var(--card2);border:1px solid var(--teal);color:var(--text)';
+  displayEl.innerHTML = '';
+  displayEl.appendChild(input);
+  input.focus();
+  const save = async () => {
+    const newVal = input.value.trim();
+    displayEl.textContent = newVal || '—';
+    await api('/api/projects/' + projectId, { method: 'PUT', body: JSON.stringify({ [field]: newVal }) });
+    const p = projects.find(x => x.id === projectId);
+    if (p) p[field] = newVal;
+  };
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { displayEl.textContent = current || '—'; } });
+}
+
+// ── Project invoicing tracker ─────────────────────────────────────────────────
+async function loadProjectInvoices(projectId) {
+  const el = document.getElementById('invoicing-content-' + projectId);
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading…</div>';
+  const p = projects.find(x => x.id === projectId);
+  const totalVal = p ? parseValue(p.value) : 0;
+
+  let invoices = [];
+  try {
+    const data = await api('/api/projects/' + projectId + '/invoices');
+    invoices = data.invoices || [];
+  } catch(e) {}
+
+  const totalInvoiced = invoices.reduce((s,i) => s + parseFloat(i.amount||0), 0);
+  const totalPaid     = invoices.filter(i=>i.paid).reduce((s,i) => s + parseFloat(i.amount||0), 0);
+  const outstanding   = totalVal - totalInvoiced;
+
+  let html = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
+    <div class="card" style="padding:10px;text-align:center">
+      <div style="font-size:16px;font-weight:600;font-family:var(--fs);color:var(--teal)">$${Math.round(totalInvoiced).toLocaleString('en-AU')}</div>
+      <div style="font-size:10px;color:var(--text3);margin-top:2px">Invoiced</div>
+    </div>
+    <div class="card" style="padding:10px;text-align:center">
+      <div style="font-size:16px;font-weight:600;font-family:var(--fs);color:var(--blue)">$${Math.round(totalPaid).toLocaleString('en-AU')}</div>
+      <div style="font-size:10px;color:var(--text3);margin-top:2px">Paid</div>
+    </div>
+    <div class="card" style="padding:10px;text-align:center">
+      <div style="font-size:16px;font-weight:600;font-family:var(--fs);color:${outstanding>0?'var(--amber)':'var(--teal)'}">$${Math.round(Math.max(0,outstanding)).toLocaleString('en-AU')}</div>
+      <div style="font-size:10px;color:var(--text3);margin-top:2px">Outstanding</div>
+    </div>
+  </div>`;
+
+  if (invoices.length) {
+    invoices.forEach(inv => {
+      html += `<div class="card" style="margin-bottom:8px;padding:10px 12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <div style="font-size:13px;font-weight:500;color:var(--text)">Invoice ${inv.invoiceNumber||'#'}</div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:13px;font-weight:600;color:var(--teal)">$${parseFloat(inv.amount||0).toLocaleString('en-AU')}</span>
+            ${inv.paid
+              ? `<span class="badge bt">✓ Paid ${inv.paidAt?new Date(inv.paidAt).toLocaleDateString('en-AU',{day:'numeric',month:'short'}):''}</span>`
+              : `<button class="btn btn-t btn-sm" onclick="markInvoicePaid('${projectId}','${inv.id}',this)">Mark paid</button>`}
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--text3)">Sent: ${inv.sentDate||inv.createdAt?.slice(0,10)||'—'} ${inv.source==='email'?'· Detected from email':''}</div>
+      </div>`;
+    });
+  } else {
+    html += '<div style="color:var(--text3);font-size:12px;margin-bottom:12px">No invoices recorded yet. Aurora will detect invoices from emails automatically, or add one manually below.</div>';
+  }
+
+  // Add invoice form
+  html += `<div class="card" style="padding:12px">
+    <div style="font-size:11px;font-weight:500;color:var(--text2);margin-bottom:10px">Record an invoice</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <div><label style="font-size:10px;color:var(--text3);display:block;margin-bottom:3px">Invoice number</label>
+        <input id="inv-num-${projectId}" placeholder="e.g. INV-001" style="width:100%;font-size:12px"/></div>
+      <div><label style="font-size:10px;color:var(--text3);display:block;margin-bottom:3px">Amount (excl GST)</label>
+        <input id="inv-amt-${projectId}" placeholder="e.g. 7700" type="number" style="width:100%;font-size:12px"/></div>
+    </div>
+    <div style="margin-bottom:8px"><label style="font-size:10px;color:var(--text3);display:block;margin-bottom:3px">Date sent</label>
+      <input id="inv-date-${projectId}" type="date" value="${new Date().toISOString().slice(0,10)}" style="font-size:12px"/></div>
+    <button class="btn btn-p btn-sm" onclick="addInvoice('${projectId}')">+ Add invoice</button>
+  </div>`;
+
+  el.innerHTML = html;
+}
+
+async function markInvoicePaid(projectId, invId, btn) {
+  btn.textContent = '…';
+  btn.disabled = true;
+  await api('/api/projects/' + projectId + '/invoices/' + invId, { method: 'PUT', body: JSON.stringify({ paid: true }) });
+  await loadProjectInvoices(projectId);
+}
+
+async function addInvoice(projectId) {
+  const num  = document.getElementById('inv-num-' + projectId)?.value?.trim();
+  const amt  = document.getElementById('inv-amt-' + projectId)?.value?.trim();
+  const date = document.getElementById('inv-date-' + projectId)?.value;
+  if (!num || !amt) { alert('Please enter invoice number and amount'); return; }
+  await api('/api/projects/' + projectId + '/invoices', {
+    method: 'POST',
+    body: JSON.stringify({ invoiceNumber: num, amount: amt, sentDate: date, source: 'manual' })
+  });
+  await loadProjectInvoices(projectId);
+}
+
+// ── Editable deliverable names ────────────────────────────────────────────────
+async function editDeliverable(projectId, delId, field, currentVal) {
+  const newVal = prompt(`Edit ${field}:`, currentVal || '');
+  if (newVal === null) return; // cancelled
+  await api('/api/projects/' + projectId + '/deliverables/' + delId, {
+    method: 'PUT', body: JSON.stringify({ [field]: newVal })
+  });
+  await loadDeliverables(projectId);
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
