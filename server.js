@@ -823,18 +823,32 @@ async function readConsultantReplies() {
         continue;
       }
 
-      // Find ALL matching projects — email may mention multiple
+      // Find ALL matching projects — check subject, body text, AND email addresses/domains in thread
       const bodyLower    = bodyText.toLowerCase();
       const subjectLower = subject.toLowerCase();
-      const matchedProjects = projects.filter(p =>
-        p.type === 'standard' && p.clientName && (
-          subjectLower.includes(p.clientName.toLowerCase()) ||
-          subjectLower.includes((p.projectName || '').toLowerCase().slice(0, 12)) ||
-          bodyLower.includes(p.clientName.toLowerCase()) ||
-          bodyLower.includes((p.projectName || '').toLowerCase().slice(0, 12)) ||
-          (p.clientEmail && fromEmail.toLowerCase() === p.clientEmail.toLowerCase())
-        )
-      );
+      const fullText     = subjectLower + ' ' + bodyLower;
+
+      // Extract all email addresses from the body (catches forwarded thread recipients)
+      const emailsInBody = [...bodyText.matchAll(/[\w.+-]+@[\w-]+\.[\w.]+/g)].map(m => m[0].toLowerCase());
+      const domainsInBody = [...new Set(emailsInBody.map(e => e.split('@')[1]).filter(Boolean))];
+
+      const matchedProjects = projects.filter(p => {
+        if (p.type !== 'standard' || !p.clientName) return false;
+        const clientNameLower = p.clientName.toLowerCase();
+        const projectNameLower = (p.projectName || '').toLowerCase();
+        const clientEmailLower = (p.clientEmail || '').toLowerCase();
+        const clientDomain = clientEmailLower.includes('@') ? clientEmailLower.split('@')[1] : '';
+
+        // Match by client name in full text
+        if (fullText.includes(clientNameLower)) return true;
+        // Match by project name in full text
+        if (projectNameLower.length > 4 && fullText.includes(projectNameLower.slice(0,15))) return true;
+        // Match by client email domain appearing in body (catches forwarded threads)
+        if (clientDomain && domainsInBody.includes(clientDomain)) return true;
+        // Match by exact client email in body
+        if (clientEmailLower && emailsInBody.includes(clientEmailLower)) return true;
+        return false;
+      });
 
       console.log(`[Poll] Project matches: ${matchedProjects.length > 0 ? matchedProjects.map(p => p.clientName).join(', ') : 'NONE'}  Internal: ${isInternal}`);
 
@@ -1000,37 +1014,35 @@ Return this exact JSON (no other text):
         }
 
         // ── 4. Invoice trigger ────────────────────────────────────────────────
-        if (parsed.invoiceTriggered && matchedProject.clientEmail) {
+        if (parsed.invoiceTriggered) {
+          actions.push(`Invoice milestone reached: ${parsed.invoiceNote}`);
+          await sendEmail('diane.k@risk2solution.com',
+            `[Aurora] Invoice milestone: ${matchedProject.clientName}`,
+            `Aurora detected an invoice milestone on the ${matchedProject.projectName || matchedProject.clientName} project.\n\nMilestone: ${parsed.invoiceNote}\n\nPlease review the invoicing status in Aurora and issue the relevant invoice to the client.\n\n${process.env.FRONTEND_URL || ''}\n\nAurora\nR2S Project Management Intelligence`,
+            true
+          );
+        }
+
+        // ── 4b. Auto-detect Xero/invoice emails and record them ──────────────────
+        const invNumMatch = bodyText.match(/(?:invoice\s*(?:number|no\.?|#:?|#)\s*)([A-Z]{0,5}-?\d{3,})/i) ||
+                            bodyText.match(/\b(INV-\d+)\b/i);
+        const invAmtMatch = bodyText.match(/\$([\d,]+(?:\.\d{2})?)\s*(?:AUD)?/i) ||
+                            bodyText.match(/([\d,]+(?:\.\d{2})?)\s*AUD\b/i);
+        if (invNumMatch && invAmtMatch) {
           try {
-            const invoiceBody = await aurora('invoice_reminder',
-              `Draft a professional invoice reminder email from R2S to ${matchedProject.clientContact || 'the client'} at ${matchedProject.clientName}.
-
-An invoice milestone has been reached: ${parsed.invoiceNote}
-
-Project: ${matchedProject.projectName || matchedProject.clientName}
-Contract value: ${matchedProject.value || 'As per contract'}
-Invoicing terms: ${matchedProject.invoicingNotes || 'As per contract'}
-
-Write a brief, professional email notifying them that an invoice will be issued. Plain text, no asterisks. Sign off as Diane Kruger.`,
-              null
-            );
-            const draft = {
-              id: `d_${Date.now()}_inv`,
-              projectId: matchedProject.id,
-              clientName: matchedProject.clientName,
-              projectName: matchedProject.projectName,
-              type: 'invoice_reminder',
-              urgency: 'routine',
-              toName: matchedProject.clientContact,
-              toEmail: matchedProject.clientEmail,
-              subject: `Invoice — ${matchedProject.projectName || matchedProject.clientName}`,
-              body: invoiceBody,
-              source: 'auto',
-            };
-            await db.saveDraft(draft);
-            await saveDraftEmail(draft);
-            actions.push(`Invoice email drafted for Diane to review`);
-          } catch(invErr) { console.error('[Invoice]', invErr.message); }
+            const invoiceNum = invNumMatch[1].toUpperCase();
+            const amount     = invAmtMatch[1].replace(/,/g,'');
+            const key        = `invoices_${matchedProject.id}.json`;
+            const existing   = await (async () => { try { return await db.read(key,[]); } catch { return []; } })();
+            if (!existing.find(i => i.invoiceNumber === invoiceNum)) {
+              const invoice = { id:`inv_${Date.now()}`, invoiceNumber:invoiceNum, amount, sentDate:new Date().toISOString().slice(0,10), source:'email', paid:false, createdAt:new Date().toISOString() };
+              existing.push(invoice);
+              await db.write(key, existing);
+              actions.push(`Invoice ${invoiceNum} for $${parseFloat(amount).toLocaleString('en-AU')} detected and recorded`);
+              await db.logActivity(matchedProject.id, { type:'contract', summary:`Invoice ${invoiceNum} detected — $${parseFloat(amount).toLocaleString('en-AU')} sent to client` });
+              console.log(`[Invoice] Auto-recorded: ${invoiceNum} $${amount} for ${matchedProject.clientName}`);
+            }
+          } catch(invErr) { console.error('[Invoice detect]', invErr.message); }
         }
 
         // ── 5. Kick-off scheduling ────────────────────────────────────────────
@@ -3094,6 +3106,44 @@ app.put('/api/projects/:id/risks/:riskId', express.json(), async (req, res) => {
 
 // Also generate and save risk register when report is downloaded
 // (handled by hooking into the reports endpoint — see reports endpoint update below)
+
+// ── Invoice tracking routes ──────────────────────────────────────────────────
+app.get('/api/projects/:id/invoices', async (req, res) => {
+  try {
+    const data = await db.read ? db.read(`invoices_${req.params.id}.json`, []) : JSON.parse(require('fs').readFileSync(require('path').join(db.DATA, `invoices_${req.params.id}.json`), 'utf8') || '[]');
+    res.json({ invoices: data });
+  } catch (e) { res.json({ invoices: [] }); }
+});
+
+app.post('/api/projects/:id/invoices', express.json(), async (req, res) => {
+  try {
+    const key = `invoices_${req.params.id}.json`;
+    const existing = await (async () => { try { return await db.read(key, []); } catch { return []; } })();
+    const invoice = { id: `inv_${Date.now()}`, ...req.body, createdAt: new Date().toISOString(), paid: false };
+    existing.push(invoice);
+    await db.write(key, existing);
+    // Log activity
+    await db.logActivity(req.params.id, { type: 'contract', summary: `Invoice ${invoice.invoiceNumber || ''} sent to client — $${invoice.amount || '0'}` });
+    res.json({ invoice });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/projects/:id/invoices/:invId', express.json(), async (req, res) => {
+  try {
+    const key = `invoices_${req.params.id}.json`;
+    const invoices = await (async () => { try { return await db.read(key, []); } catch { return []; } })();
+    const idx = invoices.findIndex(i => i.id === req.params.invId);
+    if (idx >= 0) {
+      Object.assign(invoices[idx], req.body);
+      if (req.body.paid) {
+        invoices[idx].paidAt = new Date().toISOString();
+        await db.logActivity(req.params.id, { type: 'contract', summary: `Invoice ${invoices[idx].invoiceNumber || ''} marked as paid — $${invoices[idx].amount || '0'}` });
+      }
+      await db.write(key, invoices);
+    }
+    res.json({ invoice: invoices[idx] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // ── Deliverables Tracker routes ───────────────────────────────────────────────
 app.get('/api/projects/:id/deliverables', async (req, res) => {
