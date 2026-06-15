@@ -820,13 +820,15 @@ function openProject(id) {
       </div>
       <!-- Contact -->
       <div class="info-item">
-        <div class="info-label">Client contact</div>
-        <div class="info-val" style="font-size:12px">${p.clientContact||'—'}${p.clientEmail?`<div style="font-size:11px;color:var(--text3);margin-top:2px">${p.clientEmail}</div>`:''}</div>
+        <div class="info-label">Client contact <span style="color:var(--teal);font-size:10px;cursor:pointer;margin-left:4px" onclick="editField('${p.id}','clientContact',this)">✎</span></div>
+        <div class="info-val" id="field-clientContact-${p.id}" style="font-size:12px">${p.clientContact||'—'}</div>
+        <div class="info-label" style="margin-top:6px">Client email <span style="color:var(--teal);font-size:10px;cursor:pointer;margin-left:4px" onclick="editField('${p.id}','clientEmail',this)">✎</span></div>
+        <div class="info-val" id="field-clientEmail-${p.id}" style="font-size:11px;color:var(--text3)">${p.clientEmail||'—'}</div>
       </div>
       <!-- Phone -->
       <div class="info-item">
-        <div class="info-label">Client phone</div>
-        <div class="info-val" style="font-size:12px">${p.clientPhone||'—'}</div>
+        <div class="info-label">Client phone <span style="color:var(--teal);font-size:10px;cursor:pointer;margin-left:4px" onclick="editField('${p.id}','clientPhone',this)">✎</span></div>
+        <div class="info-val" id="field-clientPhone-${p.id}" style="font-size:12px">${p.clientPhone||'—'}</div>
       </div>
       <!-- Consultant multi-select -->
       <div class="info-item" style="grid-column:1/-1">
@@ -1769,7 +1771,9 @@ async function loadDeliverables(projectId) {
         ${d.dueDate ? `<div class="del-due" style="cursor:pointer" onclick="editDeliverable('${projectId}','${d.id}','dueDate','${d.dueDate}')" title="Click to edit due date">📅 ${d.dueDate} <span style="color:var(--text3);font-size:9px">✎</span></div>` : `<div class="del-due" style="cursor:pointer;color:var(--text3)" onclick="editDeliverable('${projectId}','${d.id}','dueDate','')" title="Add due date">+ Add due date</div>`}
         ${d.calendarEvent ? `<div style="font-size:10px;color:var(--teal);margin-bottom:4px">📆 ${d.calendarEvent}</div>` : ''}
         <span class="del-badge" style="${delBadgeStyle(d.status)}">${d.status}</span>
-        ${d.notes ? `<div style="font-size:10px;color:var(--text3);margin-top:6px">${d.notes}</div>` : ''}
+        ${d.notes
+          ? `<div style="font-size:10px;color:var(--text3);margin-top:6px;cursor:pointer" onclick="editDeliverable('${projectId}','${d.id}','notes','${(d.notes||'').replace(/'/g,"\\'").replace(/\n/g,' ')}')" title="Click to edit">${d.notes} <span style="color:var(--teal)">✎</span></div>`
+          : `<div style="font-size:10px;color:var(--text3);margin-top:6px;cursor:pointer" onclick="editDeliverable('${projectId}','${d.id}','notes','')" title="Add notes">+ Add notes ✎</div>`}
         <div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap">
           ${['Complete','In Progress','Outstanding','Overdue'].map(s =>
             `<button class="btn btn-g" style="font-size:9px;padding:2px 6px;${d.status===s?'background:var(--teal);color:#07090f':''}" onclick="setDelStatus('${projectId}','${d.id}','${s}',this)">${s}</button>`
