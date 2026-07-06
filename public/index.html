@@ -244,6 +244,7 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <button class="btn btn-b btn-sm" onclick="pollNow(this)" style="font-size:11px">▶ Poll inbox now</button>
+    <button class="btn btn-p btn-sm" onclick="sendReportNow(this)" style="font-size:11px" title="Send daily status report to Dave, Kandia and Diane">📊 Send report now</button>
     <button class="btn btn-g btn-sm" onclick="downloadBackup()" style="font-size:11px" title="Download all Aurora data as a backup file">⬇ Backup data</button>
   </div>
   <div class="pills">
@@ -2059,6 +2060,21 @@ async function downloadBackup() {
   a.download = 'aurora-backup-' + new Date().toISOString().slice(0,10) + '.json';
   a.click();
   URL.revokeObjectURL(url);
+}
+
+async function sendReportNow(btn) {
+  const orig = btn.textContent;
+  btn.textContent = '⟳ Sending…';
+  btn.disabled = true;
+  try {
+    await api('/api/report/send', { method: 'POST' });
+    btn.textContent = '✓ Report sent';
+    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 4000);
+  } catch(e) {
+    btn.textContent = 'Error — try again';
+    btn.disabled = false;
+    setTimeout(() => { btn.textContent = orig; }, 3000);
+  }
 }
 
 async function pollNow(btn) {
