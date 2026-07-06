@@ -1003,17 +1003,24 @@ async function removeConsultant(id, name) {
 }
 
 async function deleteProject(id, name, btn) {
-  if (!confirm(`Are you sure you want to delete the project for "${name}"?\n\nThis cannot be undone. All project data, deliverables, risks and activity logs will be permanently removed.`)) return;
+  const confirmed = window.confirm(`Delete project for "${name}"?\n\nThis cannot be undone.`);
+  if (!confirmed) return;
+  const origText = btn.textContent;
   btn.textContent = 'Deleting…';
   btn.disabled = true;
   try {
-    await api('/api/projects/' + id, { method: 'DELETE' });
+    const token = sessionStorage.getItem('aurora_token') || '';
+    const res = await fetch('/api/projects/' + id, {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + token },
+    });
+    if (!res.ok) throw new Error('Delete failed: ' + res.status);
     closeModal();
     projects = projects.filter(p => p.id !== id);
     renderProjects();
     loadSuggestions();
   } catch(e) {
-    btn.textContent = '🗑 Delete project';
+    btn.textContent = origText;
     btn.disabled = false;
     alert('Error deleting project: ' + e.message);
   }
