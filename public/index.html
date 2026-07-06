@@ -506,7 +506,7 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
     <div class="modal-hdr">
       <div><div class="modal-title" id="modal-title"></div><div class="modal-sub" id="modal-sub"></div></div>
       <button class="modal-close" onclick="closeModal()">✕</button>
-      <button onclick="deleteProject('${p.id}','${p.clientName.replace(/'/g,"\\'")}',this)" style="background:none;border:1px solid var(--rose);color:var(--rose);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer;margin-right:8px" title="Delete this project">🗑 Delete project</button>
+      <button id="delete-btn-${p.id}" onclick="deleteProject('${p.id}',this)" data-name="${p.clientName}" style="background:none;border:1px solid var(--rose);color:var(--rose);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer;margin-right:8px" title="Delete this project">🗑 Delete project</button>
     </div>
     <div id="modal-body"></div>
   </div>
@@ -1002,7 +1002,8 @@ async function removeConsultant(id, name) {
   openProject(id); // refresh modal
 }
 
-async function deleteProject(id, name, btn) {
+async function deleteProject(id, btn) {
+  const name = btn.getAttribute('data-name') || 'this project';
   const confirmed = window.confirm(`Delete project for "${name}"?\n\nThis cannot be undone.`);
   if (!confirmed) return;
   const origText = btn.textContent;
@@ -1014,7 +1015,10 @@ async function deleteProject(id, name, btn) {
       method: 'DELETE',
       headers: { 'Authorization': 'Bearer ' + token },
     });
-    if (!res.ok) throw new Error('Delete failed: ' + res.status);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Delete failed: ' + res.status);
+    }
     closeModal();
     projects = projects.filter(p => p.id !== id);
     renderProjects();
@@ -1022,7 +1026,7 @@ async function deleteProject(id, name, btn) {
   } catch(e) {
     btn.textContent = origText;
     btn.disabled = false;
-    alert('Error deleting project: ' + e.message);
+    alert('Error: ' + e.message);
   }
 }
 
