@@ -1020,8 +1020,8 @@ async function deleteProject(id, btn) {
       throw new Error(err.error || 'Delete failed: ' + res.status);
     }
     closeModal();
-    projects = projects.filter(p => p.id !== id);
-    renderProjects();
+    // Reload from server to ensure Blob Storage is in sync
+    await loadProjects();
     loadSuggestions();
   } catch(e) {
     btn.textContent = origText;
