@@ -64,9 +64,13 @@ async function blobWrite(key, data) {
   try {
     const blob = blobContainer.getBlockBlobClient(key);
     const json = JSON.stringify(data, null, 2);
-    await blob.upload(json, Buffer.byteLength(json), {
+    const buffer = Buffer.from(json, 'utf8');
+    // Use uploadData which is more reliable than upload for overwrites
+    await blob.uploadData(buffer, {
       blobHTTPHeaders: { blobContentType: 'application/json' },
+      overwrite: true,
     });
+    console.log(`[Blob] Written: ${key} (${buffer.length} bytes)`);
   } catch (err) {
     console.error(`[Blob] Write error for ${key}:`, err.message);
     throw err;
