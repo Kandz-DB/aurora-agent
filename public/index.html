@@ -1002,16 +1002,26 @@ async function removeConsultant(id, name) {
   openProject(id); // refresh modal
 }
 
-async function deleteProject(id, btn) {
+function deleteProject(id, btn) {
   const name = btn.getAttribute('data-name') || 'this project';
-  const confirmed = window.confirm(`Delete project for "${name}"?\n\nThis cannot be undone.`);
-  if (!confirmed) return;
-  const origText = btn.textContent;
-  btn.textContent = 'Deleting…';
-  btn.disabled = true;
+  // Replace button with inline confirm UI — avoids browser confirm() blocking
+  const container = btn.parentElement;
+  const orig = container.innerHTML;
+  container.innerHTML = `
+    <span style="font-size:12px;color:var(--rose);margin-right:8px">Delete "${name}"? This cannot be undone.</span>
+    <button type="button" onclick="confirmDelete('${id}')" style="background:var(--rose);color:#fff;border:none;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;margin-right:4px">Yes, delete</button>
+    <button type="button" onclick="this.closest('.modal-header').innerHTML=window._deleteOrig" style="background:none;border:1px solid var(--border);color:var(--text2);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px">Cancel</button>
+  `;
+  window._deleteOrig = orig;
+}
+
+async function confirmDelete(id) {
+  // Show deleting state
+  const hdr = document.querySelector('.modal-header');
+  if (hdr) hdr.innerHTML = '<span style="color:var(--text3);font-size:12px">Deleting…</span>';
   try {
     const data = await api('/api/projects/' + id, { method: 'DELETE' });
-    if (!data.success) throw new Error(data.error || 'Delete failed');
+    if (!data.success && !data.projects) throw new Error(data.error || 'Delete failed');
     closeModal();
     if (data.projects) {
       projects = data.projects;
@@ -1022,9 +1032,12 @@ async function deleteProject(id, btn) {
     loadSuggestions();
   } catch(e) {
     console.error('Delete error:', e);
-    btn.textContent = origText;
-    btn.disabled = false;
-    alert('Delete failed: ' + e.message);
+    if (hdr) hdr.innerHTML = window._deleteOrig || '';
+    const errDiv = document.createElement('div');
+    errDiv.style.cssText = 'position:fixed;top:20px;right:20px;background:var(--rose);color:#fff;padding:12px 18px;border-radius:8px;z-index:9999;font-size:13px';
+    errDiv.textContent = 'Delete failed: ' + e.message;
+    document.body.appendChild(errDiv);
+    setTimeout(() => errDiv.remove(), 4000);
   }
 }
 
