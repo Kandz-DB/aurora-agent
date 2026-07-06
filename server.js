@@ -777,6 +777,11 @@ async function readConsultantReplies() {
       console.log(`[Poll] Checking: "${subject}" from ${fromEmail}`);
 
       // Skip Aurora's own emails — prevents infinite feedback loops
+      // Also check for Xero invoice emails BEFORE skipping non-R2S senders
+      const isXeroInvoice = fromEmail.toLowerCase().includes('xero.com') ||
+                            fromEmail.toLowerCase().includes('post.xero.com') ||
+                            subject.toLowerCase().includes('invoice') && subject.toLowerCase().includes('risk 2 solution');
+
       if (subject.startsWith('[Aurora]') || fromEmail.toLowerCase() === (process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com').toLowerCase()) {
         console.log(`[Poll] Skipping — Aurora's own email or self-sent`);
         try {
@@ -798,6 +803,81 @@ async function readConsultantReplies() {
         );
       } catch(tagErr) {}
 
+      // ── Handle Xero invoice emails specially ──────────────────────────────
+      if (isXeroInvoice) {
+        console.log(`[Poll] Xero invoice detected: ${subject}`);
+        // Extract invoice number and amount from Xero format
+        // Format: "Invoice INV-4290 from Risk 2 Solution Pty Ltd for Macquarie Bank"
+        // Body: "Please see invoice INV-4290 for $AUD 4,867.50"
+        const xeroInvNum = subject.match(/Invoice\s+(INV-\d+)/i) || bodyText.match(/invoice\s+(INV-\d+)/i);
+        const xeroAmount = bodyText.match(/for\s+\$AUD\s+([\d,]+(?:\.\d{2})?)/i) ||
+                           bodyText.match(/\$AUD\s+([\d,]+(?:\.\d{2})?)/i) ||
+                           bodyText.match(/AUD\s+([\d,]+(?:\.\d{2})?)/i);
+        // Extract client name from subject: "...for Macquarie Bank"
+        const xeroClient = subject.match(/for\s+(.+)$/i)?.[1]?.trim();
+
+        if (xeroInvNum && xeroAmount && xeroClient) {
+          const invoiceNum = xeroInvNum[1].toUpperCase();
+          const amount = xeroAmount[1].replace(/,/g,'');
+          // Find matching project by client name
+          const xeroProject = projects.find(p =>
+            p.type === 'standard' && p.clientName &&
+            (xeroClient.toLowerCase().includes(p.clientName.toLowerCase().slice(0,8)) ||
+             p.clientName.toLowerCase().includes(xeroClient.toLowerCase().slice(0,8)))
+          );
+          if (xeroProject) {
+            try {
+              const key = `invoices_${xeroProject.id}.json`;
+              const existing = await (async () => { try { return await db.read(key,[]); } catch { return []; } })();
+              if (!existing.find(i => i.invoiceNumber === invoiceNum)) {
+                existing.push({ id:`inv_${Date.now()}`, invoiceNumber:invoiceNum, amount, sentDate:new Date().toISOString().slice(0,10), source:'xero', paid:false, createdAt:new Date().toISOString() });
+                await db.write(key, existing);
+                await db.logActivity(xeroProject.id, { type:'contract', summary:`Invoice ${invoiceNum} sent via Xero — $${parseFloat(amount).toLocaleString('en-AU')} to ${xeroClient}` });
+                await sendEmail('diane.k@risk2solution.com',
+                  `[Aurora] Invoice recorded: ${invoiceNum} for ${xeroProject.clientName}`,
+                  `Aurora detected a Xero invoice sent to ${xeroClient}.
+
+Invoice: ${invoiceNum}
+Amount: $${parseFloat(amount).toLocaleString('en-AU')} AUD
+Due: ${bodyText.match(/due by (.+)/i)?.[1] || 'See Xero'}
+
+This has been recorded in the ${xeroProject.clientName} project invoicing tab in Aurora.
+
+Aurora
+R2S Project Management Intelligence`,
+                  true
+                );
+                console.log(`[Invoice] Xero invoice ${invoiceNum} $${amount} recorded for ${xeroProject.clientName}`);
+              }
+            } catch(xeroErr) { console.error('[Xero Invoice]', xeroErr.message); }
+          } else {
+            // No project match — alert Diane
+            await sendEmail('diane.k@risk2solution.com',
+              `[Aurora] Xero invoice received — no project match: ${subject}`,
+              `Aurora detected a Xero invoice but could not match it to a project.
+
+Invoice: ${invoiceNum || 'Unknown'}
+Client: ${xeroClient}
+Amount: $${amount ? parseFloat(amount).toLocaleString('en-AU') : 'Unknown'} AUD
+
+Please check the project exists in Aurora and has the correct client name.
+
+Aurora
+R2S Project Management Intelligence`,
+              true
+            );
+          }
+        }
+        // Mark as processed and skip normal processing
+        try {
+          await axios.patch(`https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
+            { isRead: true, categories: ['Aurora Processed'] },
+            { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+          );
+        } catch(e) {}
+        continue;
+      }
+
       // Determine if this is internal R2S or external (client/other)
       const isInternal = fromEmail.toLowerCase().endsWith('@risk2solution.com') ||
                          fromEmail.toLowerCase().endsWith('@presilience.com');
@@ -808,11 +888,15 @@ async function readConsultantReplies() {
       const hasAttachment = msg.hasAttachments || false;
       const mentionsNewProject = /agreement|contract|proposal|signed|new client|new project|new engagement/i.test(subject + ' ' + bodyText.slice(0, 500));
 
-      if (isFromDiane && (hasAttachment && mentionsNewProject || bodyText.toLowerCase().includes('see attached') && hasAttachment)) {
+      // Catch agreement emails from Diane — with OR without attachment flag
+      // (Graph API hasAttachments can be unreliable for forwarded emails)
+      const isDianeAgreement = isFromDiane && mentionsNewProject;
+
+      if (isDianeAgreement) {
         console.log(`[Poll] Agreement email from Diane detected — prompting to upload to Aurora`);
         await sendEmail('diane.k@risk2solution.com',
-          `[Aurora] New agreement detected — please upload to Aurora`,
-          `Hi Diane,\n\nAurora noticed you sent what appears to be a new client agreement or contract to the info@ inbox.\n\nSubject: ${subject}\n\nTo create a new project in Aurora from this document, please:\n1. Open the Aurora portal\n2. Go to Projects → New Project\n3. Click Upload Contract and attach the agreement PDF\n\nAurora will automatically extract all the client details, project scope, contract value, and deliverables.\n\n${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}\n\nAurora\nR2S Project Management Intelligence`,
+          `[Aurora] New agreement detected — please create project in Aurora`,
+          `Hi Diane,\n\nAurora noticed you sent a new client agreement or proposal to the info@ inbox.\n\nSubject: ${subject}\n\nTo create a new project in Aurora from this document:\n1. Open the Aurora portal\n2. Go to Projects → New Project\n3. Click Upload Contract and attach the PDF\n\nAurora will automatically extract the client details, project scope, value, and deliverables.\n\n${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}\n\nAurora\nR2S Project Management Intelligence`,
           true
         );
         try {
