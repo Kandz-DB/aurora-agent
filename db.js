@@ -213,6 +213,7 @@ module.exports = {
   getDrafts, saveDraft, updateDraft,
   getSpend, recordSpend,
   DATA, readJSON, writeJSON,
+  read, write,
 };
 
 // ── Suggestions CRUD ──────────────────────────────────────────────────────────
