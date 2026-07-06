@@ -1775,7 +1775,7 @@ async function sendWeeklyExecutiveReport(projects) {
       <!-- Background -->
       <rect width="${chartWidth}" height="${chartHeight}" fill="#1a1a2e" rx="8"/>
       <!-- Title -->
-      <text x="${chartWidth/2}" y="20" text-anchor="middle" fill="#aaa" font-size="11">Invoicing per project — total contract value</text>
+      <text x="${chartWidth/2}" y="20" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600">Invoicing per project — total contract value</text>
       ${chartProjects.map((p, i) => {
         const y = 35 + i * (barHeight + barGap);
         const val = parseVal(p.value);
@@ -1786,16 +1786,16 @@ async function sendWeeklyExecutiveReport(projects) {
         const name = (p.clientName || '').slice(0, 14);
         const valStr = '$' + Math.round(val/1000) + 'k';
         return `
-          <text x="${labelWidth - 4}" y="${y + barHeight/2 + 4}" text-anchor="end" fill="#ccc" font-size="10">${name}</text>
-          <rect x="${labelWidth}" y="${y}" width="${barW}" height="${barHeight}" fill="#2a2a4a" rx="3"/>
-          <rect x="${labelWidth}" y="${y}" width="${invoicedW}" height="${barHeight}" fill="#00e8bb" rx="3" opacity="0.85"/>
-          <text x="${labelWidth + barW + 4}" y="${y + barHeight/2 + 4}" fill="#aaa" font-size="9">${valStr}</text>`;
+          <text x="${labelWidth - 4}" y="${y + barHeight/2 + 4}" text-anchor="end" fill="#e8e8e8" font-size="10" font-weight="500">${name}</text>
+          <rect x="${labelWidth}" y="${y}" width="${barW}" height="${barHeight}" fill="#3a3a6a" rx="3"/>
+          <rect x="${labelWidth}" y="${y}" width="${invoicedW}" height="${barHeight}" fill="#00e8bb" rx="3" opacity="0.9"/>
+          <text x="${labelWidth + barW + 6}" y="${y + barHeight/2 + 4}" fill="#ffffff" font-size="10" font-weight="600">${valStr}</text>`;
       }).join('')}
       <!-- Legend -->
       <rect x="${labelWidth}" y="${chartHeight - 14}" width="12" height="10" fill="#00e8bb" rx="2"/>
-      <text x="${labelWidth + 16}" y="${chartHeight - 5}" fill="#aaa" font-size="9">Invoiced (estimated)</text>
-      <rect x="${labelWidth + 130}" y="${chartHeight - 14}" width="12" height="10" fill="#2a2a4a" rx="2"/>
-      <text x="${labelWidth + 146}" y="${chartHeight - 5}" fill="#aaa" font-size="9">Outstanding</text>
+      <text x="${labelWidth + 16}" y="${chartHeight - 5}" fill="#e8e8e8" font-size="10">Invoiced (estimated)</text>
+      <rect x="${labelWidth + 140}" y="${chartHeight - 14}" width="12" height="10" fill="#3a3a6a" rx="2"/>
+      <text x="${labelWidth + 156}" y="${chartHeight - 5}" fill="#e8e8e8" font-size="10">Outstanding</text>
     </svg>`;
   }
 
@@ -1900,7 +1900,7 @@ Write as if briefing the CEO, COO and PM. Highlight what needs attention this we
   ${chartSvg ? `<div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:16px;margin-bottom:20px">
     <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Invoicing Overview</div>
     ${chartSvg}
-    <div style="font-size:10px;color:#666;margin-top:8px;text-align:center">Teal = estimated invoiced to date based on phase · Grey = outstanding</div>
+    <div style="font-size:11px;color:#aaa;margin-top:8px;text-align:center">Teal = estimated invoiced to date based on phase · Grey = outstanding</div>
   </div>` : ''}
 
   <!-- Project table -->
@@ -2023,9 +2023,6 @@ R2S Project Management Intelligence`,
 
   // ── 5. Weekly actions (Mondays only) ─────────────────────────────────────
   if (isMonday) {
-    // 5a. Weekly executive report to Dave, Kandia, Diane
-    try { await sendWeeklyExecutiveReport(standard); } catch(e) { console.error('[WeeklyReport]', e.message); }
-
     // 5b. Weekly client status email drafts
     for (const p of standard) {
       if (['Completed','Terminated','On Hold'].includes(p.status)) continue;
@@ -3325,6 +3322,15 @@ app.get('/api/cost', async (req, res) => {
 app.post('/api/batch', async (req, res) => {
   try { await runBatch(); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/report/send', async (req, res) => {
+  try {
+    const projects = await db.getProjects();
+    const standard = projects.filter(p => p.type === 'standard');
+    await sendWeeklyExecutiveReport(standard);
+    res.json({ success: true, message: 'Report sent to Dave, Kandia and Diane' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Manual calendar booking from deliverable tile
