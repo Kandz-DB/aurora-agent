@@ -503,10 +503,12 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
 <!-- PROJECT DETAIL MODAL -->
 <div class="modal-bg" id="modal-bg" onclick="if(event.target===this)closeModal()">
   <div class="modal">
-    <div class="modal-hdr">
+    <div class="modal-hdr" id="modal-hdr">
       <div><div class="modal-title" id="modal-title"></div><div class="modal-sub" id="modal-sub"></div></div>
-      <button class="modal-close" onclick="closeModal()">✕</button>
-      <button id="delete-btn-${p.id}" onclick="deleteProject('${p.id}',this)" data-name="${p.clientName}" style="background:none;border:1px solid var(--rose);color:var(--rose);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer;margin-right:8px" title="Delete this project">🗑 Delete project</button>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div id="modal-delete-area"></div>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
     </div>
     <div id="modal-body"></div>
   </div>
@@ -721,6 +723,12 @@ function openProject(id) {
   const phase = p.phase || 0;
   document.getElementById('modal-title').textContent = p.clientName;
   document.getElementById('modal-sub').textContent   = p.projectName || '';
+  // Set delete button dynamically with safe name
+  const deleteArea = document.getElementById('modal-delete-area');
+  if (deleteArea) {
+    const safeName = (p.clientName || '').replace(/['"]/g, '');
+    deleteArea.innerHTML = `<button type="button" onclick="deleteProject('${p.id}','${safeName}')" style="background:none;border:1px solid var(--rose);color:var(--rose);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer" title="Delete this project">🗑 Delete</button>`;
+  }
 
   const phasecards = PHASES.map((ph, i) => {
     const cls = i < phase ? 'done-ph' : i === phase ? 'active-ph' : 'pending-ph';
@@ -1002,26 +1010,37 @@ async function removeConsultant(id, name) {
   openProject(id); // refresh modal
 }
 
-function deleteProject(id, btn) {
-  const name = btn.getAttribute('data-name') || 'this project';
-  // Replace button with inline confirm UI — avoids browser confirm() blocking
-  const container = btn.parentElement;
-  const orig = container.innerHTML;
-  container.innerHTML = `
-    <span style="font-size:12px;color:var(--rose);margin-right:8px">Delete "${name}"? This cannot be undone.</span>
-    <button type="button" onclick="confirmDelete('${id}')" style="background:var(--rose);color:#fff;border:none;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;margin-right:4px">Yes, delete</button>
-    <button type="button" onclick="this.closest('.modal-header').innerHTML=window._deleteOrig" style="background:none;border:1px solid var(--border);color:var(--text2);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px">Cancel</button>
+function deleteProject(id, name) {
+  const area = document.getElementById('modal-delete-area');
+  if (!area) return;
+  area.innerHTML = `
+    <span style="font-size:11px;color:var(--rose)">Delete "${name}"?</span>
+    <button type="button" onclick="confirmDelete('${id}')" style="background:var(--rose);color:#fff;border:none;padding:3px 10px;border-radius:5px;cursor:pointer;font-size:11px;margin-left:6px">Yes</button>
+    <button type="button" onclick="resetDeleteBtn('${id}','${name}')" style="background:none;border:1px solid var(--border);color:var(--text2);padding:3px 8px;border-radius:5px;cursor:pointer;font-size:11px;margin-left:3px">No</button>
   `;
-  window._deleteOrig = orig;
+}
+
+function resetDeleteBtn(id, name) {
+  const area = document.getElementById('modal-delete-area');
+  if (area) area.innerHTML = `<button type="button" onclick="deleteProject('${id}','${name}')" style="background:none;border:1px solid var(--rose);color:var(--rose);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer" title="Delete this project">🗑 Delete</button>`;
 }
 
 async function confirmDelete(id) {
-  // Show deleting state
-  const hdr = document.querySelector('.modal-header');
-  if (hdr) hdr.innerHTML = '<span style="color:var(--text3);font-size:12px">Deleting…</span>';
+  const area = document.getElementById('modal-delete-area');
+  if (area) area.innerHTML = '<span style="color:var(--text3);font-size:11px">Deleting…</span>';
   try {
-    const data = await api('/api/projects/' + id, { method: 'DELETE' });
-    if (!data.success && !data.projects) throw new Error(data.error || 'Delete failed');
+    const token = sessionStorage.getItem('aurora_token') || '';
+    console.log('[Delete] Sending DELETE for id:', id, 'token length:', token.length);
+    const res = await fetch('/api/projects/' + id, {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + token },
+    });
+    console.log('[Delete] Response status:', res.status, res.statusText);
+    const text = await res.text();
+    console.log('[Delete] Response body:', text);
+    let data;
+    try { data = JSON.parse(text); } catch(e) { throw new Error('Server returned non-JSON: ' + text.slice(0, 100)); }
+    if (data.error) throw new Error(data.error);
     closeModal();
     if (data.projects) {
       projects = data.projects;
@@ -1031,13 +1050,12 @@ async function confirmDelete(id) {
     renderProjects();
     loadSuggestions();
   } catch(e) {
-    console.error('Delete error:', e);
-    if (hdr) hdr.innerHTML = window._deleteOrig || '';
+    console.error('[Delete] Error:', e);
     const errDiv = document.createElement('div');
-    errDiv.style.cssText = 'position:fixed;top:20px;right:20px;background:var(--rose);color:#fff;padding:12px 18px;border-radius:8px;z-index:9999;font-size:13px';
+    errDiv.style.cssText = 'position:fixed;top:20px;right:20px;background:var(--rose);color:#fff;padding:12px 18px;border-radius:8px;z-index:9999;font-size:13px;max-width:400px';
     errDiv.textContent = 'Delete failed: ' + e.message;
     document.body.appendChild(errDiv);
-    setTimeout(() => errDiv.remove(), 4000);
+    setTimeout(() => errDiv.remove(), 6000);
   }
 }
 
