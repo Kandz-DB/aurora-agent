@@ -2239,14 +2239,16 @@ async function loadProjectInvoices(projectId) {
   // Add invoice form
   html += `<div class="card" style="padding:12px">
     <div style="font-size:11px;font-weight:500;color:var(--text2);margin-bottom:10px">Record an invoice</div>
+    <div autocomplete="off" role="presentation">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
       <div><label style="font-size:10px;color:var(--text3);display:block;margin-bottom:3px">Invoice number</label>
-        <input id="inv-num-${projectId}" placeholder="e.g. INV-001" autocomplete="off" style="width:100%;font-size:12px"/></div>
+        <input id="invref-${projectId}" name="invref-${projectId}" placeholder="e.g. INV-001" autocomplete="new-password" style="width:100%;font-size:12px"/></div>
       <div><label style="font-size:10px;color:var(--text3);display:block;margin-bottom:3px">Amount (excl GST)</label>
-        <input id="inv-amt-${projectId}" placeholder="e.g. 7700" type="text" inputmode="numeric" autocomplete="off" style="width:100%;font-size:12px"/></div>
+        <input id="invval-${projectId}" name="invval-${projectId}" placeholder="e.g. 7700" type="text" inputmode="numeric" autocomplete="new-password" style="width:100%;font-size:12px"/></div>
     </div>
     <div style="margin-bottom:8px"><label style="font-size:10px;color:var(--text3);display:block;margin-bottom:3px">Date sent</label>
-      <input id="inv-date-${projectId}" type="date" value="${new Date().toISOString().slice(0,10)}" autocomplete="off" style="font-size:12px"/></div>
+      <input id="invday-${projectId}" name="invday-${projectId}" type="date" value="${new Date().toISOString().slice(0,10)}" autocomplete="off" style="font-size:12px"/></div>
+    </div>
     <button type="button" class="btn btn-p btn-sm" onclick="addInvoice('${projectId}')">+ Add invoice</button>
   </div>`;
 
@@ -2261,9 +2263,9 @@ async function markInvoicePaid(projectId, invId, btn) {
 }
 
 async function addInvoice(projectId) {
-  const num  = document.getElementById('inv-num-' + projectId)?.value?.trim();
-  const amt  = document.getElementById('inv-amt-' + projectId)?.value?.trim();
-  const date = document.getElementById('inv-date-' + projectId)?.value;
+  const num  = document.getElementById('invref-' + projectId)?.value?.trim();
+  const amt  = document.getElementById('invval-' + projectId)?.value?.trim();
+  const date = document.getElementById('invday-' + projectId)?.value;
   if (!num || !amt) { alert('Please enter invoice number and amount'); return; }
   await api('/api/projects/' + projectId + '/invoices', {
     method: 'POST',
