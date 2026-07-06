@@ -777,16 +777,71 @@ async function readConsultantReplies() {
       console.log(`[Poll] Checking: "${subject}" from ${fromEmail}`);
 
       // Skip Aurora's own emails — prevents infinite feedback loops
-      // Also check for Xero invoice emails BEFORE skipping non-R2S senders
       const isXeroInvoice = fromEmail.toLowerCase().includes('xero.com') ||
-                            fromEmail.toLowerCase().includes('post.xero.com') ||
-                            subject.toLowerCase().includes('invoice') && subject.toLowerCase().includes('risk 2 solution');
+                            fromEmail.toLowerCase().includes('post.xero.com');
 
       if (subject.startsWith('[Aurora]') || fromEmail.toLowerCase() === (process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com').toLowerCase()) {
         console.log(`[Poll] Skipping — Aurora's own email or self-sent`);
         try {
           await axios.patch(
             `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
+            { isRead: true, categories: ['Aurora Processed'] },
+            { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+          );
+        } catch(e) {}
+        continue;
+      }
+
+      // ── Handle Xero invoice emails BEFORE tagging ─────────────────────────
+      if (isXeroInvoice) {
+        console.log(`[Poll] Xero invoice detected: ${subject}`);
+        const xeroInvNum = subject.match(/Invoice\s+(INV-\d+)/i) || bodyText.match(/invoice\s+(INV-\d+)/i);
+        const xeroAmount = bodyText.match(/for\s+\$AUD\s+([\d,]+(?:\.\d{2})?)/i) ||
+                           bodyText.match(/\$AUD\s+([\d,]+(?:\.\d{2})?)/i) ||
+                           bodyText.match(/AUD\s+([\d,]+(?:\.\d{2})?)/i);
+        const xeroClient = subject.match(/for\s+(.+)$/i)?.[1]?.trim();
+        console.log(`[Poll] Xero: num=${xeroInvNum?.[1]} amount=${xeroAmount?.[1]} client=${xeroClient}`);
+
+        if (xeroInvNum && xeroAmount && xeroClient) {
+          const invoiceNum = xeroInvNum[1].toUpperCase();
+          const amount = xeroAmount[1].replace(/,/g,'');
+          const xeroProject = projects.find(p =>
+            p.type === 'standard' && p.clientName &&
+            (xeroClient.toLowerCase().includes(p.clientName.toLowerCase().slice(0,8)) ||
+             p.clientName.toLowerCase().includes(xeroClient.toLowerCase().slice(0,8)))
+          );
+          console.log(`[Poll] Xero project match: ${xeroProject?.clientName || 'NONE'}`);
+          if (xeroProject) {
+            try {
+              const key = `invoices_${xeroProject.id}.json`;
+              const existing = await (async () => { try { return await db.read(key,[]); } catch { return []; } })();
+              if (!existing.find(i => i.invoiceNumber === invoiceNum)) {
+                existing.push({ id:`inv_${Date.now()}`, invoiceNumber:invoiceNum, amount, sentDate:new Date().toISOString().slice(0,10), source:'xero', paid:false, createdAt:new Date().toISOString() });
+                await db.write(key, existing);
+                await db.logActivity(xeroProject.id, { type:'contract', summary:`Invoice ${invoiceNum} sent via Xero — $${parseFloat(amount).toLocaleString('en-AU')} to ${xeroClient}` });
+                await sendEmail('diane.k@risk2solution.com',
+                  `[Aurora] Invoice recorded: ${invoiceNum} for ${xeroProject.clientName}`,
+                  `Aurora detected a Xero invoice sent to ${xeroClient}.\n\nInvoice: ${invoiceNum}\nAmount: $${parseFloat(amount).toLocaleString('en-AU')} AUD\nDue: ${bodyText.match(/due by (.+?)[\.\r\n]/i)?.[1] || 'See Xero'}\n\nThis has been recorded in the ${xeroProject.clientName} project invoicing tab in Aurora.\n\nAurora\nR2S Project Management Intelligence`,
+                  true
+                );
+                console.log(`[Invoice] Xero invoice ${invoiceNum} $${amount} recorded for ${xeroProject.clientName}`);
+              } else {
+                console.log(`[Invoice] Already recorded: ${invoiceNum}`);
+              }
+            } catch(xeroErr) { console.error('[Xero Invoice]', xeroErr.message); }
+          } else {
+            await sendEmail('diane.k@risk2solution.com',
+              `[Aurora] Xero invoice — no project match: ${subject}`,
+              `Aurora detected a Xero invoice but could not match it to a project.\n\nInvoice: ${xeroInvNum[1]}\nClient in Xero: ${xeroClient}\nAmount: $${parseFloat(amount).toLocaleString('en-AU')} AUD\n\nPlease check the project exists in Aurora with the correct client name.\n\nAurora\nR2S Project Management Intelligence`,
+              true
+            );
+          }
+        } else {
+          console.log(`[Poll] Xero invoice parse failed — num:${!!xeroInvNum} amount:${!!xeroAmount} client:${!!xeroClient}`);
+        }
+        // Tag and skip normal processing
+        try {
+          await axios.patch(`https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
             { isRead: true, categories: ['Aurora Processed'] },
             { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
           );
@@ -802,81 +857,6 @@ async function readConsultantReplies() {
           { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
         );
       } catch(tagErr) {}
-
-      // ── Handle Xero invoice emails specially ──────────────────────────────
-      if (isXeroInvoice) {
-        console.log(`[Poll] Xero invoice detected: ${subject}`);
-        // Extract invoice number and amount from Xero format
-        // Format: "Invoice INV-4290 from Risk 2 Solution Pty Ltd for Macquarie Bank"
-        // Body: "Please see invoice INV-4290 for $AUD 4,867.50"
-        const xeroInvNum = subject.match(/Invoice\s+(INV-\d+)/i) || bodyText.match(/invoice\s+(INV-\d+)/i);
-        const xeroAmount = bodyText.match(/for\s+\$AUD\s+([\d,]+(?:\.\d{2})?)/i) ||
-                           bodyText.match(/\$AUD\s+([\d,]+(?:\.\d{2})?)/i) ||
-                           bodyText.match(/AUD\s+([\d,]+(?:\.\d{2})?)/i);
-        // Extract client name from subject: "...for Macquarie Bank"
-        const xeroClient = subject.match(/for\s+(.+)$/i)?.[1]?.trim();
-
-        if (xeroInvNum && xeroAmount && xeroClient) {
-          const invoiceNum = xeroInvNum[1].toUpperCase();
-          const amount = xeroAmount[1].replace(/,/g,'');
-          // Find matching project by client name
-          const xeroProject = projects.find(p =>
-            p.type === 'standard' && p.clientName &&
-            (xeroClient.toLowerCase().includes(p.clientName.toLowerCase().slice(0,8)) ||
-             p.clientName.toLowerCase().includes(xeroClient.toLowerCase().slice(0,8)))
-          );
-          if (xeroProject) {
-            try {
-              const key = `invoices_${xeroProject.id}.json`;
-              const existing = await (async () => { try { return await db.read(key,[]); } catch { return []; } })();
-              if (!existing.find(i => i.invoiceNumber === invoiceNum)) {
-                existing.push({ id:`inv_${Date.now()}`, invoiceNumber:invoiceNum, amount, sentDate:new Date().toISOString().slice(0,10), source:'xero', paid:false, createdAt:new Date().toISOString() });
-                await db.write(key, existing);
-                await db.logActivity(xeroProject.id, { type:'contract', summary:`Invoice ${invoiceNum} sent via Xero — $${parseFloat(amount).toLocaleString('en-AU')} to ${xeroClient}` });
-                await sendEmail('diane.k@risk2solution.com',
-                  `[Aurora] Invoice recorded: ${invoiceNum} for ${xeroProject.clientName}`,
-                  `Aurora detected a Xero invoice sent to ${xeroClient}.
-
-Invoice: ${invoiceNum}
-Amount: $${parseFloat(amount).toLocaleString('en-AU')} AUD
-Due: ${bodyText.match(/due by (.+)/i)?.[1] || 'See Xero'}
-
-This has been recorded in the ${xeroProject.clientName} project invoicing tab in Aurora.
-
-Aurora
-R2S Project Management Intelligence`,
-                  true
-                );
-                console.log(`[Invoice] Xero invoice ${invoiceNum} $${amount} recorded for ${xeroProject.clientName}`);
-              }
-            } catch(xeroErr) { console.error('[Xero Invoice]', xeroErr.message); }
-          } else {
-            // No project match — alert Diane
-            await sendEmail('diane.k@risk2solution.com',
-              `[Aurora] Xero invoice received — no project match: ${subject}`,
-              `Aurora detected a Xero invoice but could not match it to a project.
-
-Invoice: ${invoiceNum || 'Unknown'}
-Client: ${xeroClient}
-Amount: $${amount ? parseFloat(amount).toLocaleString('en-AU') : 'Unknown'} AUD
-
-Please check the project exists in Aurora and has the correct client name.
-
-Aurora
-R2S Project Management Intelligence`,
-              true
-            );
-          }
-        }
-        // Mark as processed and skip normal processing
-        try {
-          await axios.patch(`https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
-            { isRead: true, categories: ['Aurora Processed'] },
-            { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
-          );
-        } catch(e) {}
-        continue;
-      }
 
       // Determine if this is internal R2S or external (client/other)
       const isInternal = fromEmail.toLowerCase().endsWith('@risk2solution.com') ||
@@ -2729,8 +2709,23 @@ app.put('/api/projects/:id', express.json(), async (req, res) => {
 });
 
 app.delete('/api/projects/:id', async (req, res) => {
-  try { await db.deleteProject(req.params.id); res.json({ success: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    const id = req.params.id;
+    const before = await db.getProjects();
+    const exists = before.find(p => p.id === id);
+    if (!exists) return res.status(404).json({ error: 'Project not found' });
+    console.log(`[Delete] Removing: ${exists.clientName} (${id}), total before: ${before.length}`);
+    await db.deleteProject(id);
+    // Small delay to ensure Blob write completes before verification
+    await new Promise(r => setTimeout(r, 500));
+    const after = await db.getProjects();
+    console.log(`[Delete] After: ${after.length} projects, deleted ID still present: ${!!after.find(p => p.id === id)}`);
+    // Return the updated list so client doesn't need to re-fetch
+    res.json({ success: true, projects: after });
+  } catch (e) {
+    console.error('[Delete] Error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Trigger consultant briefing for a specific consultant on a project
