@@ -65,7 +65,10 @@ async function blobWrite(key, data) {
     const blob = blobContainer.getBlockBlobClient(key);
     const json = JSON.stringify(data, null, 2);
     const buf = Buffer.from(json);
+    // Delete existing blob first to ensure clean overwrite
+    try { await blob.delete(); } catch(e) { /* ok if doesn't exist */ }
     await blob.upload(buf, buf.length, { blobHTTPHeaders: { blobContentType: 'application/json' } });
+    console.log(`[Blob] Written: ${key} (${buf.length} bytes, ${Array.isArray(data) ? data.length + ' items' : 'object'})`);
   } catch (err) {
     console.error(`[Blob] Write error for ${key}:`, err.message);
     throw err;
