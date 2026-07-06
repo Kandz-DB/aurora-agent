@@ -506,6 +506,7 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
     <div class="modal-hdr">
       <div><div class="modal-title" id="modal-title"></div><div class="modal-sub" id="modal-sub"></div></div>
       <button class="modal-close" onclick="closeModal()">✕</button>
+      <button onclick="deleteProject('${p.id}','${p.clientName.replace(/'/g,"\\'")}',this)" style="background:none;border:1px solid var(--rose);color:var(--rose);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer;margin-right:8px" title="Delete this project">🗑 Delete project</button>
     </div>
     <div id="modal-body"></div>
   </div>
@@ -999,6 +1000,23 @@ async function removeConsultant(id, name) {
   await api(`/api/projects/${id}`, { method: 'PUT', body: JSON.stringify({ consultant: updated }) });
   p.consultant = updated;
   openProject(id); // refresh modal
+}
+
+async function deleteProject(id, name, btn) {
+  if (!confirm(`Are you sure you want to delete the project for "${name}"?\n\nThis cannot be undone. All project data, deliverables, risks and activity logs will be permanently removed.`)) return;
+  btn.textContent = 'Deleting…';
+  btn.disabled = true;
+  try {
+    await api('/api/projects/' + id, { method: 'DELETE' });
+    closeModal();
+    projects = projects.filter(p => p.id !== id);
+    renderProjects();
+    loadSuggestions();
+  } catch(e) {
+    btn.textContent = '🗑 Delete project';
+    btn.disabled = false;
+    alert('Error deleting project: ' + e.message);
+  }
 }
 
 function closeModal() { document.getElementById('modal-bg').classList.remove('open'); }
