@@ -873,12 +873,101 @@ async function readConsultantReplies() {
       const isDianeAgreement = isFromDiane && mentionsNewProject;
 
       if (isDianeAgreement) {
-        console.log(`[Poll] Agreement email from Diane detected — prompting to upload to Aurora`);
-        await sendEmail('diane.k@risk2solution.com',
-          `[Aurora] New agreement detected — please create project in Aurora`,
-          `Hi Diane,\n\nAurora noticed you sent a new client agreement or proposal to the info@ inbox.\n\nSubject: ${subject}\n\nTo create a new project in Aurora from this document:\n1. Open the Aurora portal\n2. Go to Projects → New Project\n3. Click Upload Contract and attach the PDF\n\nAurora will automatically extract the client details, project scope, value, and deliverables.\n\n${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}\n\nAurora\nR2S Project Management Intelligence`,
-          true
-        );
+        console.log(`[Poll] Agreement email from Diane — attempting to auto-create project from attachment`);
+        let projectCreated = false;
+
+        // Try to download and process the PDF attachment automatically
+        if (hasAttachment) {
+          try {
+            // Get attachments list
+            const attRes = await axios.get(
+              `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}/attachments`,
+              { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 }
+            );
+            const attachments = attRes.data?.value || [];
+            const pdfAtt = attachments.find(a =>
+              a.contentType?.includes('pdf') ||
+              a.name?.toLowerCase().endsWith('.pdf') ||
+              a.contentType?.includes('word') ||
+              a.name?.toLowerCase().endsWith('.docx')
+            );
+
+            if (pdfAtt && pdfAtt.contentBytes) {
+              console.log(`[Poll] Found attachment: ${pdfAtt.name} (${pdfAtt.size} bytes)`);
+              // Decode base64 attachment
+              const pdfBuffer = Buffer.from(pdfAtt.contentBytes, 'base64');
+
+              // Extract text from PDF using pdf-parse
+              let rawText = '';
+              try {
+                const pdfParse = require('pdf-parse');
+                const parsed = await pdfParse(pdfBuffer);
+                rawText = parsed.text || '';
+                console.log(`[Poll] Extracted ${rawText.length} chars from ${pdfAtt.name}`);
+              } catch(pdfErr) {
+                console.error('[Poll] PDF parse error:', pdfErr.message);
+                // Try treating as text if not a real PDF
+                rawText = pdfBuffer.toString('utf8').slice(0, 20000);
+              }
+
+              if (rawText.length > 100) {
+                // Run contract analysis
+                const extracted = await analyseContract(rawText, pdfAtt.name);
+                if (extracted && extracted.clientName) {
+                  // Check for duplicate
+                  const existing = projects.find(p =>
+                    p.clientName?.toLowerCase().includes(extracted.clientName.toLowerCase().slice(0,8)) ||
+                    extracted.clientName.toLowerCase().includes((p.clientName||'').toLowerCase().slice(0,8))
+                  );
+
+                  if (!existing) {
+                    const projectId = `p_${Date.now()}`;
+                    const project = {
+                      id: projectId, type: 'standard',
+                      ...extracted,
+                      status: 'Active', phase: 0,
+                      createdAt: new Date().toISOString(),
+                      updatedAt: new Date().toISOString(),
+                    };
+                    await db.upsertProject(project);
+                    await db.logActivity(projectId, { type: 'project_created', summary: `Project auto-created from email attachment: ${pdfAtt.name} sent by Diane` });
+                    await draftClientOnboarding(project);
+                    projectCreated = true;
+                    console.log(`[Poll] ✓ Auto-created project: ${extracted.clientName}`);
+
+                    await sendEmail('diane.k@risk2solution.com',
+                      `[Aurora] New project created: ${extracted.clientName}`,
+                      `Aurora automatically created a new project from the attachment in your email.\n\nClient: ${extracted.clientName}\nProject: ${extracted.projectName || 'See Aurora'}\nValue: ${extracted.value || 'TBC'}\nConsultant identified: ${extracted.consultant || 'Not specified'}\n\nThe project has been added to Aurora. A client onboarding email draft is ready for your review.\n\n${process.env.FRONTEND_URL || ''}\n\nAurora\nR2S Project Management Intelligence`,
+                      true
+                    );
+                  } else {
+                    console.log(`[Poll] Duplicate detected — project already exists: ${existing.clientName}`);
+                    await sendEmail('diane.k@risk2solution.com',
+                      `[Aurora] Duplicate project detected: ${extracted.clientName}`,
+                      `Aurora detected a possible duplicate when processing the attachment from your email.\n\nAttachment: ${pdfAtt.name}\nDetected client: ${extracted.clientName}\nExisting project: ${existing.clientName} (${existing.status})\n\nPlease review in Aurora to confirm.\n\n${process.env.FRONTEND_URL || ''}\n\nAurora\nR2S Project Management Intelligence`,
+                      true
+                    );
+                    projectCreated = true; // Suppress fallback prompt
+                  }
+                }
+              }
+            }
+          } catch(attErr) {
+            console.error('[Poll] Attachment processing error:', attErr.message);
+          }
+        }
+
+        // Fallback — if no attachment processed, prompt Diane to upload manually
+        if (!projectCreated) {
+          const clientHint = subject.replace(/new (project|agreement|proposal) (for )?/i,'').trim();
+          const valueHint = bodyText.match(/\$([\d,]+)/)?.[0] || '';
+          await sendEmail('diane.k@risk2solution.com',
+            `[Aurora] New project detected — please upload contract: ${clientHint}`,
+            `Hi Diane,\n\nAurora detected a new client agreement but could not automatically process the attachment.\n\nSubject: ${subject}${valueHint ? '\nValue mentioned: ' + valueHint : ''}\n\nPlease upload the contract manually:\n${process.env.FRONTEND_URL || ''}\n→ Projects → New Project → Upload Contract\n\nAurora\nR2S Project Management Intelligence`,
+            true
+          );
+        }
+
         try {
           await axios.patch(
             `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
