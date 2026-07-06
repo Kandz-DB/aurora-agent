@@ -813,8 +813,8 @@ function openProject(id) {
       </div>
       <!-- Contract value -->
       <div class="info-item">
-        <div class="info-label">Total project cost</div>
-        <div class="info-val" style="color:var(--teal);font-family:var(--fm);font-size:16px">${val}</div>
+        <div class="info-label">Total project cost <span style="color:var(--teal);font-size:10px;cursor:pointer;margin-left:4px" onclick="editField('${p.id}','value',this)">✎</span></div>
+        <div class="info-val" id="field-value-${p.id}" style="color:var(--teal);font-family:var(--fm);font-size:16px">${val}</div>
       </div>
       <!-- Contract start with date picker -->
       <div class="info-item">
@@ -868,13 +868,25 @@ function openProject(id) {
           </div>
         </div>` : ''}
       <!-- Invoicing -->
-      ${p.invoicingNotes?`<div class="info-item" style="grid-column:1/-1"><div class="info-label">Invoicing terms</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2)">${p.invoicingNotes}</div></div>`:''}
-      <!-- Milestones — numbered -->
-      ${p.milestones?`<div class="info-item" style="grid-column:1/-1"><div class="info-label">Milestones</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2);line-height:1.8">${fmtList(p.milestones,true)}</div></div>`:''}
+      <div class="info-item" style="grid-column:1/-1">
+        <div class="info-label">Invoicing terms <span style="color:var(--teal);font-size:10px;cursor:pointer;margin-left:4px" onclick="editTextarea('${p.id}','invoicingNotes',this)">✎</span></div>
+        <div class="info-val" id="field-invoicingNotes-${p.id}" style="font-size:12px;font-weight:400;color:var(--text2)">${p.invoicingNotes||'—'}</div>
+      </div>
+      <!-- Milestones -->
+      <div class="info-item" style="grid-column:1/-1">
+        <div class="info-label">Milestones <span style="color:var(--teal);font-size:10px;cursor:pointer;margin-left:4px" onclick="editTextarea('${p.id}','milestones',this)">✎</span></div>
+        <div class="info-val" id="field-milestones-${p.id}" style="font-size:12px;font-weight:400;color:var(--text2);line-height:1.8">${p.milestones?fmtList(p.milestones,true):'—'}</div>
+      </div>
       <!-- Timeline -->
-      ${p.timeline?`<div class="info-item" style="grid-column:1/-1"><div class="info-label">Timeline</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2);line-height:1.8">${fmtList(p.timeline,true)}</div></div>`:''}
+      <div class="info-item" style="grid-column:1/-1">
+        <div class="info-label">Timeline <span style="color:var(--teal);font-size:10px;cursor:pointer;margin-left:4px" onclick="editTextarea('${p.id}','timeline',this)">✎</span></div>
+        <div class="info-val" id="field-timeline-${p.id}" style="font-size:12px;font-weight:400;color:var(--text2);line-height:1.8">${p.timeline?fmtList(p.timeline,true):'—'}</div>
+      </div>
       <!-- Notes -->
-      ${p.notes?`<div class="info-item" style="grid-column:1/-1"><div class="info-label">Notes</div><div class="info-val" style="font-size:12px;font-weight:400;color:var(--text2)">${p.notes}</div></div>`:''}
+      <div class="info-item" style="grid-column:1/-1">
+        <div class="info-label">Notes <span style="color:var(--teal);font-size:10px;cursor:pointer;margin-left:4px" onclick="editTextarea('${p.id}','notes',this)">✎</span></div>
+        <div class="info-val" id="field-notes-${p.id}" style="font-size:12px;font-weight:400;color:var(--text2)">${p.notes||'—'}</div>
+      </div>
     </div>
 
     <div class="sec">Update phase</div>
@@ -2298,13 +2310,35 @@ async function forceUploadContract() {
 }
 
 // ── Editable project fields ──────────────────────────────────────────────────
+async function editTextarea(projectId, field, linkEl) {
+  const displayEl = document.getElementById('field-' + field + '-' + projectId);
+  if (!displayEl) return;
+  const current = displayEl.innerText.trim().replace('—','');
+  const ta = document.createElement('textarea');
+  ta.value = current;
+  ta.style.cssText = 'width:100%;min-height:80px;font-size:12px;padding:6px 8px;border-radius:5px;background:var(--card2);border:1px solid var(--teal);color:var(--text2);resize:vertical;font-family:var(--fb);line-height:1.6';
+  displayEl.innerHTML = '';
+  displayEl.appendChild(ta);
+  ta.focus();
+  const save = async () => {
+    const newVal = ta.value.trim();
+    displayEl.innerHTML = newVal ? newVal.replace(/\n/g,'<br>') : '—';
+    await api('/api/projects/' + projectId, { method: 'PUT', body: JSON.stringify({ [field]: newVal }) });
+    const p = projects.find(x => x.id === projectId);
+    if (p) p[field] = newVal;
+  };
+  ta.addEventListener('blur', save);
+  ta.addEventListener('keydown', e => { if (e.key === 'Escape') { displayEl.innerHTML = current || '—'; } });
+}
+
 async function editField(projectId, field, linkEl) {
   const displayEl = document.getElementById('field-' + field + '-' + projectId);
   if (!displayEl) return;
   const current = displayEl.textContent.trim().replace('—','');
   const input = document.createElement('input');
   input.value = current;
-  input.style.cssText = 'width:100%;font-size:12px;padding:4px 6px;border-radius:5px;background:var(--card2);border:1px solid var(--teal);color:var(--text)';
+  const fontSize = field === 'value' ? '16px' : '12px';
+  input.style.cssText = `width:100%;font-size:${fontSize};padding:4px 6px;border-radius:5px;background:var(--card2);border:1px solid var(--teal);color:var(--teal);font-family:var(--fm)`;
   displayEl.innerHTML = '';
   displayEl.appendChild(input);
   input.focus();
