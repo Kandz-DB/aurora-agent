@@ -12,6 +12,23 @@ const axios     = require('axios');
 const nodemailer= require('nodemailer');
 const db        = require('./db');
 
+// ── Invoice storage helpers (since db.read/write may not be exported) ─────────
+async function readInvoices(projectId) {
+  try {
+    if (db.read) return await db.read(`invoices_${projectId}.json`, []);
+    const f = require('path').join(db.DATA, `invoices_${projectId}.json`);
+    return require('fs').existsSync(f) ? JSON.parse(require('fs').readFileSync(f,'utf8')) : [];
+  } catch { return []; }
+}
+
+async function writeInvoices(projectId, invoices) {
+  if (db.write) return await db.write(`invoices_${projectId}.json`, invoices);
+  require('fs').writeFileSync(
+    require('path').join(db.DATA, `invoices_${projectId}.json`),
+    JSON.stringify(invoices, null, 2)
+  );
+}
+
 // ── Setup ─────────────────────────────────────────────────────────────────────
 const app    = express();
 const PORT   = process.env.PORT || 3001;
@@ -813,11 +830,10 @@ async function readConsultantReplies() {
           console.log(`[Poll] Xero project match: ${xeroProject?.clientName || 'NONE'}`);
           if (xeroProject) {
             try {
-              const key = `invoices_${xeroProject.id}.json`;
-              const existing = await (async () => { try { return await db.read(key,[]); } catch { return []; } })();
+              const existing = await readInvoices(xeroProject.id);
               if (!existing.find(i => i.invoiceNumber === invoiceNum)) {
                 existing.push({ id:`inv_${Date.now()}`, invoiceNumber:invoiceNum, amount, sentDate:new Date().toISOString().slice(0,10), source:'xero', paid:false, createdAt:new Date().toISOString() });
-                await db.write(key, existing);
+                await writeInvoices(xeroProject.id, existing);
                 await db.logActivity(xeroProject.id, { type:'contract', summary:`Invoice ${invoiceNum} sent via Xero — $${parseFloat(amount).toLocaleString('en-AU')} to ${xeroClient}` });
                 await sendEmail('diane.k@risk2solution.com',
                   `[Aurora] Invoice recorded: ${invoiceNum} for ${xeroProject.clientName}`,
@@ -911,14 +927,28 @@ async function readConsultantReplies() {
               }
 
               if (rawText.length > 100) {
-                // Run contract analysis
-                const extracted = await analyseContract(rawText, pdfAtt.name);
+                console.log(`[Poll] Running contract analysis on ${pdfAtt.name}...`);
+                // Run contract analysis with timeout protection
+                const extracted = await Promise.race([
+                  analyseContract(rawText, pdfAtt.name),
+                  new Promise((_, reject) => setTimeout(() => reject(new Error('Analysis timeout')), 90000))
+                ]);
                 if (extracted && extracted.clientName) {
-                  // Check for duplicate
-                  const existing = projects.find(p =>
-                    p.clientName?.toLowerCase().includes(extracted.clientName.toLowerCase().slice(0,8)) ||
-                    extracted.clientName.toLowerCase().includes((p.clientName||'').toLowerCase().slice(0,8))
-                  );
+                  // Check for duplicate — must match BOTH client name AND project name
+                  // Same client can have multiple different projects
+                  const existing = projects.find(p => {
+                    const sameClient = p.clientName?.toLowerCase().includes(extracted.clientName.toLowerCase().slice(0,8)) ||
+                      extracted.clientName.toLowerCase().includes((p.clientName||'').toLowerCase().slice(0,8));
+                    if (!sameClient) return false;
+                    // If same client, also check project name similarity
+                    const extractedProject = (extracted.projectName || '').toLowerCase();
+                    const existingProject = (p.projectName || '').toLowerCase();
+                    if (!extractedProject || !existingProject) return false; // can't confirm duplicate without project names
+                    // Only flag as duplicate if project names are also similar
+                    return extractedProject.slice(0,15) === existingProject.slice(0,15) ||
+                      existingProject.includes(extractedProject.slice(0,12)) ||
+                      extractedProject.includes(existingProject.slice(0,12));
+                  });
 
                   if (!existing) {
                     const projectId = `p_${Date.now()}`;
@@ -1187,12 +1217,11 @@ Return this exact JSON (no other text):
           try {
             const invoiceNum = invNumMatch[1].toUpperCase();
             const amount     = invAmtMatch[1].replace(/,/g,'');
-            const key        = `invoices_${matchedProject.id}.json`;
-            const existing   = await (async () => { try { return await db.read(key,[]); } catch { return []; } })();
+            const existing   = await readInvoices(matchedProject.id);
             if (!existing.find(i => i.invoiceNumber === invoiceNum)) {
               const invoice = { id:`inv_${Date.now()}`, invoiceNumber:invoiceNum, amount, sentDate:new Date().toISOString().slice(0,10), source:'email', paid:false, createdAt:new Date().toISOString() };
               existing.push(invoice);
-              await db.write(key, existing);
+              await writeInvoices(matchedProject.id, existing);
               actions.push(`Invoice ${invoiceNum} for $${parseFloat(amount).toLocaleString('en-AU')} detected and recorded`);
               await db.logActivity(matchedProject.id, { type:'contract', summary:`Invoice ${invoiceNum} detected — $${parseFloat(amount).toLocaleString('en-AU')} sent to client` });
               console.log(`[Invoice] Auto-recorded: ${invoiceNum} $${amount} for ${matchedProject.clientName}`);
@@ -1919,7 +1948,7 @@ async function sendWeeklyExecutiveReport(projects) {
   // Load saved invoices for each project to get actual invoiced amounts
   const invoiceData = await Promise.all(invoiceProjects.map(async p => {
     let recorded = [];
-    try { recorded = await db.read(`invoices_${p.id}.json`, []); } catch {}
+    try { recorded = await readInvoices(p.id); } catch {}
     const invoiced = recorded.reduce((s,i) => s + parseFloat(i.amount||0), 0);
     const paid     = recorded.filter(i=>i.paid).reduce((s,i) => s + parseFloat(i.amount||0), 0);
     const val      = parseVal(p.value);
@@ -3322,18 +3351,18 @@ app.put('/api/projects/:id/risks/:riskId', express.json(), async (req, res) => {
 // ── Invoice tracking routes ──────────────────────────────────────────────────
 app.get('/api/projects/:id/invoices', async (req, res) => {
   try {
-    const data = await db.read ? db.read(`invoices_${req.params.id}.json`, []) : JSON.parse(require('fs').readFileSync(require('path').join(db.DATA, `invoices_${req.params.id}.json`), 'utf8') || '[]');
-    res.json({ invoices: data });
+    const invoices = await readInvoices(req.params.id);
+    res.json({ invoices });
   } catch (e) { res.json({ invoices: [] }); }
 });
 
 app.post('/api/projects/:id/invoices', express.json(), async (req, res) => {
   try {
     const key = `invoices_${req.params.id}.json`;
-    const existing = await (async () => { try { return await db.read(key, []); } catch { return []; } })();
+    const existing = await readInvoices(req.params.id);
     const invoice = { id: `inv_${Date.now()}`, ...req.body, createdAt: new Date().toISOString(), paid: false };
     existing.push(invoice);
-    await db.write(key, existing);
+    await writeInvoices(req.params.id, existing);
     // Log activity
     await db.logActivity(req.params.id, { type: 'contract', summary: `Invoice ${invoice.invoiceNumber || ''} sent to client — $${invoice.amount || '0'}` });
     res.json({ invoice });
@@ -3343,7 +3372,7 @@ app.post('/api/projects/:id/invoices', express.json(), async (req, res) => {
 app.put('/api/projects/:id/invoices/:invId', express.json(), async (req, res) => {
   try {
     const key = `invoices_${req.params.id}.json`;
-    const invoices = await (async () => { try { return await db.read(key, []); } catch { return []; } })();
+    const invoices = await readInvoices(req.params.id);
     const idx = invoices.findIndex(i => i.id === req.params.invId);
     if (idx >= 0) {
       Object.assign(invoices[idx], req.body);
@@ -3351,7 +3380,7 @@ app.put('/api/projects/:id/invoices/:invId', express.json(), async (req, res) =>
         invoices[idx].paidAt = new Date().toISOString();
         await db.logActivity(req.params.id, { type: 'contract', summary: `Invoice ${invoices[idx].invoiceNumber || ''} marked as paid — $${invoices[idx].amount || '0'}` });
       }
-      await db.write(key, invoices);
+      await writeInvoices(req.params.id, invoices);
     }
     res.json({ invoice: invoices[idx] });
   } catch (e) { res.status(500).json({ error: e.message }); }
