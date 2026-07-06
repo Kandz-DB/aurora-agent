@@ -1759,45 +1759,95 @@ async function sendWeeklyExecutiveReport(projects) {
     return m ? parseFloat(m[0]) : 0;
   };
 
-  // ── Invoice chart data ────────────────────────────────────────────────────
-  const chartProjects = standard.filter(p => parseVal(p.value) > 0).slice(0, 8);
-  const maxVal = Math.max(...chartProjects.map(p => parseVal(p.value)), 1);
-  const chartWidth = 560;
-  const barHeight = 28;
-  const barGap = 10;
-  const chartHeight = chartProjects.length * (barHeight + barGap) + 40;
-  const labelWidth = 120;
-  const barAreaWidth = chartWidth - labelWidth - 60;
+  // ── Invoice summary — replaces broken SVG chart ───────────────────────────
+  const invoiceProjects = standard.filter(p => parseVal(p.value) > 0);
+  const totalPortfolio  = invoiceProjects.reduce((s,p) => s + parseVal(p.value), 0);
 
-  let chartSvg = '';
-  if (chartProjects.length > 0) {
-    chartSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${chartWidth}" height="${chartHeight}" style="font-family:Arial,sans-serif;display:block;margin:0 auto">
-      <!-- Background -->
-      <rect width="${chartWidth}" height="${chartHeight}" fill="#1a1a2e" rx="8"/>
-      <!-- Title -->
-      <text x="${chartWidth/2}" y="20" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600">Invoicing per project — total contract value</text>
-      ${chartProjects.map((p, i) => {
-        const y = 35 + i * (barHeight + barGap);
-        const val = parseVal(p.value);
-        const barW = Math.max(2, Math.round((val / maxVal) * barAreaWidth));
-        // Assume ~33% invoiced per payment milestone (3 milestone model)
-        const invoicedPct = p.phase >= 3 ? 0.66 : p.phase >= 1 ? 0.33 : 0;
-        const invoicedW = Math.round(barW * invoicedPct);
-        const name = (p.clientName || '').slice(0, 14);
-        const valStr = '$' + Math.round(val/1000) + 'k';
-        return `
-          <text x="${labelWidth - 4}" y="${y + barHeight/2 + 4}" text-anchor="end" fill="#e8e8e8" font-size="10" font-weight="500">${name}</text>
-          <rect x="${labelWidth}" y="${y}" width="${barW}" height="${barHeight}" fill="#3a3a6a" rx="3"/>
-          <rect x="${labelWidth}" y="${y}" width="${invoicedW}" height="${barHeight}" fill="#00e8bb" rx="3" opacity="0.9"/>
-          <text x="${labelWidth + barW + 6}" y="${y + barHeight/2 + 4}" fill="#ffffff" font-size="10" font-weight="600">${valStr}</text>`;
-      }).join('')}
-      <!-- Legend -->
-      <rect x="${labelWidth}" y="${chartHeight - 14}" width="12" height="10" fill="#00e8bb" rx="2"/>
-      <text x="${labelWidth + 16}" y="${chartHeight - 5}" fill="#e8e8e8" font-size="10">Invoiced (estimated)</text>
-      <rect x="${labelWidth + 140}" y="${chartHeight - 14}" width="12" height="10" fill="#3a3a6a" rx="2"/>
-      <text x="${labelWidth + 156}" y="${chartHeight - 5}" fill="#e8e8e8" font-size="10">Outstanding</text>
-    </svg>`;
-  }
+  // Load saved invoices for each project to get actual invoiced amounts
+  const invoiceData = await Promise.all(invoiceProjects.map(async p => {
+    let recorded = [];
+    try { recorded = await db.read(`invoices_${p.id}.json`, []); } catch {}
+    const invoiced = recorded.reduce((s,i) => s + parseFloat(i.amount||0), 0);
+    const paid     = recorded.filter(i=>i.paid).reduce((s,i) => s + parseFloat(i.amount||0), 0);
+    const val      = parseVal(p.value);
+    // Estimate outstanding invoicing by month based on due date
+    const dueDate  = p.dueDate ? new Date(p.dueDate) : null;
+    const dueMonth = dueDate ? dueDate.toLocaleDateString('en-AU',{month:'short',year:'numeric'}) : 'TBC';
+    return { p, val, invoiced, paid, outstanding: Math.max(0, val - invoiced), dueMonth, recorded };
+  }));
+
+  const totalInvoiced    = invoiceData.reduce((s,d) => s + d.invoiced, 0);
+  const totalPaid        = invoiceData.reduce((s,d) => s + d.paid, 0);
+  const totalOutstanding = invoiceData.reduce((s,d) => s + d.outstanding, 0);
+
+  // Group outstanding by due month
+  const byMonth = {};
+  invoiceData.forEach(d => {
+    if (d.outstanding > 0) {
+      if (!byMonth[d.dueMonth]) byMonth[d.dueMonth] = 0;
+      byMonth[d.dueMonth] += d.outstanding;
+    }
+  });
+
+  // Build project rows for invoice table
+  const invoiceRows = invoiceData.map((d,i) => {
+    const bg = i % 2 === 0 ? '#1a1a2e' : '#141428';
+    const pct = d.val > 0 ? Math.round((d.invoiced/d.val)*100) : 0;
+    const barW = Math.min(100, pct);
+    return `<tr style="background:${bg}">
+      <td style="padding:8px 10px;border-bottom:1px solid #2a2a4a;color:#fff;font-size:12px;font-weight:500">${d.p.clientName}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #2a2a4a;color:#aaa;font-size:11px">$${Math.round(d.val).toLocaleString('en-AU')}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #2a2a4a;font-size:11px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;background:#2a2a4a;border-radius:3px;height:8px;min-width:60px">
+            <div style="width:${barW}%;background:#00e8bb;height:8px;border-radius:3px"></div>
+          </div>
+          <span style="color:${d.invoiced>0?'#00e8bb':'#555'};min-width:60px;text-align:right">$${Math.round(d.invoiced).toLocaleString('en-AU')}</span>
+        </div>
+      </td>
+      <td style="padding:8px 10px;border-bottom:1px solid #2a2a4a;color:${d.outstanding>0?'#ffd93d':'#00e8bb'};font-size:11px;font-weight:${d.outstanding>0?'600':'400'}">$${Math.round(d.outstanding).toLocaleString('en-AU')}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #2a2a4a;color:#aaa;font-size:11px">${d.dueMonth}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #2a2a4a;color:${d.paid>0?'#00e8bb':'#555'};font-size:11px">$${Math.round(d.paid).toLocaleString('en-AU')}</td>
+    </tr>`;
+  }).join('');
+
+  // Monthly outstanding breakdown
+  const monthlyRows = Object.entries(byMonth)
+    .sort(([a],[b]) => new Date('1 '+a) - new Date('1 '+b))
+    .map(([month, amt]) => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #2a2a4a22">
+        <span style="color:#ccc;font-size:12px">${month}</span>
+        <span style="color:#ffd93d;font-size:13px;font-weight:600">$${Math.round(amt).toLocaleString('en-AU')}</span>
+      </div>`).join('');
+
+  let invoicingSectionHtml = `
+  <!-- Invoicing Summary -->
+  <div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:0;margin-bottom:20px;overflow:hidden">
+    <div style="padding:14px 16px;border-bottom:1px solid #2a2a4a;display:flex;gap:24px;align-items:center">
+      <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:1px;flex:1">Invoicing Overview</div>
+      <div style="text-align:center"><div style="font-size:16px;font-weight:700;color:#00e8bb">$${Math.round(totalInvoiced).toLocaleString('en-AU')}</div><div style="font-size:9px;color:#888;text-transform:uppercase">Invoiced</div></div>
+      <div style="text-align:center"><div style="font-size:16px;font-weight:700;color:#6aa3ff">$${Math.round(totalPaid).toLocaleString('en-AU')}</div><div style="font-size:9px;color:#888;text-transform:uppercase">Paid</div></div>
+      <div style="text-align:center"><div style="font-size:16px;font-weight:700;color:#ffd93d">$${Math.round(totalOutstanding).toLocaleString('en-AU')}</div><div style="font-size:9px;color:#888;text-transform:uppercase">Outstanding</div></div>
+      <div style="text-align:center"><div style="font-size:16px;font-weight:700;color:#fff">$${Math.round(totalPortfolio).toLocaleString('en-AU')}</div><div style="font-size:9px;color:#888;text-transform:uppercase">Portfolio</div></div>
+    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+      <thead><tr style="background:#141428">
+        <th style="padding:8px 10px;text-align:left;font-size:10px;color:#666;font-weight:500;text-transform:uppercase;border-bottom:1px solid #2a2a4a">Client</th>
+        <th style="padding:8px 10px;text-align:left;font-size:10px;color:#666;font-weight:500;text-transform:uppercase;border-bottom:1px solid #2a2a4a">Contract value</th>
+        <th style="padding:8px 10px;text-align:left;font-size:10px;color:#666;font-weight:500;text-transform:uppercase;border-bottom:1px solid #2a2a4a">Invoiced to date</th>
+        <th style="padding:8px 10px;text-align:left;font-size:10px;color:#666;font-weight:500;text-transform:uppercase;border-bottom:1px solid #2a2a4a">Outstanding</th>
+        <th style="padding:8px 10px;text-align:left;font-size:10px;color:#666;font-weight:500;text-transform:uppercase;border-bottom:1px solid #2a2a4a">Due month</th>
+        <th style="padding:8px 10px;text-align:left;font-size:10px;color:#666;font-weight:500;text-transform:uppercase;border-bottom:1px solid #2a2a4a">Paid</th>
+      </tr></thead>
+      <tbody>${invoiceRows}</tbody>
+    </table>
+    ${Object.keys(byMonth).length > 0 ? `
+    <div style="padding:14px 16px;border-top:1px solid #2a2a4a">
+      <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Outstanding by month</div>
+      ${monthlyRows}
+    </div>` : ''}
+  </div>`;
+
 
   // ── Build project table rows ──────────────────────────────────────────────
   const projectRows = standard.map((p, i) => {
@@ -1896,12 +1946,7 @@ Write as if briefing the CEO, COO and PM. Highlight what needs attention this we
     ${narrative}
   </div>
 
-  <!-- Invoice chart -->
-  ${chartSvg ? `<div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:16px;margin-bottom:20px">
-    <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Invoicing Overview</div>
-    ${chartSvg}
-    <div style="font-size:11px;color:#aaa;margin-top:8px;text-align:center">Teal = estimated invoiced to date based on phase · Grey = outstanding</div>
-  </div>` : ''}
+  ${invoicingSectionHtml}
 
   <!-- Project table -->
   <div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;overflow:hidden;margin-bottom:20px">
