@@ -538,7 +538,7 @@ function nav(id, el) {
   if (id === 'milestones')  renderMilestones();
   if (id === 'risks')       renderRisks();
   if (id === 'stakeholders')renderStakeholders();
-  if (id === 'invoicing')   renderInvoicing();
+  if (id === 'invoicing')   renderInvoicing().catch(console.error);
   if (id === 'docs')        renderDocs();
 }
 
@@ -1301,64 +1301,170 @@ function parseValue(valStr) {
   return match ? parseFloat(match[0]) : 0;
 }
 
-function renderInvoicing() {
-  const withVal = projects.filter(p => p.type === 'standard' && p.value);
-  if (!withVal.length) { document.getElementById('invoicing-list').innerHTML = '<div style="color:var(--text3);font-size:12px">No contract values found. Upload contracts to populate.</div>'; return; }
+async function renderInvoicing() {
+  const el = document.getElementById('invoicing-list');
+  el.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading financial data…</div>';
 
-  // ── Projection calculation ──────────────────────────────────────────────────
-  const active    = withVal.filter(p => !isCompleted(p));
-  const completed = withVal.filter(p => isCompleted(p));
-  const totalActive    = active.reduce((s, p) => s + parseValue(p.value), 0);
-  const totalCompleted = completed.reduce((s, p) => s + parseValue(p.value), 0);
-  const totalPortfolio = totalActive + totalCompleted;
+  // Load all invoices for all projects
+  const allProjects = projects.filter(p => p.type === 'standard' && p.value);
+  const projectData = await Promise.all(allProjects.map(async p => {
+    let invoices = [];
+    try { const d = await api('/api/projects/' + p.id + '/invoices'); invoices = d.invoices || []; } catch {}
+    const contractVal   = parseValue(p.value);
+    const invoiced      = invoices.reduce((s,i) => s + parseFloat(i.amount||0), 0);
+    const paid          = invoices.filter(i=>i.paid).reduce((s,i) => s + parseFloat(i.amount||0), 0);
+    const unpaid        = invoiced - paid;
+    const outstanding   = Math.max(0, contractVal - invoiced);
+    // Check for overdue — any unpaid invoice older than 30 days
+    const hasOverdue = invoices.some(i => !i.paid && i.sentDate &&
+      (new Date() - new Date(i.sentDate)) > 30 * 24 * 60 * 60 * 1000);
+    return { p, invoices, contractVal, invoiced, paid, unpaid, outstanding, hasOverdue };
+  }));
 
-  // Rough monthly projection — spread active contracts across remaining months this year
-  const now = new Date();
-  const monthsLeft = 12 - now.getMonth();
-  const monthlyProjection = monthsLeft > 0 ? totalActive / monthsLeft : totalActive;
-  const annualProjection  = totalActive + totalCompleted;
+  const active    = projectData.filter(d => !isCompleted(d.p));
+  const archived  = projectData.filter(d => isCompleted(d.p));
 
   const fmt = n => '$' + Math.round(n).toLocaleString('en-AU');
+  const totalContract   = active.reduce((s,d) => s + d.contractVal, 0);
+  const totalInvoiced   = active.reduce((s,d) => s + d.invoiced, 0);
+  const totalPaid       = active.reduce((s,d) => s + d.paid, 0);
+  const totalUnpaid     = active.reduce((s,d) => s + d.unpaid, 0);
+  const totalOutstanding= active.reduce((s,d) => s + d.outstanding, 0);
+  const overdueCount    = active.filter(d => d.hasOverdue).length;
 
-  let html = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
-    <div class="card" style="padding:10px 12px">
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Active portfolio</div>
-      <div style="font-size:18px;font-family:var(--fs);font-weight:600;color:var(--teal)">${fmt(totalActive)}</div>
-      <div style="font-size:10px;color:var(--text3);margin-top:2px">${active.length} active project${active.length!==1?'s':''}</div>
-    </div>
-    <div class="card" style="padding:10px 12px">
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Monthly projection</div>
-      <div style="font-size:18px;font-family:var(--fs);font-weight:600;color:var(--pink-light)">${fmt(monthlyProjection)}</div>
-      <div style="font-size:10px;color:var(--text3);margin-top:2px">Avg over ${monthsLeft} remaining months</div>
-    </div>
-    <div class="card" style="padding:10px 12px">
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:5px">Annual projection</div>
-      <div style="font-size:18px;font-family:var(--fs);font-weight:600;color:var(--blue)">${fmt(annualProjection)}</div>
-      <div style="font-size:10px;color:var(--text3);margin-top:2px">Active + completed ${now.getFullYear()}</div>
-    </div>
-  </div>`;
+  const now = new Date();
 
-  withVal.forEach(p => {
-    const comp = isCompleted(p);
-    const val = parseValue(p.value);
-    html += `<div style="margin-bottom:10px">
-      <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--card2);border:1px solid var(--border);border-radius:9px;margin-bottom:6px">
-        <div style="width:26px;height:26px;border-radius:6px;background:rgba(255,96,128,.12);color:var(--rose);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600">${ini(p.clientName)}</div>
-        <div style="flex:1;font-size:12px;font-weight:500">${p.clientName} · ${p.projectName||''}</div>
-        ${comp?'<span class="badge bt">Completed</span>':'<span class="badge bg">Active</span>'}
-      </div>
-      <div style="padding-left:6px"><div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <span style="font-size:15px;font-weight:600;font-family:var(--fs);color:var(--teal)">${val ? '$'+Math.round(val).toLocaleString('en-AU') : p.value}</span>
-          ${p.dueDate?`<span class="badge bg">Due ${p.dueDate}</span>`:''}
+  let html = `
+  <!-- Summary stats -->
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:20px">
+    ${[
+      { label:'Total portfolio', val: fmt(totalContract), color:'var(--text)', sub: active.length + ' active projects' },
+      { label:'Invoiced', val: fmt(totalInvoiced), color:'var(--teal)', sub: Math.round(totalContract>0?totalInvoiced/totalContract*100:0) + '% of portfolio' },
+      { label:'Paid', val: fmt(totalPaid), color:'var(--blue)', sub: 'Cash received' },
+      { label:'Awaiting payment', val: fmt(totalUnpaid), color:'var(--amber)', sub: 'Invoiced but unpaid' },
+      { label:'Not yet invoiced', val: fmt(totalOutstanding), color: totalOutstanding>0?'var(--rose)':'var(--teal)', sub: overdueCount>0?overdueCount+' project(s) overdue':'All on track' },
+    ].map(s => `<div class="card" style="padding:10px 12px;text-align:center">
+      <div style="font-size:9px;text-transform:uppercase;letter-spacing:.6px;color:var(--text3);margin-bottom:4px">${s.label}</div>
+      <div style="font-size:16px;font-family:var(--fs);font-weight:700;color:${s.color}">${s.val}</div>
+      <div style="font-size:10px;color:var(--text3);margin-top:2px">${s.sub}</div>
+    </div>`).join('')}
+  </div>
+
+  <!-- Active projects table -->
+  <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px">
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+      <div style="font-size:10px;color:var(--teal);text-transform:uppercase;letter-spacing:1px;font-weight:600">Active projects — financial status</div>
+    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+      <thead><tr style="background:var(--card2)">
+        ${['Client / Project','Contract value','Invoiced','Paid','Awaiting payment','Outstanding','Status'].map(h =>
+          `<th style="padding:8px 10px;text-align:left;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)">${h}</th>`
+        ).join('')}
+      </tr></thead>
+      <tbody>`;
+
+  active.forEach((d, i) => {
+    const { p, invoices, contractVal, invoiced, paid, unpaid, outstanding, hasOverdue } = d;
+    const bg = i % 2 === 0 ? 'var(--card)' : 'var(--card2)';
+    const pct = contractVal > 0 ? Math.round(invoiced / contractVal * 100) : 0;
+    let statusLabel = 'On track';
+    let statusColor = 'var(--teal)';
+    if (hasOverdue) { statusLabel = 'Overdue'; statusColor = 'var(--rose)'; }
+    else if (outstanding === 0 && contractVal > 0) { statusLabel = 'Fully invoiced'; statusColor = 'var(--blue)'; }
+    else if (unpaid > 0) { statusLabel = 'Awaiting payment'; statusColor = 'var(--amber)'; }
+
+    html += `<tr style="background:${bg}" onclick="openProject('${p.id}')" title="Click to open project">
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border2)">
+        <div style="font-size:12px;font-weight:500;color:var(--text)">${p.clientName}</div>
+        <div style="font-size:10px;color:var(--text3)">${p.projectName||''}</div>
+        <div style="margin-top:4px;background:var(--border2);border-radius:2px;height:4px;width:80px">
+          <div style="width:${pct}%;background:var(--teal);height:4px;border-radius:2px"></div>
         </div>
-        ${p.invoicingNotes?`<div style="font-size:11px;color:var(--text2);margin-bottom:8px">${p.invoicingNotes}</div>`:''}
-        <div class="arow"><button class="btn btn-r btn-sm" onclick="generateDraft('${p.id}','invoice_reminder','')">Draft invoice reminder ↗</button></div>
-      </div></div>
-    </div>`;
+      </td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border2);color:var(--text);font-size:12px">${contractVal ? fmt(contractVal) : p.value || 'TBC'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border2);color:${invoiced>0?'var(--teal)':'var(--text3)'};font-size:12px">${fmt(invoiced)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border2);color:${paid>0?'var(--blue)':'var(--text3)'};font-size:12px">${fmt(paid)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border2);color:${unpaid>0?'var(--amber)':'var(--text3)'};font-size:12px">${fmt(unpaid)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border2);color:${outstanding>0?'var(--rose)':'var(--teal)'};font-size:12px;font-weight:${outstanding>0?'600':'400'}">${fmt(outstanding)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border2)">
+        <span style="font-size:10px;padding:2px 8px;border-radius:10px;background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor}44">${statusLabel}</span>
+      </td>
+    </tr>
+    ${invoices.length ? `<tr style="background:${bg}">
+      <td colspan="7" style="padding:0 10px 10px 10px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;padding-top:4px">
+          ${invoices.map(inv => `<div style="background:var(--card2);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:10px">
+            <span style="color:var(--text2)">${inv.invoiceNumber}</span>
+            <span style="color:var(--text);margin:0 4px">·</span>
+            <span style="color:var(--teal)">$${parseFloat(inv.amount||0).toLocaleString('en-AU')}</span>
+            <span style="color:var(--text);margin:0 4px">·</span>
+            <span style="color:${inv.paid?'var(--blue)':'var(--amber)'}">
+              ${inv.paid ? '✓ Paid '+(inv.paidAt?new Date(inv.paidAt).toLocaleDateString('en-AU',{day:'numeric',month:'short'}):'') : '⏳ Awaiting payment'}
+            </span>
+            ${!inv.paid?`<button type="button" onclick="event.stopPropagation();markPaidFromPage('${p.id}','${inv.id}',this)" style="margin-left:6px;background:none;border:1px solid var(--teal);color:var(--teal);border-radius:4px;padding:1px 6px;font-size:9px;cursor:pointer">Mark paid</button>`:''}
+          </div>`).join('')}
+        </div>
+      </td>
+    </tr>` : ''}`;
   });
 
-  document.getElementById('invoicing-list').innerHTML = html;
+  html += `</tbody></table></div>`;
+
+  // Archived completed projects
+  if (archived.length) {
+    const archTotal = archived.reduce((s,d) => s + d.contractVal, 0);
+    const archPaid  = archived.reduce((s,d) => s + d.paid, 0);
+    html += `
+    <div style="margin-bottom:8px">
+      <button type="button" onclick="toggleArchive()" style="background:none;border:none;color:var(--text2);font-size:13px;cursor:pointer;padding:0;display:flex;align-items:center;gap:6px">
+        <span id="archive-chevron">▶</span> Completed projects archive (${archived.length}) · ${fmt(archTotal)} total · ${fmt(archPaid)} paid
+      </button>
+    </div>
+    <div id="archive-section" style="display:none">
+      <div class="card" style="padding:0;overflow:hidden">
+        <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+          <thead><tr style="background:var(--card2)">
+            ${['Client / Project','Contract value','Total invoiced','Total paid','Outstanding','Invoices'].map(h =>
+              `<th style="padding:8px 10px;text-align:left;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)">${h}</th>`
+            ).join('')}
+          </tr></thead>
+          <tbody>
+          ${archived.map((d,i) => {
+            const bg = i%2===0?'var(--card)':'var(--card2)';
+            return `<tr style="background:${bg};cursor:pointer" onclick="openProject('${d.p.id}')">
+              <td style="padding:8px 10px;border-bottom:1px solid var(--border2)">
+                <div style="font-size:12px;font-weight:500;color:var(--text)">${d.p.clientName}</div>
+                <div style="font-size:10px;color:var(--text3)">${d.p.projectName||''}</div>
+              </td>
+              <td style="padding:8px 10px;border-bottom:1px solid var(--border2);color:var(--text);font-size:12px">${d.contractVal?fmt(d.contractVal):d.p.value||'TBC'}</td>
+              <td style="padding:8px 10px;border-bottom:1px solid var(--border2);color:var(--teal);font-size:12px">${fmt(d.invoiced)}</td>
+              <td style="padding:8px 10px;border-bottom:1px solid var(--border2);color:var(--blue);font-size:12px">${fmt(d.paid)}</td>
+              <td style="padding:8px 10px;border-bottom:1px solid var(--border2);color:${d.outstanding>0?'var(--rose)':'var(--text3)'};font-size:12px">${fmt(d.outstanding)}</td>
+              <td style="padding:8px 10px;border-bottom:1px solid var(--border2);font-size:10px;color:var(--text3)">${d.invoices.length} invoice${d.invoices.length!==1?'s':''}</td>
+            </tr>`;
+          }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function toggleArchive() {
+  const sec = document.getElementById('archive-section');
+  const chev = document.getElementById('archive-chevron');
+  const open = sec.style.display === 'none';
+  sec.style.display = open ? 'block' : 'none';
+  chev.textContent = open ? '▼' : '▶';
+}
+
+async function markPaidFromPage(projectId, invId, btn) {
+  btn.textContent = '…';
+  btn.disabled = true;
+  await api('/api/projects/' + projectId + '/invoices/' + invId, { method: 'PUT', body: JSON.stringify({ paid: true }) });
+  renderInvoicing();
 }
 
 // ── Comms ─────────────────────────────────────────────────────────────────────
