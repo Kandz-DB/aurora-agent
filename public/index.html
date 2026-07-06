@@ -1010,23 +1010,21 @@ async function deleteProject(id, btn) {
   btn.textContent = 'Deleting…';
   btn.disabled = true;
   try {
-    const token = sessionStorage.getItem('aurora_token') || '';
-    const res = await fetch('/api/projects/' + id, {
-      method: 'DELETE',
-      headers: { 'Authorization': 'Bearer ' + token },
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Delete failed: ' + res.status);
-    }
+    const data = await api('/api/projects/' + id, { method: 'DELETE' });
+    if (!data.success) throw new Error(data.error || 'Delete failed');
     closeModal();
-    // Reload from server to ensure Blob Storage is in sync
-    await loadProjects();
+    if (data.projects) {
+      projects = data.projects;
+    } else {
+      projects = projects.filter(p => p.id !== id);
+    }
+    renderProjects();
     loadSuggestions();
   } catch(e) {
+    console.error('Delete error:', e);
     btn.textContent = origText;
     btn.disabled = false;
-    alert('Error: ' + e.message);
+    alert('Delete failed: ' + e.message);
   }
 }
 
