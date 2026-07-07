@@ -1676,42 +1676,34 @@ async function generateSuggestions() {
 // ── Apply a suggestion action ─────────────────────────────────────────────────
 async function applySuggestion(suggestion) {
   const project = await db.getProject(suggestion.projectId);
-  if (!project) return;
+  if (!project) { console.error(`[applySuggestion] Project not found: ${suggestion.projectId}`); return; }
+  console.log(`[applySuggestion] Applying: ${suggestion.title} for ${project.clientName}`);
 
   if (suggestion.action?.phase !== undefined) {
+    const oldPhase = project.phase || 0;
     await db.updateProjectField(suggestion.projectId, {
       phase: suggestion.action.phase,
       ...(suggestion.action.status ? { status: suggestion.action.status } : {}),
     });
+    await db.logActivity(suggestion.projectId, {
+      type: 'phase_change',
+      summary: `Phase updated to ${PHASES[suggestion.action.phase]} — Diane approved Aurora suggestion: "${suggestion.title}"`,
+    });
+    console.log(`[applySuggestion] Phase: ${PHASES[oldPhase]} → ${PHASES[suggestion.action.phase]}`);
 
-    // If moving to Close-out, trigger close-out actions
-    if (suggestion.action.phase === 4 || suggestion.action.status === 'Completed') {
-      // Draft client feedback email
+    // If moving to Close-out or Completed, trigger close-out actions
+    if (suggestion.action.phase === 4 || suggestion.action.phase === 5 || suggestion.action.status === 'Completed') {
       try { await draftClientFeedback(project); } catch(e) { console.error('[Feedback]', e.message); }
       const yr1 = new Date(); yr1.setFullYear(yr1.getFullYear() + 1);
       const yr2 = new Date(); yr2.setFullYear(yr2.getFullYear() + 2);
-      await createCalendarReminder(
-        `1-year follow-up: ${project.clientName}`,
-        `Check in with ${project.clientName} — explore new opportunities for R2S.`,
-        yr1.toISOString().slice(0,10)
-      );
-      await createCalendarReminder(
-        `2-year follow-up: ${project.clientName}`,
-        `2-year relationship check-in with ${project.clientName}.`,
-        yr2.toISOString().slice(0,10)
-      );
-      await sendInternalEmail(
-        `[Aurora] Project closed: ${project.clientName}`,
-        `The ${project.projectName||project.clientName} project has been marked complete.
-
-Aurora has set 1-year and 2-year follow-up reminders in the Outlook calendar.
-
-Aurora
-R2S Project Management Intelligence`
+      try { await createCalendarReminder(`1-year follow-up: ${project.clientName}`, `Check in with ${project.clientName} — explore new opportunities.`, yr1.toISOString().slice(0,10)); } catch(e) {}
+      try { await createCalendarReminder(`2-year follow-up: ${project.clientName}`, `2-year relationship check-in with ${project.clientName}.`, yr2.toISOString().slice(0,10)); } catch(e) {}
+      await sendEmail('diane.k@risk2solution.com',
+        `[Aurora] Project ${suggestion.action.phase === 5 ? 'completed' : 'in close-out'}: ${project.clientName}`,
+        `The ${project.projectName||project.clientName} project has been moved to ${PHASES[suggestion.action.phase]}.\n\nAurora has drafted a client feedback email for your review and set follow-up calendar reminders.\n\n${process.env.FRONTEND_URL||''}\n\nAurora\nR2S Project Management Intelligence`,
+        true
       );
     }
-
-    console.log(`[Suggestions] Phase updated for ${project.clientName}: ${PHASES[project.phase||0]} → ${PHASES[suggestion.action.phase]}`);
   }
 
   // If suggestion was to draft an escalation
@@ -3085,33 +3077,47 @@ app.post('/api/drafts/generate', express.json(), async (req, res) => {
 
 app.post('/api/drafts/:id/approve', async (req, res) => {
   try {
-    const drafts = db.readJSON('drafts.json');
+    const drafts = await db.getDrafts();
     const draft  = drafts.find(d => d.id === req.params.id);
-    if (!draft) return res.status(404).json({ error: 'Not found' });
+    if (!draft) return res.status(404).json({ error: 'Draft not found' });
 
-    // Send via Outlook
-    const cc = draft.ccEmail ? [draft.ccEmail] : [];
-    await sendEmail(draft.toEmail || INTERNAL_EMAILS[1], draft.subject, draft.body, false, cc);
-    await db.updateDraft(req.params.id, { approved: true });
+    // Save to Outlook Drafts folder ONLY — Diane sends manually from Outlook
+    await saveDraftEmail(draft);
+    console.log(`[Drafts] Saved to Outlook Drafts: ${draft.subject} → ${draft.toEmail}`);
 
-    // Log the approval
+    // Mark as approved in Aurora
+    await db.updateDraft(req.params.id, { approved: true, approvedAt: new Date().toISOString() });
+
+    // Log activity
     if (draft.projectId) {
-      const typeLabels = { consultant_briefing: 'Consultant briefing email sent', client_onboarding: 'Client onboarding email sent', status_email: 'Client status update email sent', kickoff_agenda: 'Kick-off agenda sent', invoice_reminder: 'Invoice reminder email sent', escalation_email: 'Escalation email sent to client', feedback_request: 'Client feedback email sent', consultant_checkin: 'Consultant check-in email sent' };
-      const label = typeLabels[draft.type] || `${draft.type} email approved and sent`;
-      await db.logActivity(draft.projectId, { type: 'draft_sent', summary: `${label} to ${draft.toName || draft.toEmail}` });
+      const typeLabels = {
+        consultant_briefing: 'Consultant briefing saved to Outlook Drafts',
+        client_onboarding: 'Client onboarding email saved to Outlook Drafts',
+        status_email: 'Client status update saved to Outlook Drafts',
+        kickoff_agenda: 'Kick-off agenda saved to Outlook Drafts',
+        invoice_reminder: 'Invoice reminder saved to Outlook Drafts',
+        escalation_email: 'Escalation email saved to Outlook Drafts',
+        feedback_request: 'Client feedback email saved to Outlook Drafts',
+        consultant_checkin: 'Consultant check-in saved to Outlook Drafts',
+      };
+      const label = typeLabels[draft.type] || `${(draft.type||'').replace(/_/g,' ')} saved to Outlook Drafts`;
+      await db.logActivity(draft.projectId, { type: 'draft_sent', summary: `${label} — ready for Diane to review and send to ${draft.toName || draft.toEmail}` });
     }
 
-    // If this was a consultant briefing, send kick-off meeting prompt to Diane
+    // If consultant briefing approved, prompt Diane about kick-off scheduling
     if (draft.type === 'consultant_briefing' && draft.projectId) {
       const project = await db.getProject(draft.projectId);
       if (project) {
         await sendKickoffPrompt(project);
-        console.log(`[Approve] Kick-off prompt sent for ${project.clientName}`);
+        console.log(`[Drafts] Kick-off prompt sent for ${project.clientName}`);
       }
     }
 
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ success: true, message: 'Saved to Outlook Drafts — open Outlook to send' });
+  } catch (e) {
+    console.error('[Drafts] Approve error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/drafts/:id/reject', async (req, res) => {
@@ -3285,15 +3291,23 @@ app.post('/api/suggestions/generate', async (req, res) => {
 
 app.post('/api/suggestions/:id/approve', express.json(), async (req, res) => {
   try {
-    const allSuggestions = await db.getSuggestions();
-    const allWithDismissed = await (async () => { try { return JSON.parse(require('fs').readFileSync(require('path').join(db.DATA,'suggestions.json'),'utf8')); } catch { return []; } })();
-    const suggestions = allWithDismissed;
-    const suggestion = suggestions.find(s => s.id === req.params.id);
-    if (!suggestion) return res.status(404).json({ error: 'Not found' });
+    const id = req.params.id;
+    // Get suggestion from Blob (db.getSuggestions reads from Blob)
+    const suggestions = await db.getSuggestions();
+    const suggestion = suggestions.find(s => s.id === id);
+    if (!suggestion) {
+      console.error(`[Suggestions] Approve: suggestion ${id} not found. Available: ${suggestions.map(s=>s.id).join(',')}`);
+      return res.status(404).json({ error: 'Suggestion not found' });
+    }
+    console.log(`[Suggestions] Approving: ${suggestion.title} for ${suggestion.clientName}`);
+    // Apply the action FIRST
     await applySuggestion(suggestion);
-    await db.updateSuggestion(req.params.id, 'approved');
+    // Then mark as approved so it doesn't reappear
+    await db.updateSuggestion(id, 'approved');
+    console.log(`[Suggestions] ✓ Approved and applied: ${suggestion.title}`);
     res.json({ success: true });
   } catch (e) {
+    console.error('[Suggestions] Approve error:', e.message);
     if (e.message === 'MONTHLY_CAP_REACHED') return res.status(429).json({ error: 'Monthly cap reached' });
     res.status(500).json({ error: e.message });
   }
@@ -3301,9 +3315,15 @@ app.post('/api/suggestions/:id/approve', express.json(), async (req, res) => {
 
 app.post('/api/suggestions/:id/dismiss', async (req, res) => {
   try {
-    await db.updateSuggestion(req.params.id, 'dismissed');
+    const id = req.params.id;
+    console.log(`[Suggestions] Dismissing: ${id}`);
+    await db.updateSuggestion(id, 'dismissed');
+    console.log(`[Suggestions] ✓ Dismissed: ${id}`);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    console.error('[Suggestions] Dismiss error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── Risk Register routes ─────────────────────────────────────────────────────
@@ -3422,6 +3442,16 @@ app.put('/api/projects/:id/deliverables/:delId', express.json(), async (req, res
   try {
     const del = await db.updateDeliverable(req.params.id, req.params.delId, req.body);
     res.json({ deliverable: del });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/projects/:id/deliverables/:delId', async (req, res) => {
+  try {
+    const deliverables = await db.getDeliverables(req.params.id);
+    const filtered = deliverables.filter(d => d.id !== req.params.delId);
+    await db.saveDeliverables(req.params.id, filtered);
+    await db.logActivity(req.params.id, { type: 'manual_note', summary: `Deliverable deleted` });
+    res.json({ success: true, deliverables: filtered });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
