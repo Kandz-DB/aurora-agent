@@ -224,12 +224,11 @@ async function getSuggestions() {
 
 async function saveSuggestion(suggestion) {
   const all = await read('suggestions.json', []);
-  // Avoid duplicates — same project + same type within 24hrs
+  // Avoid duplicates — same project + same type, not yet resolved
   const recent = all.find(s =>
     s.projectId === suggestion.projectId &&
     s.type === suggestion.type &&
-    s.status === 'pending' &&
-    (Date.now() - new Date(s.createdAt).getTime()) < 24 * 60 * 60 * 1000
+    s.status === 'pending'
   );
   if (recent) return recent;
   const full = { ...suggestion, createdAt: new Date().toISOString(), status: 'pending' };
