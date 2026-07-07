@@ -754,18 +754,24 @@ function openProject(id) {
     return lines.map((l,i) => `<div style="display:flex;gap:8px;margin-bottom:5px"><span style="color:var(--teal);font-family:var(--fm);font-size:11px;flex-shrink:0;min-width:18px">${i+1}.</span><span style="font-size:12px;color:var(--text);line-height:1.5">${l}</span></div>`).join('');
   }
 
-  const delHtml = (p.summary || p.deliverables) ? `
+  const delHtml = `
     <div style="margin-bottom:14px">
       <div class="sec" style="margin-top:0">What we are delivering</div>
-      ${p.summary ? `<div style="background:var(--card2);border:1px solid var(--border);border-left:3px solid var(--teal);border-radius:8px;padding:11px 13px;margin-bottom:6px">
-        <div style="font-size:10px;color:var(--teal);font-family:var(--fm);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Service provision</div>
-        ${fmtNumbered(p.summary)}
-      </div>` : ''}
-      ${p.deliverables ? `<div style="background:var(--card2);border:1px solid var(--border);border-left:3px solid var(--pink);border-radius:8px;padding:11px 13px">
-        <div style="font-size:10px;color:var(--pink-light);font-family:var(--fm);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Deliverables</div>
-        ${fmtNumbered(p.deliverables)}
-      </div>` : ''}
-    </div>` : '';
+      <div style="background:var(--card2);border:1px solid var(--border);border-left:3px solid var(--teal);border-radius:8px;padding:11px 13px;margin-bottom:6px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:10px;color:var(--teal);font-family:var(--fm);text-transform:uppercase;letter-spacing:.5px">Service provision</div>
+          <span style="color:var(--teal);font-size:10px;cursor:pointer" onclick="editTextarea('${p.id}','summary',this)">✎ edit</span>
+        </div>
+        <div id="field-summary-${p.id}" style="font-size:12px;color:var(--text2);line-height:1.7">${p.summary ? fmtNumbered(p.summary) : '<span style="color:var(--text3)">No service provision details — click ✎ to add</span>'}</div>
+      </div>
+      <div style="background:var(--card2);border:1px solid var(--border);border-left:3px solid var(--pink);border-radius:8px;padding:11px 13px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:10px;color:var(--pink-light);font-family:var(--fm);text-transform:uppercase;letter-spacing:.5px">Deliverables</div>
+          <span style="color:var(--teal);font-size:10px;cursor:pointer" onclick="editTextarea('${p.id}','deliverables',this)">✎ edit</span>
+        </div>
+        <div id="field-deliverables-${p.id}" style="font-size:12px;color:var(--text2);line-height:1.7">${p.deliverables ? fmtNumbered(p.deliverables) : '<span style="color:var(--text3)">No deliverables listed — click ✎ to add</span>'}</div>
+      </div>
+    </div>`;
 
   // Format deliverables as numbered list
   function fmtList(text, numbered) {
@@ -1503,21 +1509,28 @@ function renderDrafts() {
       </div>
       <div style="padding-left:6px;display:flex;flex-direction:column;gap:6px">`;
     items.forEach(d => {
-      html += `<div class="card" id="draft-${d.id}">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:5px">
-          <span style="font-size:11px;color:var(--text2)">To: ${d.toName||d.toEmail||'client'}</span>
-          <div style="display:flex;align-items:center;gap:6px">
+      html += `<div class="card" id="draft-${d.id}" style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+          <div>
+            <div style="font-size:13px;font-weight:500;font-family:var(--fs);margin-bottom:2px">${d.subject||d.projectName||''}</div>
+            <div style="font-size:11px;color:var(--text2)">To: ${d.toName||d.toEmail||'client'}${d.ccEmail?` · CC: ${d.ccEmail}`:' · CC: diane.k@risk2solution.com'}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
             <span class="badge ${d.urgency==='urgent'?'br':'bg'}">${(d.type||'').replace(/_/g,' ')}</span>
             <button onclick="rejectDraft('${d.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px;padding:0;line-height:1" title="Dismiss">✕</button>
           </div>
         </div>
-        <div style="font-size:13px;font-weight:500;margin-bottom:4px;font-family:var(--fs)">${d.subject||d.projectName||''}</div>
-        <div style="font-size:10px;color:var(--text3);margin-bottom:6px;font-family:var(--fm)">${d.createdAt ? new Date(d.createdAt).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}) + ' at ' + new Date(d.createdAt).toLocaleTimeString('en-AU',{hour:'numeric',minute:'2-digit',hour12:true}) : ''}</div>
-        <div style="font-size:11px;color:var(--text2);line-height:1.6;border-left:2px solid var(--border2);padding-left:10px;margin-bottom:8px">${(d.body||'').slice(0,220)}…</div>
+        <div style="font-size:10px;color:var(--text3);margin-bottom:8px;font-family:var(--fm)">${d.createdAt ? new Date(d.createdAt).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}) + ' at ' + new Date(d.createdAt).toLocaleTimeString('en-AU',{hour:'numeric',minute:'2-digit',hour12:true}) : ''}</div>
+        <!-- Full email body always visible -->
+        <div style="background:var(--card2);border:1px solid var(--border);border-radius:6px;padding:12px;margin-bottom:10px;font-size:12px;color:var(--text2);line-height:1.7;white-space:pre-wrap;max-height:300px;overflow-y:auto">${d.body||''}</div>
+        <div style="font-size:10px;color:var(--text3);margin-bottom:8px">
+          ℹ Clicking "Save to Outlook Drafts" will add this email to the <strong>info@ Drafts folder</strong> in Outlook. Open Outlook to review and send when ready.
+        </div>
         <div class="arow">
-          <button class="btn btn-p btn-sm" onclick="approveDraft('${d.id}')">✓ Approve & send</button>
+          <button class="btn btn-p btn-sm" onclick="approveDraft('${d.id}',this)">📥 Save to Outlook Drafts</button>
           <button class="btn btn-g btn-sm" onclick="rejectDraft('${d.id}')">Dismiss</button>
         </div>
+        <div id="draft-status-${d.id}" style="font-size:11px;color:var(--teal);margin-top:6px;display:none">✓ Saved to Outlook Drafts — open Outlook to review and send</div>
       </div>`;
     });
     html += '</div></div>';
@@ -1536,10 +1549,20 @@ async function generateDraft(projectId, taskType, customPrompt) {
   if (data.draft) drafts.unshift(data.draft);
 }
 
-async function approveDraft(id) {
-  await api(`/api/drafts/${id}/approve`, { method: 'POST' });
-  drafts = drafts.filter(d => d.id !== id);
-  renderDrafts();
+async function approveDraft(id, btn) {
+  if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
+  try {
+    await api(`/api/drafts/${id}/approve`, { method: 'POST' });
+    // Show success message but keep the card visible so Diane knows it's done
+    const statusEl = document.getElementById('draft-status-' + id);
+    if (statusEl) statusEl.style.display = 'block';
+    if (btn) { btn.textContent = '✓ Saved to Drafts'; btn.style.background = 'var(--teal)'; btn.disabled = true; }
+    // Remove from local array but keep displayed for 3 seconds
+    drafts = drafts.filter(d => d.id !== id);
+  } catch(e) {
+    if (btn) { btn.textContent = '📥 Save to Outlook Drafts'; btn.disabled = false; }
+    alert('Error: ' + e.message);
+  }
 }
 
 async function rejectDraft(id) {
@@ -1945,7 +1968,9 @@ async function loadDeliverables(projectId) {
       html += `<div class="del-tile ${cls}">
         <div class="del-num">Deliverable ${d.number}</div>
         <div class="del-name" style="cursor:pointer" onclick="editDeliverable('${projectId}','${d.id}','name','${d.name.replace(/'/g,"\'")}')" title="Click to edit">${d.name} <span style="color:var(--text3);font-size:10px">✎</span></div>
-        ${d.dueDate ? `<div class="del-due" style="cursor:pointer" onclick="editDeliverable('${projectId}','${d.id}','dueDate','${d.dueDate}')" title="Click to edit due date">📅 ${d.dueDate} <span style="color:var(--text3);font-size:9px">✎</span></div>` : `<div class="del-due" style="cursor:pointer;color:var(--text3)" onclick="editDeliverable('${projectId}','${d.id}','dueDate','')" title="Add due date">+ Add due date</div>`}
+        ${d.dueDate
+          ? `<div class="del-due">📅 <input type="date" value="${d.dueDate}" style="background:none;border:none;color:var(--text3);font-size:11px;cursor:pointer;font-family:var(--fb)" onchange="saveDeliverableDate('${projectId}','${d.id}',this.value,this)" title="Click to change date"/></div>`
+          : `<div class="del-due"><input type="date" placeholder="Set due date" style="background:none;border:none;color:var(--text3);font-size:11px;cursor:pointer;font-family:var(--fb)" onchange="saveDeliverableDate('${projectId}','${d.id}',this.value,this)" title="Set due date"/></div>`}
         ${d.calendarEvent ? `<div style="font-size:10px;color:var(--teal);margin-bottom:4px">📆 ${d.calendarEvent}</div>` : ''}
         <span class="del-badge" style="${delBadgeStyle(d.status)}">${d.status}</span>
         ${d.notes
@@ -1956,6 +1981,7 @@ async function loadDeliverables(projectId) {
             `<button class="btn btn-g" style="font-size:9px;padding:2px 6px;${d.status===s?'background:var(--teal);color:#07090f':''}" onclick="setDelStatus('${projectId}','${d.id}','${s}',this)">${s}</button>`
           ).join('')}
           <button class="btn btn-b" style="font-size:9px;padding:2px 6px" onclick="toggleBookingForm('${projectId}','${d.id}')">📅 Book</button>
+          <button onclick="deleteDeliverable('${projectId}','${d.id}',this)" style="background:none;border:1px solid var(--rose);color:var(--rose);font-size:9px;padding:2px 6px;border-radius:4px;cursor:pointer;margin-left:auto">🗑</button>
         </div>
         <div id="booking-form-${d.id}" class="booking-form" style="display:none">
           <div style="font-size:11px;font-weight:500;color:var(--teal);margin-bottom:10px">Schedule this deliverable</div>
@@ -2313,22 +2339,28 @@ async function forceUploadContract() {
 async function editTextarea(projectId, field, linkEl) {
   const displayEl = document.getElementById('field-' + field + '-' + projectId);
   if (!displayEl) return;
-  const current = displayEl.innerText.trim().replace('—','');
+  // Get plain text — use stored value from projects array if available
+  const p = projects.find(x => x.id === projectId);
+  const current = (p && p[field]) ? p[field] : displayEl.innerText.trim().replace('—','');
   const ta = document.createElement('textarea');
   ta.value = current;
-  ta.style.cssText = 'width:100%;min-height:80px;font-size:12px;padding:6px 8px;border-radius:5px;background:var(--card2);border:1px solid var(--teal);color:var(--text2);resize:vertical;font-family:var(--fb);line-height:1.6';
+  ta.style.cssText = 'width:100%;min-height:100px;font-size:12px;padding:6px 8px;border-radius:5px;background:var(--card2);border:1px solid var(--teal);color:var(--text2);resize:vertical;font-family:var(--fb);line-height:1.6';
   displayEl.innerHTML = '';
   displayEl.appendChild(ta);
   ta.focus();
   const save = async () => {
     const newVal = ta.value.trim();
-    displayEl.innerHTML = newVal ? newVal.replace(/\n/g,'<br>') : '—';
+    // Show formatted or plain depending on field
+    if (field === 'summary' || field === 'deliverables' || field === 'milestones' || field === 'timeline') {
+      displayEl.innerHTML = newVal ? newVal.split('\n').filter(l=>l.trim()).map(l=>`<div style="margin-bottom:3px">• ${l.replace(/^[•\-\*\d\.]\s*/,'')}</div>`).join('') : '<span style="color:var(--text3)">Click ✎ to add</span>';
+    } else {
+      displayEl.innerHTML = newVal ? newVal.replace(/\n/g,'<br>') : '—';
+    }
     await api('/api/projects/' + projectId, { method: 'PUT', body: JSON.stringify({ [field]: newVal }) });
-    const p = projects.find(x => x.id === projectId);
     if (p) p[field] = newVal;
   };
   ta.addEventListener('blur', save);
-  ta.addEventListener('keydown', e => { if (e.key === 'Escape') { displayEl.innerHTML = current || '—'; } });
+  ta.addEventListener('keydown', e => { if (e.key === 'Escape') { save(); } });
 }
 
 async function editField(projectId, field, linkEl) {
@@ -2444,6 +2476,32 @@ async function addInvoice(projectId) {
 }
 
 // ── Editable deliverable names ────────────────────────────────────────────────
+async function saveDeliverableDate(projectId, delId, newDate, input) {
+  if (!newDate) return;
+  try {
+    await api(`/api/projects/${projectId}/deliverables/${delId}`, {
+      method: 'PUT', body: JSON.stringify({ dueDate: newDate })
+    });
+    // Update display without reloading whole list
+    const parentDiv = input.closest('.del-due');
+    if (parentDiv) parentDiv.innerHTML = `📅 <input type="date" value="${newDate}" style="background:none;border:none;color:var(--text3);font-size:11px;cursor:pointer;font-family:var(--fb)" onchange="saveDeliverableDate('${projectId}','${delId}',this.value,this)"/>`;
+  } catch(e) { console.error('Save date error:', e.message); }
+}
+
+async function deleteDeliverable(projectId, delId, btn) {
+  if (!confirm('Delete this deliverable? This cannot be undone.')) return;
+  btn.textContent = '…';
+  btn.disabled = true;
+  try {
+    await api(`/api/projects/${projectId}/deliverables/${delId}`, { method: 'DELETE' });
+    await loadDeliverables(projectId);
+  } catch(e) {
+    btn.textContent = '🗑';
+    btn.disabled = false;
+    alert('Delete failed: ' + e.message);
+  }
+}
+
 async function editDeliverable(projectId, delId, field, currentVal) {
   const newVal = prompt(`Edit ${field}:`, currentVal || '');
   if (newVal === null) return; // cancelled
