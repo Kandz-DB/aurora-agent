@@ -3611,17 +3611,19 @@ app.post('/api/projects/:id/deliverables/:delId/book', express.json(), async (re
     const project = await db.getProject(req.params.id);
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
-    const { date, time, durationMinutes, title, location, online } = req.body;
+    const { date, time, timeDisplay, durationMinutes, title, location, online } = req.body;
     if (!date || !time) return res.status(400).json({ error: 'Date and time are required' });
 
     const deliverables = await db.getDeliverables(req.params.id);
     const del = deliverables.find(d => d.id === req.params.delId);
 
+    const eventTitle = title || (del ? del.name : 'Meeting') + ` — ${project.clientName}`;
+    const displayTime = timeDisplay || time;
+    const dateFormatted = new Date(date).toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+
     const booking = {
-      title: title || (del ? del.name : 'Meeting') + ` — ${project.clientName}`,
-      description: del ? `Deliverable: ${del.name}
-Project: ${project.projectName || project.clientName}
-Client: ${project.clientName}` : '',
+      title: eventTitle,
+      description: `Deliverable: ${del?.name || title}\nProject: ${project.projectName || project.clientName}\nClient: ${project.clientName}`,
       startDateTime: `${date}T${time}:00`,
       durationMinutes: parseInt(durationMinutes) || 60,
       location: location || project.clientName,
@@ -3633,36 +3635,82 @@ Client: ${project.clientName}` : '',
       projectId: project.id,
     };
 
-    // Create confirmed booking (not tentative — Diane is manually scheduling this)
-    const eventId = await createCalendarBooking(booking, false);
+    // Create calendar event (tentative — not confirmed until invite is sent)
+    const eventId = await createCalendarBooking(booking, true);
     if (!eventId) return res.status(500).json({ error: 'Calendar booking failed — check Outlook connection' });
+    console.log(`[Booking] Calendar event created: ${eventTitle} on ${date} at ${displayTime}`);
 
-    // Send meeting invites immediately
-    await sendMeetingInvite(booking, eventId);
+    // Build attendee list for the invite email
+    const attendees = [
+      project.consultant ? `• ${project.consultant} (Consultant/Trainer)` : null,
+      project.clientContact ? `• ${project.clientContact} — ${project.clientName} (Client)` : null,
+      '• Diane Kruger — Risk 2 Solution (Project Manager)',
+    ].filter(Boolean).join('\n');
 
-    // Update deliverable status
+    // Draft the meeting invite email — saved to Outlook Drafts, NOT sent
+    const inviteBody = `Dear ${project.clientContact || 'Team'},
+
+I hope this message finds you well. I am writing to confirm the following meeting scheduled in relation to the ${project.projectName || project.clientName} engagement.
+
+Meeting Details:
+Event: ${eventTitle}
+Date: ${dateFormatted}
+Time: ${displayTime} AEST
+Duration: ${durationMinutes || 60} minutes
+Location: ${location || (online ? 'Online — link to follow' : 'TBC')}
+${online ? 'Format: Online meeting\n' : ''}
+Attendees:
+${attendees}
+
+Please confirm your attendance by replying to this email. If you have any questions or need to reschedule, please do not hesitate to contact us.
+
+Kind regards,
+
+Diane Kruger
+Corporate Operations Lead
+Risk 2 Solution Group
+P: 1300 459 970 | M: +61 415 748 747
+E: diane.k@risk2solution.com
+W: www.risk2solution.com`;
+
+    const inviteDraft = {
+      id: `d_${Date.now()}_invite`,
+      projectId: project.id,
+      clientName: project.clientName,
+      projectName: project.projectName,
+      type: 'meeting_invite',
+      urgency: 'routine',
+      toName: project.clientContact,
+      toEmail: project.clientEmail || 'info@risk2solution.com',
+      ccEmail: 'diane.k@risk2solution.com',
+      subject: `Meeting Confirmation — ${eventTitle} — ${dateFormatted}`,
+      body: inviteBody,
+      source: 'booking',
+      createdAt: new Date().toISOString(),
+    };
+
+    await db.saveDraft(inviteDraft);
+    await saveDraftEmail(inviteDraft);
+
+    // Update deliverable with booking details
     if (del) {
       await db.updateDeliverable(req.params.id, req.params.delId, {
         status: 'In Progress',
-        calendarEvent: booking.title,
+        calendarEvent: eventTitle,
         calendarDate: date,
       });
     }
 
-    // Notify Diane
+    // Log activity
+    await db.logActivity(project.id, {
+      type: 'calendar_booking',
+      summary: `Meeting booked: ${eventTitle} on ${dateFormatted} at ${displayTime} — invite draft saved to Outlook Drafts`,
+    });
+
+    // Alert Diane
     await sendEmail('diane.k@risk2solution.com',
-      `[Aurora] Meeting booked: ${booking.title}`,
-      `A meeting has been booked in the R2S Training & Education calendar and invites sent.
-
-Event: ${booking.title}
-Date: ${date}
-Time: ${time}
-Duration: ${durationMinutes || 60} minutes
-Location: ${location || 'TBC'}
-${online ? 'Format: Online\n' : ''}Attendees:\n${project.consultant ? '• ' + project.consultant + '\n' : ''}${project.clientContact ? '• ' + project.clientContact + ' (' + project.clientName + ')\n' : ''}• Diane Kruger
-
-Aurora
-R2S Project Management Intelligence`,
+      `[Aurora] Meeting booked — invite draft ready: ${eventTitle}`,
+      `Aurora has created a calendar event and saved a draft meeting invite to your Outlook Drafts folder.\n\nEvent: ${eventTitle}\nDate: ${dateFormatted}\nTime: ${displayTime} AEST\nDuration: ${durationMinutes || 60} minutes\nLocation: ${location || 'TBC'}\n\nOpen Outlook → Drafts → review the invite → hit Send when ready.\n\nAurora\nR2S Project Management Intelligence`,
       true
     );
 
