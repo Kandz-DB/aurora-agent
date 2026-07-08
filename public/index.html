@@ -1987,7 +1987,20 @@ async function loadDeliverables(projectId) {
           <div style="font-size:11px;font-weight:500;color:var(--teal);margin-bottom:10px">Schedule this deliverable</div>
           <div class="booking-row">
             <div><label>Date</label><input type="date" id="bk-date-${d.id}"/></div>
-            <div><label>Time</label><input type="time" id="bk-time-${d.id}" value="09:00"/></div>
+            <div style="display:flex;gap:4px;align-items:flex-end">
+              <div><label>Time</label>
+                <select id="bk-hour-${d.id}" style="font-size:12px;width:52px">
+                  ${[...Array(12)].map((_,i)=>`<option value="${String(i+1).padStart(2,'0')}">${i+1}</option>`).join('')}
+                </select>
+                <span style="color:var(--text2);font-size:12px;margin:0 2px">:</span>
+                <select id="bk-min-${d.id}" style="font-size:12px;width:52px">
+                  <option value="00">00</option><option value="15">15</option><option value="30">30</option><option value="45">45</option>
+                </select>
+                <select id="bk-ampm-${d.id}" style="font-size:12px;width:52px">
+                  <option value="AM">AM</option><option value="PM" selected>PM</option>
+                </select>
+              </div>
+            </div>
           </div>
           <div class="booking-row">
             <div><label>Duration (minutes)</label><input type="number" id="bk-dur-${d.id}" value="60" min="15" step="15"/></div>
@@ -1996,7 +2009,7 @@ async function loadDeliverables(projectId) {
           <label>Location (optional)</label>
           <input type="text" id="bk-loc-${d.id}" placeholder="e.g. Client office, Zoom"/>
           <div class="arow" style="margin-top:6px">
-            <button class="btn btn-t btn-sm" onclick="confirmBooking('${projectId}','${d.id}','${d.name.replace(/'/g,"\\'")}',this)">✓ Book & send invites</button>
+            <button class="btn btn-t btn-sm" onclick="confirmBooking('${projectId}','${d.id}','${d.name.replace(/'/g,"\\'")}',this)">📅 Book & draft invite</button>
             <button class="btn btn-g btn-sm" onclick="toggleBookingForm('${projectId}','${d.id}')">Cancel</button>
           </div>
           <div id="bk-status-${d.id}" style="font-size:11px;color:var(--text3);margin-top:6px"></div>
@@ -2028,29 +2041,41 @@ function toggleBookingForm(projectId, delId) {
 
 async function confirmBooking(projectId, delId, delName, btn) {
   const date     = document.getElementById('bk-date-' + delId)?.value;
-  const time     = document.getElementById('bk-time-' + delId)?.value;
+  const hour     = document.getElementById('bk-hour-' + delId)?.value || '09';
+  const min      = document.getElementById('bk-min-' + delId)?.value || '00';
+  const ampm     = document.getElementById('bk-ampm-' + delId)?.value || 'AM';
   const duration = document.getElementById('bk-dur-' + delId)?.value;
   const online   = document.getElementById('bk-online-' + delId)?.value;
   const location = document.getElementById('bk-loc-' + delId)?.value;
   const status   = document.getElementById('bk-status-' + delId);
 
-  if (!date || !time) { if (status) { status.textContent = 'Please enter a date and time.'; status.style.color = 'var(--rose)'; } return; }
+  if (!date) { if (status) { status.textContent = 'Please enter a date.'; status.style.color = 'var(--rose)'; } return; }
+
+  // Convert to 24hr for API
+  let h = parseInt(hour);
+  if (ampm === 'PM' && h !== 12) h += 12;
+  if (ampm === 'AM' && h === 12) h = 0;
+  const time = `${String(h).padStart(2,'0')}:${min}`;
+  const timeDisplay = `${hour}:${min} ${ampm}`;
 
   const origText = btn.textContent;
   btn.textContent = 'Booking…';
   btn.disabled = true;
-  if (status) { status.textContent = 'Creating calendar event and sending invites…'; status.style.color = 'var(--text3)'; }
+  if (status) { status.textContent = 'Creating calendar event and drafting invite email…'; status.style.color = 'var(--text3)'; }
 
   try {
     const data = await api('/api/projects/' + projectId + '/deliverables/' + delId + '/book', {
       method: 'POST',
-      body: JSON.stringify({ date, time, durationMinutes: parseInt(duration), online: online === 'true', location, title: delName }),
+      body: JSON.stringify({ date, time, timeDisplay, durationMinutes: parseInt(duration), online: online === 'true', location, title: delName }),
     });
 
     if (data.success) {
-      if (status) { status.textContent = '✓ Booked and invites sent to all attendees'; status.style.color = 'var(--teal)'; }
+      if (status) {
+        status.innerHTML = '✓ Calendar booking created · <strong>Draft meeting invite saved to Outlook Drafts</strong> — open Outlook to review and send to attendees';
+        status.style.color = 'var(--teal)';
+      }
       btn.textContent = '✓ Booked';
-      setTimeout(() => { loadDeliverables(projectId); }, 2000);
+      setTimeout(() => { loadDeliverables(projectId); }, 3000);
     } else {
       throw new Error(data.error || 'Booking failed');
     }
