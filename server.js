@@ -2295,7 +2295,15 @@ R2S Project Management Intelligence`,
     await readConsultantReplies();
   }
 
-  // ── 6. At-risk project summary ────────────────────────────────────────────
+  // ── 6. Daily executive report (weekdays only) ────────────────────────────
+  if (isWeekday) {
+    try {
+      console.log('[Batch] Sending daily executive report...');
+      await sendWeeklyExecutiveReport(standard);
+    } catch(e) { console.error('[WeeklyReport] Error:', e.message); }
+  }
+
+  // ── 7. At-risk project summary ────────────────────────────────────────────
   const atRisk = standard.filter(p => {
     if (!p.dueDate) return false;
     const days = Math.round((new Date(p.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
