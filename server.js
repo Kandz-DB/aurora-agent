@@ -651,12 +651,6 @@ async function createCalendarBooking(booking, tentative = true) {
       reminderMinutesBeforeStart: 60 * 24, // 24hr reminder
     };
 
-    const res = await axios.post(
-      `https://graph.microsoft.com/v1.0/users/${mailbox}/calendars`,
-      null,
-      { headers: { Authorization: `Bearer ${token}` }, timeout: 5000 }
-    );
-
     // Find the training calendar
     const calsRes = await axios.get(
       `https://graph.microsoft.com/v1.0/users/${mailbox}/calendars`,
@@ -3411,6 +3405,16 @@ app.put('/api/projects/:id/invoices/:invId', express.json(), async (req, res) =>
       await writeInvoices(req.params.id, invoices);
     }
     res.json({ invoice: invoices[idx] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/projects/:id/invoices/:invId', async (req, res) => {
+  try {
+    const invoices = await readInvoices(req.params.id);
+    const filtered = invoices.filter(i => i.id !== req.params.invId);
+    await writeInvoices(req.params.id, filtered);
+    await db.logActivity(req.params.id, { type: 'contract', summary: `Invoice deleted` });
+    res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
