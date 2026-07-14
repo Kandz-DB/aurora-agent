@@ -2289,10 +2289,10 @@ R2S Project Management Intelligence`,
     await readConsultantReplies();
   }
 
-  // ── 6. Daily executive report (weekdays only) ────────────────────────────
-  if (isWeekday) {
+  // ── 6. Daily executive report (mondays only) ────────────────────────────
+  if (isMonday) {
     try {
-      console.log('[Batch] Sending daily executive report...');
+      console.log('[Batch] Sending weekly executive report...');
       await sendWeeklyExecutiveReport(standard);
     } catch(e) { console.error('[WeeklyReport] Error:', e.message); }
   }
