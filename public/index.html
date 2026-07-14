@@ -1981,6 +1981,7 @@ async function loadDeliverables(projectId) {
             `<button class="btn btn-g" style="font-size:9px;padding:2px 6px;${d.status===s?'background:var(--teal);color:#07090f':''}" onclick="setDelStatus('${projectId}','${d.id}','${s}',this)">${s}</button>`
           ).join('')}
           <button class="btn btn-b" style="font-size:9px;padding:2px 6px" onclick="toggleBookingForm('${projectId}','${d.id}')">📅 Book</button>
+          <button onclick="markAlreadyBooked('${projectId}','${d.id}',this)" style="background:none;border:1px solid var(--teal);color:var(--teal);font-size:9px;padding:2px 6px;border-radius:4px;cursor:pointer" title="Already booked externally — mark as complete">✓ Booked</button>
           <button onclick="deleteDeliverable('${projectId}','${d.id}',this)" style="background:none;border:1px solid var(--rose);color:var(--rose);font-size:9px;padding:2px 6px;border-radius:4px;cursor:pointer;margin-left:auto">🗑</button>
         </div>
         <div id="booking-form-${d.id}" class="booking-form" style="display:none">
@@ -2445,17 +2446,38 @@ async function loadProjectInvoices(projectId) {
 
   if (invoices.length) {
     invoices.forEach(inv => {
-      html += `<div class="card" style="margin-bottom:8px;padding:10px 12px">
+      html += `<div class="card" style="margin-bottom:8px;padding:10px 12px" id="inv-card-${inv.id}">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-          <div style="font-size:13px;font-weight:500;color:var(--text)">Invoice ${inv.invoiceNumber||'#'}</div>
+          <div style="display:flex;align-items:center;gap:6px;flex:1">
+            <input value="${inv.invoiceNumber||''}" placeholder="INV-001"
+              style="font-size:13px;font-weight:500;background:none;border:none;border-bottom:1px solid transparent;color:var(--text);width:100px;padding:0"
+              onchange="updateInvoiceField('${projectId}','${inv.id}','invoiceNumber',this.value)"
+              onfocus="this.style.borderBottomColor='var(--teal)'"
+              onblur="this.style.borderBottomColor='transparent'"
+              title="Click to edit invoice number"/>
+            <span style="color:var(--text3);font-size:11px">·</span>
+            <input value="${inv.sentDate||inv.createdAt?.slice(0,10)||''}" type="date"
+              style="font-size:11px;background:none;border:none;border-bottom:1px solid transparent;color:var(--text3);padding:0"
+              onchange="updateInvoiceField('${projectId}','${inv.id}','sentDate',this.value)"
+              onfocus="this.style.borderBottomColor='var(--teal)'"
+              onblur="this.style.borderBottomColor='transparent'"
+              title="Click to edit sent date"/>
+          </div>
           <div style="display:flex;align-items:center;gap:6px">
-            <span style="font-size:13px;font-weight:600;color:var(--teal)">$${parseFloat(inv.amount||0).toLocaleString('en-AU')}</span>
+            <span style="color:var(--text3);font-size:12px">$</span>
+            <input value="${parseFloat(inv.amount||0).toFixed(2)}" type="text" inputmode="numeric"
+              style="font-size:13px;font-weight:600;background:none;border:none;border-bottom:1px solid transparent;color:var(--teal);width:80px;text-align:right;padding:0"
+              onchange="updateInvoiceField('${projectId}','${inv.id}','amount',this.value.replace(/[^0-9.]/g,''))"
+              onfocus="this.style.borderBottomColor='var(--teal)'"
+              onblur="this.style.borderBottomColor='transparent'"
+              title="Click to edit amount"/>
             ${inv.paid
               ? `<span class="badge bt">✓ Paid ${inv.paidAt?new Date(inv.paidAt).toLocaleDateString('en-AU',{day:'numeric',month:'short'}):''}</span>`
               : `<button class="btn btn-t btn-sm" onclick="markInvoicePaid('${projectId}','${inv.id}',this)">Mark paid</button>`}
+            <button onclick="deleteInvoice('${projectId}','${inv.id}',this)" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:0;line-height:1" title="Delete invoice">🗑</button>
           </div>
         </div>
-        <div style="font-size:11px;color:var(--text3)">Sent: ${inv.sentDate||inv.createdAt?.slice(0,10)||'—'} ${inv.source==='email'?'· Detected from email':''}</div>
+        <div style="font-size:10px;color:var(--text3)">${inv.source==='xero'?'· Detected from Xero email':inv.source==='email'?'· Detected from email':'· Manually recorded'}</div>
       </div>`;
     });
   } else {
@@ -2481,6 +2503,28 @@ async function loadProjectInvoices(projectId) {
   el.innerHTML = html;
 }
 
+async function updateInvoiceField(projectId, invId, field, value) {
+  try {
+    await api(`/api/projects/${projectId}/invoices/${invId}`, {
+      method: 'PUT', body: JSON.stringify({ [field]: value })
+    });
+  } catch(e) { console.error('Invoice update error:', e.message); }
+}
+
+async function deleteInvoice(projectId, invId, btn) {
+  if (!confirm('Delete this invoice? This cannot be undone.')) return;
+  btn.textContent = '…';
+  btn.disabled = true;
+  try {
+    await api(`/api/projects/${projectId}/invoices/${invId}`, { method: 'DELETE' });
+    document.getElementById('inv-card-' + invId)?.remove();
+  } catch(e) {
+    btn.textContent = '🗑';
+    btn.disabled = false;
+    alert('Error: ' + e.message);
+  }
+}
+
 async function markInvoicePaid(projectId, invId, btn) {
   btn.textContent = '…';
   btn.disabled = true;
@@ -2501,6 +2545,21 @@ async function addInvoice(projectId) {
 }
 
 // ── Editable deliverable names ────────────────────────────────────────────────
+async function markAlreadyBooked(projectId, delId, btn) {
+  btn.textContent = '…';
+  btn.disabled = true;
+  try {
+    await api(`/api/projects/${projectId}/deliverables/${delId}`, {
+      method: 'PUT', body: JSON.stringify({ status: 'Complete' })
+    });
+    await loadDeliverables(projectId);
+  } catch(e) {
+    btn.textContent = '✓ Booked';
+    btn.disabled = false;
+    alert('Error: ' + e.message);
+  }
+}
+
 async function saveDeliverableDate(projectId, delId, newDate, input) {
   if (!newDate) return;
   try {
