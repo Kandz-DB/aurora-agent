@@ -868,6 +868,18 @@ async function readConsultantReplies() {
         );
       } catch(tagErr) {}
 
+      // ── Check for internal task confirmations ─────────────────────────────
+      const wasInternalConfirmation = await checkInternalTaskConfirmations(bodyText, subject, fromEmail);
+      if (wasInternalConfirmation) {
+        try {
+          await axios.patch(`https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
+            { isRead: true, categories: ['Aurora Processed'] },
+            { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+          );
+        } catch(e) {}
+        continue;
+      }
+
       // Determine if this is internal R2S or external (client/other)
       const isInternal = fromEmail.toLowerCase().endsWith('@risk2solution.com') ||
                          fromEmail.toLowerCase().endsWith('@presilience.com');
@@ -2289,15 +2301,23 @@ R2S Project Management Intelligence`,
     await readConsultantReplies();
   }
 
-  // ── 6. Daily executive report (mondays only) ────────────────────────────
-  if (isMonday) {
+  // ── 6. Daily executive report (weekdays only) ────────────────────────────
+  if (isWeekday) {
     try {
-      console.log('[Batch] Sending weekly executive report...');
+      console.log('[Batch] Sending daily executive report...');
       await sendWeeklyExecutiveReport(standard);
     } catch(e) { console.error('[WeeklyReport] Error:', e.message); }
   }
 
-  // ── 7. At-risk project summary ────────────────────────────────────────────
+  // ── 7. Internal programme reminders (daily) ───────────────────────────────
+  try { await checkInternalProjectReminders(); } catch(e) { console.error('[Internal]', e.message); }
+
+  // ── 8. Internal programme weekly report (Mondays) ────────────────────────
+  if (isMonday) {
+    try { await sendInternalProjectStatusReport(); } catch(e) { console.error('[InternalReport]', e.message); }
+  }
+
+  // ── 9. At-risk project summary ────────────────────────────────────────────
   const atRisk = standard.filter(p => {
     if (!p.dueDate) return false;
     const days = Math.round((new Date(p.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
@@ -3777,3 +3797,511 @@ async function start() {
 }
 
 start().catch(console.error);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INTERNAL PROJECTS — IoP Grad Cert / Grad Dip Programme Management
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Staff email directory for internal projects
+const INTERNAL_STAFF = {
+  'Dave Cohen':       process.env.DAVE_EMAIL        || 'dave.c@risk2solution.com',
+  'Diane Kruger':     process.env.DIANE_EMAIL        || 'diane.k@risk2solution.com',
+  'Cherry Abadeza':   process.env.CHERRY_EMAIL       || 'cherry.a@risk2solution.com',
+  'Janita Zhang':     process.env.JANITA_EMAIL       || 'janita.z@risk2solution.com',
+  'Dr Paul Johnston': process.env.PAUL_EMAIL         || 'paul.j@risk2solution.com',
+  'Kandia':           process.env.KANDIA_EMAIL       || 'kandia@risk2solution.com',
+  'Trainer':          process.env.TRAINER_EMAIL      || 'info@risk2solution.com',
+};
+
+// The master checklist — 22 steps across 5 phases
+const IOP_CHECKLIST_TEMPLATE = [
+  // PHASE 1 — Program Setup and Cohort Launch
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 1, group: 'Set the delivery dates',
+    task: 'Confirm the start date and module schedule for the next Grad Cert / Grad Dip intake with academic lead.',
+    owner: 'Dave Cohen', trigger: 'program_start', daysOffset: -90 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 1, group: 'Set the delivery dates',
+    task: 'Capture final dates in the Master Communication & Cohort Tracker.',
+    owner: 'Diane Kruger', trigger: 'program_start', daysOffset: -90 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 2, group: 'Update public-facing information',
+    task: 'Update the Institute of Presilience website with the new intake dates and any pricing changes.',
+    owner: 'Janita Zhang', trigger: 'program_start', daysOffset: -85 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 2, group: 'Update public-facing information',
+    task: 'Ensure enquiry/enrolment forms, landing pages, and brochure PDFs reflect the correct dates.',
+    owner: 'Janita Zhang', trigger: 'program_start', daysOffset: -85 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 3, group: 'Lock in delivery team',
+    task: 'Book trainers and guest speakers for each module.',
+    owner: 'Dave Cohen', trigger: 'program_start', daysOffset: -80 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 3, group: 'Lock in delivery team',
+    task: 'Confirm availability, topic, time slot, delivery mode (live, pre-recorded, panel).',
+    owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -80 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 3, group: 'Lock in delivery team',
+    task: 'Record confirmed trainers and speakers in the tracker.',
+    owner: 'Diane Kruger', trigger: 'program_start', daysOffset: -78 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 4, group: 'Create the cohort Microsoft Teams Classroom',
+    task: 'Create a new Teams Class Team for this intake (Grad Cert or Grad Dip) — name consistently e.g. Graduate Certificate (11056NAT) - [Month Year].',
+    owner: 'Janita Zhang', trigger: 'program_start', daysOffset: -75 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 4, group: 'Create the cohort Microsoft Teams Classroom',
+    task: 'Set up branding, homepage, and channels by module/topic in Teams Classroom.',
+    owner: 'Janita Zhang', trigger: 'program_start', daysOffset: -74 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 4, group: 'Create the cohort Microsoft Teams Classroom',
+    task: 'Upload general course resources to Teams: IoP Candidate Handbook, Required Reading, EUOs.',
+    owner: 'Diane Kruger', trigger: 'program_start', daysOffset: -73 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 4, group: 'Create the cohort Microsoft Teams Classroom',
+    task: 'Create all assignments within Teams Classroom.',
+    owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -72 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 4, group: 'Create the cohort Microsoft Teams Classroom',
+    task: 'Add core teaching staff and admin as owners/members. Create M365 Distribution Group.',
+    owner: 'Janita Zhang', trigger: 'program_start', daysOffset: -71 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 5, group: 'Build the marketing & awareness activity',
+    task: 'Create social media campaign (LinkedIn, internal networks, partner channels) — align messaging with program theme and confirmed dates. Schedule posts.',
+    owner: 'Janita Zhang', trigger: 'program_start', daysOffset: -70 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 6, group: 'Student recruitment and confirmation',
+    task: 'Confirm which students are attending this intake (verbals, EOI, or carried over from previous intake).',
+    owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -60 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 6, group: 'Student recruitment and confirmation',
+    task: 'Send enrolment email to each confirmed student: offer/welcome, course dates, fee information, next steps for enrolment/payment.',
+    owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -58 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 6, group: 'Student recruitment and confirmation',
+    task: 'Update the Communication & Cohort Tracker spreadsheet after each student outreach.',
+    owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -57 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 7, group: 'Enrolment administration',
+    task: 'When student returns enrolment form: Add student to Axcelerate (official registration).',
+    owner: 'Diane Kruger', trigger: 'rolling', daysOffset: 0 },
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 7, group: 'Enrolment administration',
+    task: 'Confirm the fee amount for each student with Dave (standard, scholarship, partner, or corporate rate). Notify Diane of agreed pricing so she can raise the invoice.',
+    owner: 'Cherry Abadeza', trigger: 'rolling', daysOffset: 0 },
+  // PHASE 2 — Two weeks before program start
+  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Start', step: 8, group: 'Set up student access to systems',
+    task: 'Create an Institute of Presilience (IoP) email address for each enrolled student.',
+    owner: 'Janita Zhang', trigger: 'program_start', daysOffset: -14 },
+  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Start', step: 8, group: 'Set up student access to systems',
+    task: 'Add each student to the cohort Teams Classroom using their IoP email. Test their access (sign in, view channels, see files).',
+    owner: 'Janita Zhang', trigger: 'program_start', daysOffset: -13 },
+  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Start', step: 9, group: 'Send pre-start onboarding email (T-2 weeks)',
+    task: 'Send each student their IoP email address and sign-in instructions — how to access Teams and join the Classroom.',
+    owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -14 },
+  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Start', step: 9, group: 'Send pre-start onboarding email (T-2 weeks)',
+    task: 'Upload the final EUO into the Teams Classroom. Tell students that the EUO is now available in Teams.',
+    owner: 'Diane Kruger', trigger: 'program_start', daysOffset: -13 },
+  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Start', step: 10, group: 'Readiness check',
+    task: 'Ask each student to confirm they can log in to Teams and access the EUO, timetable, and resources. Follow up with anyone who hasn\'t confirmed. Update tracker.',
+    owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -10 },
+  // PHASE 3 — One week before program start
+  { phase: 3, phaseName: 'Phase 3 — One Week Before Start', step: 11, group: 'Finalise learning materials',
+    task: 'Confirm training slides and facilitator decks for Module 1 are final. Upload slides and any pre-reading to the correct channel in Teams Classroom.',
+    owner: 'Diane Kruger', trigger: 'program_start', daysOffset: -7 },
+  { phase: 3, phaseName: 'Phase 3 — One Week Before Start', step: 12, group: 'One-week reminder email to students',
+    task: 'Send group email: "Program starts in one week" — include session dates and times, expectations for attendance/camera/mic/engagement, and any preparation required.',
+    owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -7 },
+  { phase: 3, phaseName: 'Phase 3 — One Week Before Start', step: 13, group: 'Guest speaker / trainer coordination',
+    task: 'Confirm all guest speakers for Week 1. Send them their session date/time, Teams link, and cohort context. Confirm special requirements (breakout rooms, polls, recording, chat access). Note in tracker.',
+    owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -6 },
+  // PHASE 4 — During delivery (per module)
+  { phase: 4, phaseName: 'Phase 4 — During Delivery', step: 14, group: 'Module delivery rhythm',
+    task: 'Confirm slides and materials are uploaded to Teams before each module session.',
+    owner: 'Diane Kruger', trigger: 'module', daysOffset: -2 },
+  { phase: 4, phaseName: 'Phase 4 — During Delivery', step: 14, group: 'Module delivery rhythm',
+    task: 'Confirm all assignment due dates related to the module are visible and accurate in Teams.',
+    owner: 'Cherry Abadeza', trigger: 'module', daysOffset: -2 },
+  { phase: 4, phaseName: 'Phase 4 — During Delivery', step: 14, group: 'Module delivery rhythm',
+    task: 'Confirm trainer(s) and guest speaker(s) are still available and briefed.',
+    owner: 'Cherry Abadeza', trigger: 'module', daysOffset: -7 },
+  { phase: 4, phaseName: 'Phase 4 — During Delivery', step: 14, group: 'Module delivery rhythm',
+    task: 'Send 1-week-before reminder email to students: delivery dates, session link, assessment submission reminders.',
+    owner: 'Cherry Abadeza', trigger: 'module', daysOffset: -7 },
+  { phase: 4, phaseName: 'Phase 4 — During Delivery', step: 14, group: 'Module delivery rhythm',
+    task: 'Send day-before reminder: reconfirm start time, trainer, and any materials to have ready.',
+    owner: 'Cherry Abadeza', trigger: 'module', daysOffset: -1 },
+  { phase: 4, phaseName: 'Phase 4 — During Delivery', step: 14, group: 'Module delivery rhythm',
+    task: 'Run and record the live online session in the Teams Classroom.',
+    owner: 'Trainer', trigger: 'module', daysOffset: 0 },
+  { phase: 4, phaseName: 'Phase 4 — During Delivery', step: 14, group: 'Module delivery rhythm',
+    task: 'Track student attendance and engagement in the tracker (Attended / Missed / Follow up). Follow up with any absent students via email.',
+    owner: 'Cherry Abadeza', trigger: 'module', daysOffset: 1 },
+  { phase: 4, phaseName: 'Phase 4 — During Delivery', step: 14, group: 'Module delivery rhythm',
+    task: 'Send post-module follow-up email: where to find recordings, assessment submission deadlines, encourage discussion.',
+    owner: 'Cherry Abadeza', trigger: 'module', daysOffset: 1 },
+  { phase: 4, phaseName: 'Phase 4 — During Delivery', step: 15, group: 'Student support and admin during delivery',
+    task: 'Monitor Teams Classroom chat for questions, assessment clarifications, and pastoral/support needs.',
+    owner: 'Dr Paul Johnston', trigger: 'ongoing', daysOffset: 0 },
+  { phase: 4, phaseName: 'Phase 4 — During Delivery', step: 15, group: 'Student support and admin during delivery',
+    task: 'Follow up on any missed invoices or partial payments during delivery.',
+    owner: 'Diane Kruger', trigger: 'ongoing', daysOffset: 0 },
+  { phase: 4, phaseName: 'Phase 4 — During Delivery', step: 15, group: 'Student support and admin during delivery',
+    task: 'Keep Axcelerate updated with attendance, progress, and assessment submissions.',
+    owner: 'Diane Kruger', trigger: 'ongoing', daysOffset: 0 },
+  // PHASE 5 — Completion / Wrap-up
+  { phase: 5, phaseName: 'Phase 5 — Program Completion', step: 16, group: 'Financial completion',
+    task: 'Confirm all students have paid in full. Chase any outstanding invoices before issuing awards. Mark in tracker.',
+    owner: 'Diane Kruger', trigger: 'program_end', daysOffset: 0 },
+  { phase: 5, phaseName: 'Phase 5 — Program Completion', step: 17, group: 'Academic completion',
+    task: 'Confirm all required assessments are submitted and marked according to competency/criteria. Confirm which students have met requirements for award.',
+    owner: 'Dr Paul Johnston', trigger: 'program_end', daysOffset: 0 },
+  { phase: 5, phaseName: 'Phase 5 — Program Completion', step: 18, group: 'Records and documentation',
+    task: 'Export academic records from Teams Classroom. Prepare formal transcripts for each eligible student (official Institute of Presilience format).',
+    owner: 'Janita Zhang', trigger: 'program_end', daysOffset: 7 },
+  { phase: 5, phaseName: 'Phase 5 — Program Completion', step: 19, group: 'Certification and graduation',
+    task: 'Issue Certificates (Grad Cert / Grad Dip) and official Transcripts to eligible students.',
+    owner: 'Diane Kruger', trigger: 'program_end', daysOffset: 14 },
+  { phase: 5, phaseName: 'Phase 5 — Program Completion', step: 19, group: 'Certification and graduation',
+    task: 'Set the date for Graduation / Recognition ceremony (virtual or in-person). Schedule as Microsoft Teams Webinar. Send details to students. Prepare slide deck. Deliver and produce ceremony. Edit and upload recording to IoP YouTube.',
+    owner: 'Janita Zhang', trigger: 'program_end', daysOffset: 21 },
+  { phase: 5, phaseName: 'Phase 5 — Program Completion', step: 19, group: 'Certification and graduation',
+    task: 'Send thank-you email with recording and alumni welcome message to graduates.',
+    owner: 'Cherry Abadeza', trigger: 'program_end', daysOffset: 28 },
+  { phase: 5, phaseName: 'Phase 5 — Program Completion', step: 20, group: 'Post-nominal approval',
+    task: 'Prepare and submit Post Nominal application for each graduate so they are approved to use post-nominals. Notify graduates once cleared.',
+    owner: 'Cherry Abadeza', trigger: 'program_end', daysOffset: 30 },
+  { phase: 5, phaseName: 'Phase 5 — Program Completion', step: 21, group: 'Graduate engagement, close-out and handover',
+    task: 'Add graduating students to: Alumni database/mailing list, relevant professional communities, IoP alumni association (with welcome email and next-touch timeline). Update final status in Communication & Cohort Tracker.',
+    owner: 'Cherry Abadeza', trigger: 'program_end', daysOffset: 35 },
+  { phase: 5, phaseName: 'Phase 5 — Program Completion', step: 21, group: 'Graduate engagement, close-out and handover',
+    task: 'Archive the Teams Classroom: lock posting permissions or set to read-only for students. Ensure all learning materials, chat logs, and recordings are stored per retention requirements.',
+    owner: 'Janita Zhang', trigger: 'program_end', daysOffset: 35 },
+  { phase: 5, phaseName: 'Phase 5 — Program Completion', step: 21, group: 'Graduate engagement, close-out and handover',
+    task: 'Capture lessons learned: trainer feedback, student feedback, operational issues to fix for next intake.',
+    owner: 'Dave Cohen', trigger: 'program_end', daysOffset: 40 },
+  { phase: 5, phaseName: 'Phase 5 — Program Completion', step: 22, group: 'Graduate Journal preparation & publication',
+    task: 'Review assignments and select submissions for inclusion in the Graduate Journal.',
+    owner: 'Dr Paul Johnston', trigger: 'program_end', daysOffset: 45 },
+  { phase: 5, phaseName: 'Phase 5 — Program Completion', step: 22, group: 'Graduate Journal preparation & publication',
+    task: 'Contact selected students individually to request written consent to publish their work. Collect headshots and LinkedIn profiles. Compile and PDF all confirmed submissions and send to Janita.',
+    owner: 'Cherry Abadeza', trigger: 'program_end', daysOffset: 50 },
+  { phase: 5, phaseName: 'Phase 5 — Program Completion', step: 22, group: 'Graduate Journal preparation & publication',
+    task: 'Create and design Graduate Journal using pre-designed template. Conduct final proof review before publication.',
+    owner: 'Janita Zhang', trigger: 'program_end', daysOffset: 55 },
+  { phase: 5, phaseName: 'Phase 5 — Program Completion', step: 22, group: 'Graduate Journal preparation & publication',
+    task: 'Register ISBN, generate barcode, update Graduate Journal file. Upload to Adobe, add download form to webpage, connect to HubSpot.',
+    owner: 'Janita Zhang', trigger: 'program_end', daysOffset: 60 },
+  { phase: 5, phaseName: 'Phase 5 — Program Completion', step: 22, group: 'Graduate Journal preparation & publication',
+    task: 'Send launch email to all featured graduates. Schedule social media announcement. Track downloads and engagement via HubSpot.',
+    owner: 'Cherry Abadeza', trigger: 'program_end', daysOffset: 65 },
+];
+
+// ── Internal project CRUD ─────────────────────────────────────────────────────
+async function readInternalProjects() {
+  try {
+    if (db.read) return await db.read('internal_projects.json', []);
+    const f = require('path').join(db.DATA, 'internal_projects.json');
+    return require('fs').existsSync(f) ? JSON.parse(require('fs').readFileSync(f, 'utf8')) : [];
+  } catch { return []; }
+}
+
+async function writeInternalProjects(projects) {
+  if (db.write) return await db.write('internal_projects.json', projects);
+  require('fs').writeFileSync(
+    require('path').join(db.DATA, 'internal_projects.json'),
+    JSON.stringify(projects, null, 2)
+  );
+}
+
+async function readInternalChecklist(projectId) {
+  try {
+    if (db.read) return await db.read(`internal_checklist_${projectId}.json`, []);
+    const f = require('path').join(db.DATA, `internal_checklist_${projectId}.json`);
+    return require('fs').existsSync(f) ? JSON.parse(require('fs').readFileSync(f, 'utf8')) : [];
+  } catch { return []; }
+}
+
+async function writeInternalChecklist(projectId, items) {
+  if (db.write) return await db.write(`internal_checklist_${projectId}.json`, items);
+  require('fs').writeFileSync(
+    require('path').join(db.DATA, `internal_checklist_${projectId}.json`),
+    JSON.stringify(items, null, 2)
+  );
+}
+
+// Instantiate the checklist from the template for a new cohort
+function buildChecklist(projectId, programStart, programEnd) {
+  const start = new Date(programStart);
+  const end   = programEnd ? new Date(programEnd) : null;
+  return IOP_CHECKLIST_TEMPLATE.map((t, i) => {
+    let dueDate = null;
+    if (t.trigger === 'program_start' && !isNaN(start)) {
+      const d = new Date(start);
+      d.setDate(d.getDate() + t.daysOffset);
+      dueDate = d.toISOString().slice(0, 10);
+    } else if (t.trigger === 'program_end' && end) {
+      const d = new Date(end);
+      d.setDate(d.getDate() + t.daysOffset);
+      dueDate = d.toISOString().slice(0, 10);
+    }
+    return {
+      id: `chk_${projectId}_${i}`,
+      projectId,
+      phase: t.phase,
+      phaseName: t.phaseName,
+      step: t.step,
+      group: t.group,
+      task: t.task,
+      owner: t.owner,
+      ownerEmail: INTERNAL_STAFF[t.owner] || 'info@risk2solution.com',
+      trigger: t.trigger,
+      dueDate,
+      status: 'Not Started',
+      reminderSent: false,
+      completedAt: null,
+      createdAt: new Date().toISOString(),
+    };
+  });
+}
+
+// ── Send task reminder to staff member ───────────────────────────────────────
+async function sendInternalTaskReminder(project, item) {
+  const ownerEmail = item.ownerEmail || INTERNAL_STAFF[item.owner] || 'info@risk2solution.com';
+  const programName = project.programType === 'grad_cert'
+    ? 'Graduate Certificate in Organisational Resilience, Risk and High Reliability (11056NAT)'
+    : 'Graduate Diploma of Organisational Presilience®, Risk and High Performance (11066NAT)';
+
+  const subject = `[Aurora] Action required — ${project.cohortName}: ${item.group}`;
+  const body = `Hi ${item.owner.split(' ')[0]},
+
+Aurora is writing to remind you of an upcoming task for the ${programName} — ${project.cohortName} cohort.
+
+TASK: ${item.task}
+PHASE: ${item.phaseName}
+DUE: ${item.dueDate || 'As soon as possible'}
+ASSIGNED TO: ${item.owner}
+
+Please action this task and reply to this email (to info@risk2solution.com) once it is complete. Aurora will automatically mark it as done when your reply is received.
+
+You can also view the full programme checklist in Aurora.
+
+${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}
+
+Aurora
+R2S Project Management Intelligence
+
+---
+Task ID: ${item.id} (include this in your reply to auto-confirm)`;
+
+  await sendEmail(ownerEmail, subject, body, false, ['diane.k@risk2solution.com']);
+  console.log(`[Internal] Reminder sent to ${item.owner} (${ownerEmail}): ${item.task.slice(0, 60)}`);
+}
+
+// ── Check internal project checklists daily ───────────────────────────────────
+async function checkInternalProjectReminders() {
+  const projects = await readInternalProjects();
+  if (!projects.length) return;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  for (const project of projects) {
+    if (project.status === 'Completed' || project.status === 'On Hold' || project.status === 'Paused') continue;
+    const checklist = await readInternalChecklist(project.id);
+    if (!checklist.length) continue;
+
+    for (const item of checklist) {
+      if (item.status === 'Completed' || item.reminderSent) continue;
+      if (!item.dueDate) continue;
+
+      const due = new Date(item.dueDate);
+      due.setHours(0, 0, 0, 0);
+      const daysUntil = Math.round((due - today) / (1000 * 60 * 60 * 24));
+
+      // Send reminder at 7 days and 2 days before due date, and on the day
+      if ([7, 2, 0].includes(daysUntil) || (daysUntil < 0 && daysUntil >= -3)) {
+        try {
+          await sendInternalTaskReminder(project, item);
+          item.reminderSent = true;
+          item.lastReminderAt = new Date().toISOString();
+        } catch(e) { console.error('[Internal] Reminder error:', e.message); }
+      }
+    }
+    await writeInternalChecklist(project.id, checklist);
+  }
+}
+
+// ── Detect staff confirmation reply emails ────────────────────────────────────
+async function checkInternalTaskConfirmations(emailBody, emailSubject, fromEmail) {
+  // Look for task ID in email body
+  const taskIdMatch = (emailBody + emailSubject).match(/chk_[a-z0-9_]+/i);
+  if (!taskIdMatch) return false;
+  const taskId = taskIdMatch[0];
+
+  // Find the item across all internal projects
+  const projects = await readInternalProjects();
+  for (const project of projects) {
+    const checklist = await readInternalChecklist(project.id);
+    const item = checklist.find(i => i.id === taskId);
+    if (item && item.status !== 'Completed') {
+      item.status = 'Completed';
+      item.completedAt = new Date().toISOString();
+      item.completedBy = fromEmail;
+      await writeInternalChecklist(project.id, checklist);
+      console.log(`[Internal] ✓ Task auto-confirmed by ${fromEmail}: ${item.task.slice(0, 60)}`);
+      await sendEmail('diane.k@risk2solution.com',
+        `[Aurora] Task confirmed: ${project.cohortName} — ${item.group}`,
+        `${fromEmail} has confirmed completion of the following task:\n\nProgramme: ${project.cohortName}\nPhase: ${item.phaseName}\nTask: ${item.task}\nCompleted by: ${fromEmail}\n\nAurora has marked this item as complete in the checklist.\n\n${process.env.FRONTEND_URL || ''}\n\nAurora\nR2S Project Management Intelligence`,
+        true
+      );
+      return true;
+    }
+  }
+  return false;
+}
+
+// ── Weekly internal project status report ─────────────────────────────────────
+async function sendInternalProjectStatusReport() {
+  const projects = await readInternalProjects();
+  if (!projects.length) return;
+
+  const RECIPIENTS = ['dave.c@risk2solution.com', 'kandia@risk2solution.com', 'diane.k@risk2solution.com'];
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  let reportSections = '';
+
+  for (const project of projects) {
+    const checklist = await readInternalChecklist(project.id);
+    const total = checklist.length;
+    const done  = checklist.filter(i => i.status === 'Completed').length;
+    const pct   = total > 0 ? Math.round((done / total) * 100) : 0;
+
+    // Overdue items
+    const overdue = checklist.filter(i => {
+      if (i.status === 'Completed' || !i.dueDate) return false;
+      return new Date(i.dueDate) < now;
+    });
+
+    // Due this week
+    const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const dueThisWeek = checklist.filter(i => {
+      if (i.status === 'Completed' || !i.dueDate) return false;
+      const d = new Date(i.dueDate);
+      return d >= now && d <= nextWeek;
+    });
+
+    // Current phase items
+    const currentPhaseItems = checklist.filter(i => i.status !== 'Completed');
+    const currentPhase = currentPhaseItems.length > 0 ? currentPhaseItems[0].phaseName : 'Completed';
+
+    const programName = project.programType === 'grad_cert' ? 'Graduate Certificate (11056NAT)' : 'Graduate Diploma (11066NAT)';
+
+    reportSections += `
+      <div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:16px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+          <div>
+            <div style="font-size:14px;font-weight:700;color:#fff">${project.cohortName}</div>
+            <div style="font-size:11px;color:#6aa3ff;margin-top:2px">${programName} · ${project.status}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:20px;font-weight:700;color:${pct >= 80 ? '#00e8bb' : pct >= 50 ? '#ffd93d' : '#ff608a'}">${pct}%</div>
+            <div style="font-size:10px;color:#888">${done}/${total} tasks complete</div>
+          </div>
+        </div>
+        <div style="background:#2a2a4a;border-radius:4px;height:8px;margin-bottom:12px">
+          <div style="width:${pct}%;background:${pct >= 80 ? '#00e8bb' : pct >= 50 ? '#ffd93d' : '#ff608a'};height:8px;border-radius:4px"></div>
+        </div>
+        <div style="font-size:11px;color:#aaa;margin-bottom:8px">Current phase: ${currentPhase}</div>
+        ${overdue.length > 0 ? `
+        <div style="background:#ff608a22;border:1px solid #ff608a44;border-radius:6px;padding:10px;margin-bottom:8px">
+          <div style="font-size:10px;color:#ff608a;font-weight:600;margin-bottom:6px">⚠ ${overdue.length} OVERDUE TASK${overdue.length > 1 ? 'S' : ''}</div>
+          ${overdue.slice(0, 3).map(i => `<div style="font-size:11px;color:#ffaabb;margin-bottom:3px">• ${i.owner}: ${i.task.slice(0, 80)}${i.task.length > 80 ? '…' : ''} (due ${i.dueDate})</div>`).join('')}
+        </div>` : ''}
+        ${dueThisWeek.length > 0 ? `
+        <div style="background:#ffd93d22;border:1px solid #ffd93d44;border-radius:6px;padding:10px">
+          <div style="font-size:10px;color:#ffd93d;font-weight:600;margin-bottom:6px">📋 DUE THIS WEEK (${dueThisWeek.length} tasks)</div>
+          ${dueThisWeek.slice(0, 5).map(i => `<div style="font-size:11px;color:#ffe88a;margin-bottom:3px">• ${i.owner}: ${i.task.slice(0, 80)}${i.task.length > 80 ? '…' : ''}</div>`).join('')}
+        </div>` : '<div style="font-size:11px;color:#00e8bb">✓ No tasks due this week</div>'}
+      </div>`;
+  }
+
+  const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#0f0f1a;font-family:Arial,sans-serif">
+  <div style="max-width:700px;margin:0 auto;padding:24px">
+    <div style="background:linear-gradient(135deg,#1a1a3e,#0d1b2a);border-radius:12px;padding:24px;margin-bottom:20px;border:1px solid #2a2a5a">
+      <div style="font-size:11px;color:#6aa3ff;text-transform:uppercase;letter-spacing:2px;margin-bottom:6px">Institute of Presilience</div>
+      <div style="font-size:22px;font-weight:700;color:#fff;margin-bottom:4px">Internal Programmes — Weekly Status Report</div>
+      <div style="font-size:13px;color:#aaa">${dateStr} · Generated by Aurora</div>
+    </div>
+    ${reportSections}
+    <div style="text-align:center;color:#444;font-size:11px;padding-top:10px">
+      Aurora · R2S Internal Programme Management · Confidential
+      ${process.env.FRONTEND_URL ? '<br><a href="' + process.env.FRONTEND_URL + '" style="color:#6aa3ff">Open Aurora portal</a>' : ''}
+    </div>
+  </div></body></html>`;
+
+  for (const r of RECIPIENTS) {
+    await sendEmail(r, `IoP Internal Programmes — Weekly Status (${now.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })})`, html, false, [], true);
+  }
+  console.log('[Internal] Weekly programme status report sent');
+}
+
+// ── API routes for internal projects ─────────────────────────────────────────
+app.get('/api/internal/projects', async (req, res) => {
+  try { res.json({ projects: await readInternalProjects() }); }
+  catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/internal/projects', express.json(), async (req, res) => {
+  try {
+    const { cohortName, programType, programStart, programEnd, studentCount, notes } = req.body;
+    if (!cohortName || !programType) return res.status(400).json({ error: 'cohortName and programType required' });
+    const id = `ip_${Date.now()}`;
+    const project = { id, cohortName, programType, programStart, programEnd, studentCount: studentCount || 0, notes: notes || '', status: 'Active', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const checklist = buildChecklist(id, programStart, programEnd);
+    const projects = await readInternalProjects();
+    projects.push(project);
+    await writeInternalProjects(projects);
+    await writeInternalChecklist(id, checklist);
+    console.log(`[Internal] Created: ${cohortName} (${checklist.length} checklist items)`);
+    res.json({ project, checklist });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/internal/projects/:id', express.json(), async (req, res) => {
+  try {
+    const projects = await readInternalProjects();
+    const idx = projects.findIndex(p => p.id === req.params.id);
+    if (idx < 0) return res.status(404).json({ error: 'Not found' });
+    Object.assign(projects[idx], req.body, { updatedAt: new Date().toISOString() });
+    await writeInternalProjects(projects);
+    res.json({ project: projects[idx] });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/internal/projects/:id', async (req, res) => {
+  try {
+    const projects = await readInternalProjects();
+    const filtered = projects.filter(p => p.id !== req.params.id);
+    await writeInternalProjects(filtered);
+    res.json({ success: true, projects: filtered });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/internal/projects/:id/checklist', async (req, res) => {
+  try { res.json({ checklist: await readInternalChecklist(req.params.id) }); }
+  catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/internal/projects/:id/checklist/:itemId', express.json(), async (req, res) => {
+  try {
+    const checklist = await readInternalChecklist(req.params.id);
+    const idx = checklist.findIndex(i => i.id === req.params.itemId);
+    if (idx < 0) return res.status(404).json({ error: 'Item not found' });
+    Object.assign(checklist[idx], req.body);
+    if (req.body.status === 'Completed' && !checklist[idx].completedAt) {
+      checklist[idx].completedAt = new Date().toISOString();
+    }
+    await writeInternalChecklist(req.params.id, checklist);
+    res.json({ item: checklist[idx] });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/internal/projects/:id/checklist/:itemId/remind', async (req, res) => {
+  try {
+    const projects = await readInternalProjects();
+    const project = projects.find(p => p.id === req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const checklist = await readInternalChecklist(req.params.id);
+    const item = checklist.find(i => i.id === req.params.itemId);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+    await sendInternalTaskReminder(project, item);
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/internal/report', async (req, res) => {
+  try { await sendInternalProjectStatusReport(); res.json({ success: true }); }
+  catch(e) { res.status(500).json({ error: e.message }); }
+});
