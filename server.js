@@ -2191,9 +2191,12 @@ Write as if briefing the CEO, COO and PM. Highlight what needs attention this we
 // ── Daily batch (6am AEST = 8pm UTC) ─────────────────────────────────────────
 async function runBatch() {
   const now = new Date();
-  const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon ... 5=Fri, 6=Sat
+  // Use AEST (UTC+10) for day-of-week checks — cron fires at 8pm UTC = 6am AEST next day
+  const aestNow = new Date(now.getTime() + 10 * 60 * 60 * 1000);
+  const dayOfWeek = aestNow.getDay(); // 0=Sun, 1=Mon ... 5=Fri, 6=Sat (in AEST)
   const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
   const isMonday  = dayOfWeek === 1;
+  console.log(`[Batch] AEST day: ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dayOfWeek]} isMonday:${isMonday}`);
 
   console.log('\n[Batch] ═══ Aurora daily batch starting ═══');
   const projects = await db.getProjects();
@@ -2301,10 +2304,10 @@ R2S Project Management Intelligence`,
     await readConsultantReplies();
   }
 
-  // ── 6. Daily executive report (weekdays only) ────────────────────────────
-  if (isWeekday) {
+  // ── 6. Weekly executive report (Mondays only at 6am AEST) ────────────────
+  if (isMonday) {
     try {
-      console.log('[Batch] Sending daily executive report...');
+      console.log('[Batch] Sending weekly executive report (Monday)...');
       await sendWeeklyExecutiveReport(standard);
     } catch(e) { console.error('[WeeklyReport] Error:', e.message); }
   }
