@@ -2029,7 +2029,53 @@ async function sendWeeklyExecutiveReport(projects) {
   </div>`;
 
 
-  // ── Build project table rows ──────────────────────────────────────────────
+  // ── Build PM checklist summary for report ─────────────────────────────────
+  const checklistRows = await Promise.all(standard.map(async p => {
+    try {
+      const state = await readPMChecklist(p.id);
+      const weekKey = getWeekKey();
+      const weekData = state.weeks?.[weekKey] || {};
+      const phase = p.phase || 0;
+      const relevantQs = PM_CHECKLIST_QUESTIONS.filter(q => q.phase.includes(phase));
+      const checkedCount = relevantQs.filter(q => weekData[q.id]?.checked).length;
+      const total = relevantQs.length;
+      const pct = total > 0 ? Math.round((checkedCount / total) * 100) : 0;
+      return { p, checkedCount, total, pct };
+    } catch { return { p, checkedCount: 0, total: 11, pct: 0 }; }
+  }));
+
+  const checklistHtml = `
+  <div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;overflow:hidden;margin-bottom:20px">
+    <div style="padding:12px 16px;border-bottom:1px solid #2a2a4a;display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:1px">Weekly PM Checklist — Diane's completion this week</div>
+      <div style="font-size:10px;color:#888">${getWeekKey()}</div>
+    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+      <thead><tr style="background:#141428">
+        <th style="padding:8px 10px;text-align:left;font-size:10px;color:#666;font-weight:500;text-transform:uppercase;border-bottom:1px solid #2a2a4a">Project</th>
+        <th style="padding:8px 10px;text-align:left;font-size:10px;color:#666;font-weight:500;text-transform:uppercase;border-bottom:1px solid #2a2a4a">This week</th>
+        <th style="padding:8px 10px;text-align:left;font-size:10px;color:#666;font-weight:500;text-transform:uppercase;border-bottom:1px solid #2a2a4a">Status</th>
+      </tr></thead>
+      <tbody>
+        ${checklistRows.map((r, i) => {
+          const bg = i % 2 === 0 ? '#1a1a2e' : '#141428';
+          const statusColor = r.pct === 100 ? '#00e8bb' : r.pct >= 50 ? '#ffd93d' : '#ff608a';
+          const statusText = r.pct === 100 ? '✓ Complete' : r.checkedCount === 0 ? 'Not started' : `${r.checkedCount}/${r.total} done`;
+          return `<tr style="background:${bg}">
+            <td style="padding:8px 10px;border-bottom:1px solid #2a2a4a;color:#fff;font-size:12px">${r.p.clientName}<br><span style="font-size:10px;color:#888">${r.p.projectName||''}</span></td>
+            <td style="padding:8px 10px;border-bottom:1px solid #2a2a4a;font-size:11px">
+              <div style="background:#2a2a4a;border-radius:3px;height:6px;width:100px">
+                <div style="width:${r.pct}%;background:${statusColor};height:6px;border-radius:3px"></div>
+              </div>
+            </td>
+            <td style="padding:8px 10px;border-bottom:1px solid #2a2a4a">
+              <span style="font-size:11px;color:${statusColor}">${statusText}</span>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`;
   const projectRows = standard.map((p, i) => {
     const phase = PHASES[p.phase || 0];
     const sb = statusBadge(p);
@@ -2127,6 +2173,8 @@ Write as if briefing the CEO, COO and PM. Highlight what needs attention this we
   </div>
 
   ${invoicingSectionHtml}
+
+  ${checklistHtml}
 
   <!-- Project table -->
   <div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;overflow:hidden;margin-bottom:20px">
@@ -2320,7 +2368,13 @@ R2S Project Management Intelligence`,
     try { await sendInternalProjectStatusReport(); } catch(e) { console.error('[InternalReport]', e.message); }
   }
 
-  // ── 9. At-risk project summary ────────────────────────────────────────────
+  // ── 9. Wednesday PM checklist (Wednesday = dayOfWeek 3 in AEST) ───────────
+  const isWednesday = dayOfWeek === 3;
+  if (isWednesday) {
+    try { await sendWeeklyPMChecklist(); } catch(e) { console.error('[PMChecklist]', e.message); }
+  }
+
+  // ── 10. At-risk project summary ───────────────────────────────────────────
   const atRisk = standard.filter(p => {
     if (!p.dueDate) return false;
     const days = Math.round((new Date(p.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
@@ -2761,6 +2815,10 @@ Sign off as Diane Kruger with full signature.`,
 
 // Daily batch: 6am AEST (UTC+10) = 8pm UTC previous day
 cron.schedule('0 20 * * *', () => runBatch().catch(console.error), { timezone: 'UTC' });
+
+// Wednesday afternoon follow-up: 4pm AEST = 6am UTC Thursday (UTC+10 offset)
+// Wednesday 4pm AEST = Wednesday 6am UTC
+cron.schedule('0 6 * * 3', () => sendPMChecklistFollowUp().catch(console.error), { timezone: 'UTC' });
 
 // Email polling: every hour 7am-7pm AEST weekdays
 // AEST UTC+10: 7am=9pm UTC, 7pm=9am UTC
@@ -4306,5 +4364,282 @@ app.post('/api/internal/projects/:id/checklist/:itemId/remind', async (req, res)
 
 app.post('/api/internal/report', async (req, res) => {
   try { await sendInternalProjectStatusReport(); res.json({ success: true }); }
+  catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// WEEKLY PM CHECKLIST — Wednesday accountability check-in for Diane
+// ══════════════════════════════════════════════════════════════════════════════
+
+// The 11 checklist questions — with metadata about whether they are one-time or weekly
+const PM_CHECKLIST_QUESTIONS = [
+  { id: 'q1',  text: 'Have you sent the notification email to the consultant regarding the project?',           weekly: false, phase: [0,1,2,3,4] },
+  { id: 'q2',  text: 'Have you sent the welcome email to the client with the onboarding information we request?', weekly: false, phase: [0,1,2,3,4] },
+  { id: 'q3',  text: 'Have you created and shared the SP (SharePoint) link with the consultant/s on the project?', weekly: false, phase: [0,1,2,3,4] },
+  { id: 'q4',  text: 'Have you scheduled the kick-off meeting with the client, yourself, and the consultant/s?',  weekly: false, phase: [0,1,2,3,4] },
+  { id: 'q5',  text: 'Have you followed up and touched base with the consultant/s to ensure the project is running correctly and on time?', weekly: true,  phase: [1,2,3] },
+  { id: 'q6',  text: 'Have you ensured the consultant/s are saving their work as they go in the correct client folder this week?',         weekly: true,  phase: [1,2,3] },
+  { id: 'q7',  text: 'Have you checked on the deliverables to ensure they are tracking on time?',               weekly: true,  phase: [1,2,3] },
+  { id: 'q8',  text: 'Have you checked in with the consultant/s this week?',                                    weekly: true,  phase: [1,2,3] },
+  { id: 'q9',  text: 'Have you ensured the invoicing is accurate and up to date?',                              weekly: true,  phase: [1,2,3,4] },
+  { id: 'q10', text: 'Has the final invoice been sent to the client?',                                          weekly: false, phase: [4] },
+  { id: 'q11', text: 'Has the project been closed out and all deliverables met?',                               weekly: false, phase: [4,5] },
+];
+
+// ── Read/write PM checklist state per project ─────────────────────────────────
+async function readPMChecklist(projectId) {
+  try {
+    if (db.read) return await db.read(`pm_checklist_${projectId}.json`, {});
+    const f = require('path').join(db.DATA, `pm_checklist_${projectId}.json`);
+    return require('fs').existsSync(f) ? JSON.parse(require('fs').readFileSync(f, 'utf8')) : {};
+  } catch { return {}; }
+}
+
+async function writePMChecklist(projectId, data) {
+  if (db.write) return await db.write(`pm_checklist_${projectId}.json`, data);
+  require('fs').writeFileSync(
+    require('path').join(db.DATA, `pm_checklist_${projectId}.json`),
+    JSON.stringify(data, null, 2)
+  );
+}
+
+// Build the checklist state for a project — returns current week's state + history
+async function getPMChecklistState(project) {
+  const state = await readPMChecklist(project.id);
+  const phase = project.phase || 0;
+  const weekKey = getWeekKey();
+
+  // Initialise this week's entry if needed
+  if (!state.weeks) state.weeks = {};
+  if (!state.weeks[weekKey]) state.weeks[weekKey] = {};
+
+  // Build question list relevant to this project's phase
+  const questions = PM_CHECKLIST_QUESTIONS.filter(q => q.phase.includes(phase));
+
+  return questions.map(q => {
+    const thisWeek = state.weeks[weekKey][q.id] || { checked: false, checkedAt: null };
+
+    // For one-time questions, check if ever ticked in ANY previous week
+    let previouslyCompleted = false;
+    let previouslyCompletedAt = null;
+    if (!q.weekly) {
+      const pastWeeks = Object.entries(state.weeks || {})
+        .filter(([k]) => k !== weekKey)
+        .sort(([a], [b]) => b.localeCompare(a));
+      for (const [, wkData] of pastWeeks) {
+        if (wkData[q.id]?.checked) {
+          previouslyCompleted = true;
+          previouslyCompletedAt = wkData[q.id].checkedAt;
+          break;
+        }
+      }
+    }
+
+    return {
+      ...q,
+      checked: thisWeek.checked || (previouslyCompleted && !q.weekly),
+      checkedAt: thisWeek.checkedAt || previouslyCompletedAt,
+      previouslyCompleted,
+      previouslyCompletedAt,
+      isHistoric: !thisWeek.checked && previouslyCompleted && !q.weekly,
+    };
+  });
+}
+
+function getWeekKey() {
+  // ISO week key: YYYY-Www
+  const now = new Date();
+  const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+// ── Send the weekly PM checklist email to Diane ───────────────────────────────
+async function sendWeeklyPMChecklist() {
+  const projects = await db.getProjects();
+  const active = projects.filter(p =>
+    p.type === 'standard' &&
+    !['Completed', 'Terminated', 'Closed'].includes(p.status) &&
+    (p.phase || 0) < 5
+  );
+
+  if (!active.length) {
+    console.log('[PMChecklist] No active projects — skipping');
+    return;
+  }
+
+  const weekKey = getWeekKey();
+  const dateStr = new Date().toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  // Build HTML checklist for each project
+  let projectSections = '';
+  for (const p of active) {
+    const questions = await getPMChecklistState(p);
+    const done = questions.filter(q => q.checked).length;
+    const phaseLabel = ['Kick-off', 'Deployment', 'Monitoring & Review', 'Reporting', 'Close-out', 'Completed'][p.phase || 0];
+
+    projectSections += `
+      <div style="background:#1e1e3a;border:1px solid #2a2a5a;border-radius:8px;padding:18px;margin-bottom:18px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+          <div>
+            <div style="font-size:15px;font-weight:700;color:#fff">${p.clientName}</div>
+            <div style="font-size:11px;color:#6aa3ff;margin-top:2px">${p.projectName || ''} · Phase: ${phaseLabel}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:13px;font-weight:600;color:${done===questions.length?'#00e8bb':'#ffd93d'}">${done}/${questions.length} complete</div>
+          </div>
+        </div>
+        ${questions.map((q, i) => `
+        <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid #2a2a4a22">
+          <div style="width:20px;height:20px;border-radius:4px;border:2px solid ${q.checked ? '#00e8bb' : '#3a3a6a'};background:${q.checked ? '#00e8bb' : 'transparent'};flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center">
+            ${q.checked ? '<span style="color:#0f0f1a;font-weight:bold;font-size:13px">✓</span>' : ''}
+          </div>
+          <div style="flex:1">
+            <div style="font-size:12px;color:${q.checked ? '#aaa' : '#e0e0e0'};${q.checked ? 'text-decoration:line-through;' : ''}">${i + 1}. ${q.text}</div>
+            ${q.isHistoric ? `<div style="font-size:10px;color:#00e8bb;margin-top:2px">✓ Previously completed ${q.previouslyCompletedAt ? new Date(q.previouslyCompletedAt).toLocaleDateString('en-AU', {day:'numeric',month:'short',year:'numeric'}) : ''} — one-time task</div>` : ''}
+            ${q.checked && q.checkedAt && !q.isHistoric ? `<div style="font-size:10px;color:#888;margin-top:2px">Checked ${new Date(q.checkedAt).toLocaleDateString('en-AU', {day:'numeric',month:'short'})}</div>` : ''}
+          </div>
+        </div>`).join('')}
+      </div>`;
+  }
+
+  const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#0f0f1a;font-family:Arial,sans-serif">
+  <div style="max-width:680px;margin:0 auto;padding:24px">
+    <div style="background:linear-gradient(135deg,#1a1a3e,#0d1b2a);border-radius:12px;padding:24px;margin-bottom:20px;border:1px solid #2a2a5a">
+      <div style="font-size:11px;color:#6aa3ff;text-transform:uppercase;letter-spacing:2px;margin-bottom:6px">Aurora · Weekly PM Checklist</div>
+      <div style="font-size:22px;font-weight:700;color:#fff;margin-bottom:6px">Wednesday Check-in</div>
+      <div style="font-size:13px;color:#aaa">${dateStr}</div>
+    </div>
+
+    <div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:16px;margin-bottom:20px;color:#ccc;font-size:13px;line-height:1.7">
+      Hi Diane,<br><br>
+      For each project currently running, please complete the following check-in to confirm everything is on track and up to date.
+      Items marked with <span style="color:#00e8bb">✓ Previously completed</span> were ticked off in a prior week and do not need to be re-checked unless they are a weekly item.
+      <br><br>
+      Once you have reviewed each section, please reply to this email confirming you have completed the checklist. Aurora will log your responses automatically in the portal.
+    </div>
+
+    ${projectSections}
+
+    <div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:14px;margin-top:8px;text-align:center">
+      <div style="font-size:12px;color:#888;margin-bottom:8px">You can also complete and review checklists directly in Aurora under each project → Checklist tab</div>
+      ${process.env.FRONTEND_URL ? `<a href="${process.env.FRONTEND_URL}" style="color:#6aa3ff;font-size:12px">Open Aurora portal →</a>` : ''}
+    </div>
+
+    <div style="text-align:center;color:#444;font-size:11px;padding-top:16px">
+      Aurora · R2S Project Management Intelligence · Confidential
+    </div>
+  </div></body></html>`;
+
+  await sendEmail(
+    'diane.k@risk2solution.com',
+    `[Aurora] Wednesday PM Check-in — ${active.length} active project${active.length !== 1 ? 's' : ''}`,
+    html, false, ['kandia@risk2solution.com'], true
+  );
+  console.log(`[PMChecklist] Wednesday checklist sent to Diane (CC: Kandia) — ${active.length} projects`);
+}
+
+// ── Wednesday follow-up: check completion and notify Kandia ──────────────────
+async function sendPMChecklistFollowUp() {
+  const projects = await db.getProjects();
+  const active = projects.filter(p =>
+    p.type === 'standard' &&
+    !['Completed', 'Terminated', 'Closed'].includes(p.status) &&
+    (p.phase || 0) < 5
+  );
+  if (!active.length) return;
+
+  const weekKey = getWeekKey();
+  const summaryLines = [];
+  let allComplete = true;
+  let incompleteCount = 0;
+
+  for (const p of active) {
+    const questions = await getPMChecklistState(p);
+    const done = questions.filter(q => q.checked).length;
+    const total = questions.length;
+    const incomplete = questions.filter(q => !q.checked && !q.isHistoric);
+    if (incomplete.length > 0) {
+      allComplete = false;
+      incompleteCount += incomplete.length;
+    }
+    summaryLines.push({ project: p, done, total, incomplete });
+  }
+
+  const dateStr = new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
+  const statusLine = allComplete
+    ? '✅ Diane has completed all PM checklist items for this week across all active projects.'
+    : `⚠️ ${incompleteCount} checklist item${incompleteCount !== 1 ? 's' : ''} remain${incompleteCount === 1 ? 's' : ''} incomplete across ${summaryLines.filter(s => s.incomplete.length > 0).length} project${summaryLines.filter(s => s.incomplete.length > 0).length !== 1 ? 's' : ''}.`;
+
+  const body = `Hi,
+
+Weekly PM checklist follow-up for ${dateStr}:
+
+${statusLine}
+
+Summary by project:
+${summaryLines.map(s => `• ${s.project.clientName}: ${s.done}/${s.total} complete${s.incomplete.length > 0 ? ` — OUTSTANDING: ${s.incomplete.map(q => q.text.slice(0, 60)).join('; ')}` : ' ✓'}`).join('\n')}
+
+${!allComplete ? `\nPlease follow up with Diane to ensure the outstanding items are completed before end of week.\n` : '\nAll good — nothing further required.\n'}
+Aurora
+R2S Project Management Intelligence`;
+
+  // Always send to Kandia and Diane
+  await sendEmail(
+    'kandia@risk2solution.com',
+    `[Aurora] PM Checklist follow-up — ${allComplete ? 'All complete ✓' : `${incompleteCount} item${incompleteCount !== 1 ? 's' : ''} outstanding`}`,
+    body, true, ['diane.k@risk2solution.com']
+  );
+  console.log(`[PMChecklist] Follow-up sent — ${allComplete ? 'all complete' : `${incompleteCount} outstanding`}`);
+}
+
+// ── API routes for PM checklist ───────────────────────────────────────────────
+app.get('/api/projects/:id/pmchecklist', async (req, res) => {
+  try {
+    const project = await db.getProject(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const questions = await getPMChecklistState(project);
+    const weekKey = getWeekKey();
+    const state = await readPMChecklist(req.params.id);
+    // Return full history too
+    const history = Object.entries(state.weeks || {})
+      .filter(([k]) => k !== weekKey)
+      .sort(([a], [b]) => b.localeCompare(a))
+      .slice(0, 8) // last 8 weeks
+      .map(([week, data]) => ({ week, items: data }));
+    res.json({ questions, weekKey, history });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/projects/:id/pmchecklist/:questionId', express.json(), async (req, res) => {
+  try {
+    const project = await db.getProject(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const state = await readPMChecklist(req.params.id);
+    const weekKey = getWeekKey();
+    if (!state.weeks) state.weeks = {};
+    if (!state.weeks[weekKey]) state.weeks[weekKey] = {};
+    state.weeks[weekKey][req.params.questionId] = {
+      checked: req.body.checked,
+      checkedAt: req.body.checked ? new Date().toISOString() : null,
+      checkedBy: 'Diane',
+    };
+    await writePMChecklist(req.params.id, state);
+    // Log activity
+    const q = PM_CHECKLIST_QUESTIONS.find(x => x.id === req.params.questionId);
+    if (q) {
+      await db.logActivity(req.params.id, {
+        type: 'checklist',
+        summary: `PM Checklist: "${q.text.slice(0, 80)}" — ${req.body.checked ? '✓ Checked by Diane' : 'Unchecked'}`,
+      });
+    }
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/pmchecklist/send', async (req, res) => {
+  try { await sendWeeklyPMChecklist(); res.json({ success: true }); }
   catch(e) { res.status(500).json({ error: e.message }); }
 });
