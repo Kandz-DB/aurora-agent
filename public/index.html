@@ -980,6 +980,7 @@ function openProject(id) {
       <div class="proj-tab" onclick="switchProjTab(this,'tab-deliverables-${p.id}');loadDeliverables('${p.id}')">Deliverables</div>
       <div class="proj-tab" onclick="switchProjTab(this,'tab-risks-${p.id}');loadRisks('${p.id}')">Risk Register</div>
       <div class="proj-tab" onclick="switchProjTab(this,'tab-invoicing-${p.id}');loadProjectInvoices('${p.id}')">Invoicing</div>
+      <div class="proj-tab" onclick="switchProjTab(this,'tab-checklist-${p.id}');loadPMChecklist('${p.id}')">✓ Checklist</div>
       <div class="proj-tab" onclick="switchProjTab(this,'tab-activity-${p.id}');loadActivity('${p.id}')">Activity log</div>
     </div>
 
@@ -1004,6 +1005,12 @@ function openProject(id) {
     <!-- Invoicing tab -->
     <div id="tab-invoicing-${p.id}" class="proj-tab-content">
       <div id="invoicing-content-${p.id}"><div style="color:var(--text3);font-size:12px">Loading invoices…</div></div>
+    </div>
+
+    <!-- Activity log tab -->
+    <!-- Checklist tab -->
+    <div id="tab-checklist-${p.id}" class="proj-tab-content">
+      <div id="checklist-content-${p.id}"><div style="color:var(--text3);font-size:12px">Loading checklist…</div></div>
     </div>
 
     <!-- Activity log tab -->
@@ -2600,6 +2607,129 @@ async function deleteInvoice(projectId, invId, btn) {
     alert('Error: ' + e.message);
   }
 }
+
+// ── PM Checklist ──────────────────────────────────────────────────────────────
+async function loadPMChecklist(projectId) {
+  const el = document.getElementById('checklist-content-' + projectId);
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading…</div>';
+  try {
+    const data = await api('/api/projects/' + projectId + '/pmchecklist');
+    renderPMChecklist(projectId, data);
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--rose);font-size:12px">Error: ${e.message}</div>`;
+  }
+}
+
+function renderPMChecklist(projectId, data) {
+  const el = document.getElementById('checklist-content-' + projectId);
+  if (!el) return;
+  const { questions, weekKey, history } = data;
+  const done = questions.filter(q => q.checked).length;
+  const total = questions.length;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  const pctColor = pct === 100 ? 'var(--teal)' : pct >= 60 ? 'var(--amber)' : 'var(--rose)';
+
+  let html = `
+  <div style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:11px;color:var(--text2)">Week of ${weekKey} — ${done}/${total} complete</div>
+      <div style="font-size:18px;font-weight:700;color:${pctColor}">${pct}%</div>
+    </div>
+    <div style="background:var(--border2);border-radius:4px;height:8px">
+      <div style="width:${pct}%;background:${pctColor};height:8px;border-radius:4px;transition:width .3s"></div>
+    </div>
+  </div>
+
+  <div style="font-size:10px;color:var(--text3);margin-bottom:10px">
+    Items marked <span style="color:var(--teal)">Previously completed</span> were ticked in a prior week and are one-time tasks — no need to re-check. Weekly items must be ticked each week.
+  </div>`;
+
+  // Questions
+  questions.forEach((q, i) => {
+    const isDisabled = q.isHistoric;
+    const borderColor = q.checked ? 'var(--teal)' : q.isHistoric ? 'var(--teal)' : 'var(--border)';
+    const bgColor = q.checked || q.isHistoric ? 'var(--teal)' : 'transparent';
+    html += `
+    <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border2)" id="pmq-row-${projectId}-${q.id}">
+      <button type="button" ${isDisabled ? 'disabled title="One-time task — previously completed"' : `onclick="togglePMChecklist('${projectId}','${q.id}',this,${q.checked})"`}
+        style="width:22px;height:22px;border-radius:5px;border:2px solid ${borderColor};background:${bgColor};cursor:${isDisabled ? 'default' : 'pointer'};flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;opacity:${isDisabled ? '0.7' : '1'}">
+        ${q.checked || q.isHistoric ? '✓' : ''}
+      </button>
+      <div style="flex:1">
+        <div style="font-size:12px;color:${q.checked || q.isHistoric ? 'var(--text3)' : 'var(--text)'};${q.checked || q.isHistoric ? 'text-decoration:line-through' : ''};line-height:1.5">
+          ${i + 1}. ${q.text}
+        </div>
+        <div style="margin-top:3px;display:flex;gap:8px;flex-wrap:wrap">
+          ${q.weekly ? '<span style="font-size:9px;padding:1px 6px;background:var(--amber)22;color:var(--amber);border-radius:8px;border:1px solid var(--amber)44">Weekly</span>' : '<span style="font-size:9px;padding:1px 6px;background:var(--blue)22;color:var(--blue);border-radius:8px;border:1px solid var(--blue)44">One-time</span>'}
+          ${q.isHistoric ? `<span style="font-size:9px;color:var(--teal)">✓ Previously completed ${q.previouslyCompletedAt ? new Date(q.previouslyCompletedAt).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}) : ''}</span>` : ''}
+          ${q.checked && q.checkedAt && !q.isHistoric ? `<span style="font-size:9px;color:var(--text3)">Checked ${new Date(q.checkedAt).toLocaleDateString('en-AU',{day:'numeric',month:'short'})}</span>` : ''}
+        </div>
+      </div>
+    </div>`;
+  });
+
+  // History accordion
+  if (history && history.length > 0) {
+    html += `<div style="margin-top:16px">
+      <button type="button" onclick="toggleChecklistHistory(this)" style="background:none;border:none;color:var(--text3);font-size:11px;cursor:pointer;padding:0">▶ View previous weeks (${history.length})</button>
+      <div class="checklist-history" style="display:none;margin-top:10px">
+        ${history.map(h => {
+          const weekDone = PM_CHECKLIST_QUESTIONS.filter(q => h.items[q.id]?.checked).length;
+          return `<div style="padding:8px 0;border-bottom:1px solid var(--border2)">
+            <div style="font-size:11px;color:var(--text2);margin-bottom:4px">${h.week} — ${weekDone}/${PM_CHECKLIST_QUESTIONS.length} completed</div>
+            ${PM_CHECKLIST_QUESTIONS.filter(q => h.items[q.id]?.checked).map(q => `<div style="font-size:11px;color:var(--text3)">✓ ${q.text.slice(0,70)}…</div>`).join('')}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }
+
+  html += `<div style="margin-top:16px">
+    <button class="btn btn-g btn-sm" onclick="api('/api/pmchecklist/send',{method:'POST'}).then(()=>showToast('Checklist email sent to Diane'))">📧 Send checklist to Diane now</button>
+  </div>`;
+
+  el.innerHTML = html;
+}
+
+async function togglePMChecklist(projectId, questionId, btn, currentlyChecked) {
+  const newChecked = !currentlyChecked;
+  btn.textContent = newChecked ? '✓' : '';
+  btn.style.background = newChecked ? 'var(--teal)' : 'transparent';
+  btn.style.borderColor = newChecked ? 'var(--teal)' : 'var(--border)';
+  // Update onclick for next click
+  btn.setAttribute('onclick', `togglePMChecklist('${projectId}','${questionId}',this,${newChecked})`);
+  try {
+    await api(`/api/projects/${projectId}/pmchecklist/${questionId}`, {
+      method: 'PUT', body: JSON.stringify({ checked: newChecked })
+    });
+    // Reload to recalculate progress
+    const data = await api('/api/projects/' + projectId + '/pmchecklist');
+    renderPMChecklist(projectId, data);
+  } catch(e) { showToast('Error: ' + e.message, 'var(--rose)'); }
+}
+
+function toggleChecklistHistory(btn) {
+  const div = btn.nextElementSibling;
+  const open = div.style.display === 'none';
+  div.style.display = open ? 'block' : 'none';
+  btn.textContent = (open ? '▼' : '▶') + btn.textContent.slice(1);
+}
+
+// ── PM checklist constants available client-side ──────────────────────────────
+const PM_CHECKLIST_QUESTIONS = [
+  { id: 'q1',  text: 'Have you sent the notification email to the consultant regarding the project?',            weekly: false },
+  { id: 'q2',  text: 'Have you sent the welcome email to the client with the onboarding information we request?', weekly: false },
+  { id: 'q3',  text: 'Have you created and shared the SP link with the consultant/s on the project?',            weekly: false },
+  { id: 'q4',  text: 'Have you scheduled the kick-off meeting with the client, yourself, and the consultant/s?', weekly: false },
+  { id: 'q5',  text: 'Have you followed up and touched base with the consultant/s to ensure the project is running correctly and on time?', weekly: true },
+  { id: 'q6',  text: 'Have you ensured the consultant/s are saving their work as they go in the correct client folder this week?', weekly: true },
+  { id: 'q7',  text: 'Have you checked on the deliverables to ensure they are tracking on time?',               weekly: true },
+  { id: 'q8',  text: 'Have you checked in with the consultant/s this week?',                                    weekly: true },
+  { id: 'q9',  text: 'Have you ensured the invoicing is accurate and up to date?',                              weekly: true },
+  { id: 'q10', text: 'Has the final invoice been sent to the client?',                                          weekly: false },
+  { id: 'q11', text: 'Has the project been closed out and all deliverables met?',                               weekly: false },
+];
 
 async function markInvoicePaid(projectId, invId, btn) {
   btn.textContent = '…';
