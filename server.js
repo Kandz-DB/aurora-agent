@@ -3891,7 +3891,7 @@ const IOP_CHECKLIST_TEMPLATE = [
     owner: 'Janita Zhang', trigger: 'program_start', daysOffset: -85 },
   { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 3, group: 'Lock in delivery team',
     task: 'Book trainers and guest speakers for each module.',
-    owner: 'Dave Cohen', trigger: 'program_start', daysOffset: -80 },
+    owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -80 },
   { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 3, group: 'Lock in delivery team',
     task: 'Confirm availability, topic, time slot, delivery mode (live, pre-recorded, panel).',
     owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -80 },
@@ -3904,15 +3904,15 @@ const IOP_CHECKLIST_TEMPLATE = [
   { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 4, group: 'Create the cohort Microsoft Teams Classroom',
     task: 'Set up branding, homepage, and channels by module/topic in Teams Classroom.',
     owner: 'Janita Zhang', trigger: 'program_start', daysOffset: -74 },
-  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 4, group: 'Create the cohort Microsoft Teams Classroom',
-    task: 'Upload general course resources to Teams: IoP Candidate Handbook, Required Reading, EUOs.',
-    owner: 'Diane Kruger', trigger: 'program_start', daysOffset: -73 },
-  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 4, group: 'Create the cohort Microsoft Teams Classroom',
-    task: 'Create all assignments within Teams Classroom.',
-    owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -72 },
-  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 4, group: 'Create the cohort Microsoft Teams Classroom',
+  { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 4, group: 'Add core staff/admin as owners and create M365 Distribution Group.',
     task: 'Add core teaching staff and admin as owners/members. Create M365 Distribution Group.',
     owner: 'Janita Zhang', trigger: 'program_start', daysOffset: -71 },
+  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Each Module', step: 4, group: 'Upload module resources to Teams Classroom',
+    task: 'Upload module-specific resources to Teams: slides, EUO, required reading, and any pre-reading for this module.',
+    owner: 'Diane Kruger', trigger: 'module', daysOffset: -14 },
+  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Each Module', step: 4, group: 'Upload module resources to Teams Classroom',
+    task: 'Create or confirm assignments for this module are visible and accurate in Teams Classroom.',
+    owner: 'Cherry Abadeza', trigger: 'module', daysOffset: -14 },
   { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 5, group: 'Build the marketing & awareness activity',
     task: 'Create social media campaign (LinkedIn, internal networks, partner channels) — align messaging with program theme and confirmed dates. Schedule posts.',
     owner: 'Janita Zhang', trigger: 'program_start', daysOffset: -70 },
@@ -3932,31 +3932,31 @@ const IOP_CHECKLIST_TEMPLATE = [
     task: 'Confirm the fee amount for each student with Dave (standard, scholarship, partner, or corporate rate). Notify Diane of agreed pricing so she can raise the invoice.',
     owner: 'Cherry Abadeza', trigger: 'rolling', daysOffset: 0 },
   // PHASE 2 — Two weeks before program start
-  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Start', step: 8, group: 'Set up student access to systems',
-    task: 'Create an Institute of Presilience (IoP) email address for each enrolled student.',
-    owner: 'Janita Zhang', trigger: 'program_start', daysOffset: -14 },
-  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Start', step: 8, group: 'Set up student access to systems',
-    task: 'Add each student to the cohort Teams Classroom using their IoP email. Test their access (sign in, view channels, see files).',
-    owner: 'Janita Zhang', trigger: 'program_start', daysOffset: -13 },
-  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Start', step: 9, group: 'Send pre-start onboarding email (T-2 weeks)',
-    task: 'Send each student their IoP email address and sign-in instructions — how to access Teams and join the Classroom.',
-    owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -14 },
-  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Start', step: 9, group: 'Send pre-start onboarding email (T-2 weeks)',
-    task: 'Upload the final EUO into the Teams Classroom. Tell students that the EUO is now available in Teams.',
-    owner: 'Diane Kruger', trigger: 'program_start', daysOffset: -13 },
-  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Start', step: 10, group: 'Readiness check',
-    task: 'Ask each student to confirm they can log in to Teams and access the EUO, timetable, and resources. Follow up with anyone who hasn\'t confirmed. Update tracker.',
-    owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -10 },
+  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Each Module', step: 8, group: 'Set up student access to systems',
+    task: 'Create an Institute of Presilience (IoP) email address for each enrolled student (first module only — confirm access is active for subsequent modules).',
+    owner: 'Janita Zhang', trigger: 'module', daysOffset: -14 },
+  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Each Module', step: 8, group: 'Set up student access to systems',
+    task: 'Confirm each student can access the cohort Teams Classroom using their IoP email. Test access (sign in, view channels, see this module files).',
+    owner: 'Janita Zhang', trigger: 'module', daysOffset: -13 },
+  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Each Module', step: 9, group: 'Send module reminder email to students (T-2 weeks)',
+    task: 'Send each student a 2-week module reminder email — confirm module dates/times, Teams access, and any preparation required for this module.',
+    owner: 'Cherry Abadeza', trigger: 'module', daysOffset: -14 },
+  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Each Module', step: 9, group: 'Send module reminder email to students (T-2 weeks)',
+    task: 'Upload the EUO and any updated materials for this module into the Teams Classroom. Notify students they are available.',
+    owner: 'Diane Kruger', trigger: 'module', daysOffset: -13 },
+  { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Each Module', step: 10, group: 'Readiness check',
+    task: 'Ask each student to confirm they can access this module\'s materials in Teams and see the module assignments. Follow up with anyone who hasn\'t confirmed. Update tracker.',
+    owner: 'Cherry Abadeza', trigger: 'module', daysOffset: -10 },
   // PHASE 3 — One week before program start
-  { phase: 3, phaseName: 'Phase 3 — One Week Before Start', step: 11, group: 'Finalise learning materials',
-    task: 'Confirm training slides and facilitator decks for Module 1 are final. Upload slides and any pre-reading to the correct channel in Teams Classroom.',
-    owner: 'Diane Kruger', trigger: 'program_start', daysOffset: -7 },
-  { phase: 3, phaseName: 'Phase 3 — One Week Before Start', step: 12, group: 'One-week reminder email to students',
-    task: 'Send group email: "Program starts in one week" — include session dates and times, expectations for attendance/camera/mic/engagement, and any preparation required.',
-    owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -7 },
-  { phase: 3, phaseName: 'Phase 3 — One Week Before Start', step: 13, group: 'Guest speaker / trainer coordination',
-    task: 'Confirm all guest speakers for Week 1. Send them their session date/time, Teams link, and cohort context. Confirm special requirements (breakout rooms, polls, recording, chat access). Note in tracker.',
-    owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -6 },
+  { phase: 3, phaseName: 'Phase 3 — One Week Before Each Module', step: 11, group: 'Finalise learning materials',
+    task: 'Confirm training slides and facilitator decks for this module are final. Upload slides and any pre-reading to the correct channel in Teams Classroom.',
+    owner: 'Diane Kruger', trigger: 'module', daysOffset: -7 },
+  { phase: 3, phaseName: 'Phase 3 — One Week Before Each Module', step: 12, group: 'One-week reminder email to students',
+    task: 'Send group email: "Module delivery in one week" — include session dates and times, Teams link, expectations for attendance/camera/mic/engagement, and any preparation required.',
+    owner: 'Cherry Abadeza', trigger: 'module', daysOffset: -7 },
+  { phase: 3, phaseName: 'Phase 3 — One Week Before Each Module', step: 13, group: 'Guest speaker / trainer coordination',
+    task: 'Confirm all guest speakers and trainers for this module. Send them their session date/time, Teams link, and cohort context. Confirm special requirements (breakout rooms, polls, recording, chat access). Note in tracker.',
+    owner: 'Cherry Abadeza', trigger: 'module', daysOffset: -6 },
   // PHASE 4 — During delivery (per module)
   { phase: 4, phaseName: 'Phase 4 — During Delivery', step: 14, group: 'Module delivery rhythm',
     task: 'Confirm slides and materials are uploaded to Teams before each module session.',
@@ -4073,38 +4073,73 @@ async function writeInternalChecklist(projectId, items) {
 }
 
 // Instantiate the checklist from the template for a new cohort
-function buildChecklist(projectId, programStart, programEnd) {
-  const start = new Date(programStart);
-  const end   = programEnd ? new Date(programEnd) : null;
-  return IOP_CHECKLIST_TEMPLATE.map((t, i) => {
-    let dueDate = null;
-    if (t.trigger === 'program_start' && !isNaN(start)) {
-      const d = new Date(start);
-      d.setDate(d.getDate() + t.daysOffset);
-      dueDate = d.toISOString().slice(0, 10);
-    } else if (t.trigger === 'program_end' && end) {
-      const d = new Date(end);
-      d.setDate(d.getDate() + t.daysOffset);
-      dueDate = d.toISOString().slice(0, 10);
+// moduleDates: array of 'YYYY-MM-DD' strings for each module delivery weekend
+function buildChecklist(projectId, programStart, programEnd, moduleDates = []) {
+  const start = programStart ? new Date(programStart) : null;
+  const end   = programEnd   ? new Date(programEnd)   : null;
+  const items = [];
+  let idx = 0;
+
+  for (const t of IOP_CHECKLIST_TEMPLATE) {
+    if (t.trigger === 'module') {
+      // Expand once per module date
+      const dates = moduleDates.length > 0 ? moduleDates : (start ? [programStart] : []);
+      dates.forEach((modDate, modIdx) => {
+        const d = new Date(modDate);
+        d.setDate(d.getDate() + t.daysOffset);
+        items.push({
+          id: `chk_${projectId}_${idx++}`,
+          projectId,
+          phase: t.phase,
+          phaseName: t.phaseName,
+          step: t.step,
+          group: `${t.group} — Module ${modIdx + 1} (${new Date(modDate).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })})`,
+          task: t.task,
+          owner: t.owner,
+          ownerEmail: INTERNAL_STAFF[t.owner] || 'info@risk2solution.com',
+          trigger: t.trigger,
+          moduleDate: modDate,
+          moduleNumber: modIdx + 1,
+          dueDate: d.toISOString().slice(0, 10),
+          status: 'Not Started',
+          reminderSent: false,
+          completedAt: null,
+          createdAt: new Date().toISOString(),
+        });
+      });
+    } else {
+      let dueDate = null;
+      if (t.trigger === 'program_start' && start) {
+        const d = new Date(start);
+        d.setDate(d.getDate() + t.daysOffset);
+        dueDate = d.toISOString().slice(0, 10);
+      } else if (t.trigger === 'program_end' && end) {
+        const d = new Date(end);
+        d.setDate(d.getDate() + t.daysOffset);
+        dueDate = d.toISOString().slice(0, 10);
+      }
+      items.push({
+        id: `chk_${projectId}_${idx++}`,
+        projectId,
+        phase: t.phase,
+        phaseName: t.phaseName,
+        step: t.step,
+        group: t.group,
+        task: t.task,
+        owner: t.owner,
+        ownerEmail: INTERNAL_STAFF[t.owner] || 'info@risk2solution.com',
+        trigger: t.trigger,
+        moduleDate: null,
+        moduleNumber: null,
+        dueDate,
+        status: 'Not Started',
+        reminderSent: false,
+        completedAt: null,
+        createdAt: new Date().toISOString(),
+      });
     }
-    return {
-      id: `chk_${projectId}_${i}`,
-      projectId,
-      phase: t.phase,
-      phaseName: t.phaseName,
-      step: t.step,
-      group: t.group,
-      task: t.task,
-      owner: t.owner,
-      ownerEmail: INTERNAL_STAFF[t.owner] || 'info@risk2solution.com',
-      trigger: t.trigger,
-      dueDate,
-      status: 'Not Started',
-      reminderSent: false,
-      completedAt: null,
-      createdAt: new Date().toISOString(),
-    };
-  });
+  }
+  return items;
 }
 
 // ── Send task reminder to staff member ───────────────────────────────────────
@@ -4296,17 +4331,48 @@ app.get('/api/internal/projects', async (req, res) => {
 
 app.post('/api/internal/projects', express.json(), async (req, res) => {
   try {
-    const { cohortName, programType, programStart, programEnd, studentCount, notes } = req.body;
+    const { cohortName, programType, programStart, programEnd, studentCount, notes, status, moduleDates } = req.body;
     if (!cohortName || !programType) return res.status(400).json({ error: 'cohortName and programType required' });
     const id = `ip_${Date.now()}`;
-    const project = { id, cohortName, programType, programStart, programEnd, studentCount: studentCount || 0, notes: notes || '', status: 'Active', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    const checklist = buildChecklist(id, programStart, programEnd);
+    const project = {
+      id, cohortName, programType, programStart, programEnd,
+      studentCount: studentCount || 0, notes: notes || '',
+      status: status || 'Scheduled',
+      moduleDates: moduleDates || [],
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+    };
+    const checklist = buildChecklist(id, programStart, programEnd, moduleDates || []);
     const projects = await readInternalProjects();
     projects.push(project);
     await writeInternalProjects(projects);
     await writeInternalChecklist(id, checklist);
-    console.log(`[Internal] Created: ${cohortName} (${checklist.length} checklist items)`);
-    res.json({ project, checklist });
+    console.log(`[Internal] Created: ${cohortName} (${checklist.length} checklist items, ${(moduleDates||[]).length} modules)`);
+
+    // Auto-send reminders for any items due within 14 days or already overdue
+    // (catches late additions like this cohort)
+    const today = new Date(); today.setHours(0,0,0,0);
+    let autoSent = 0;
+    for (const item of checklist) {
+      if (!item.dueDate) continue;
+      const due = new Date(item.dueDate); due.setHours(0,0,0,0);
+      const daysUntil = Math.round((due - today) / (1000*60*60*24));
+      // Send immediately for anything due within 14 days or overdue (not yet completed)
+      if (daysUntil <= 14 && item.status !== 'Completed') {
+        try {
+          await sendInternalTaskReminder(project, item);
+          item.reminderSent = true;
+          item.lastReminderAt = new Date().toISOString();
+          autoSent++;
+          // Small delay to avoid rate limiting
+          await new Promise(r => setTimeout(r, 300));
+        } catch(e) { console.error('[Internal] Auto-reminder error:', e.message); }
+      }
+    }
+    // Save updated reminder flags
+    await writeInternalChecklist(id, checklist);
+    console.log(`[Internal] Auto-sent ${autoSent} immediate reminders for upcoming/overdue tasks`);
+
+    res.json({ project, checklist, autoSent });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -4317,6 +4383,49 @@ app.put('/api/internal/projects/:id', express.json(), async (req, res) => {
     if (idx < 0) return res.status(404).json({ error: 'Not found' });
     Object.assign(projects[idx], req.body, { updatedAt: new Date().toISOString() });
     await writeInternalProjects(projects);
+
+    // If module dates were updated, regenerate the module-specific checklist items
+    if (req.body.moduleDates) {
+      const p = projects[idx];
+      const existing = await readInternalChecklist(req.params.id);
+      // Keep non-module items as-is (preserve their completion status)
+      const nonModuleItems = existing.filter(i => i.trigger !== 'module');
+      // Rebuild module items from new dates
+      const newModuleItems = [];
+      let idx2 = nonModuleItems.length;
+      const moduleTasks = IOP_CHECKLIST_TEMPLATE.filter(t => t.trigger === 'module');
+      (req.body.moduleDates || []).forEach((modDate, modIdx) => {
+        moduleTasks.forEach(t => {
+          const d = new Date(modDate);
+          d.setDate(d.getDate() + t.daysOffset);
+          // Check if this item already exists (same module number + task)
+          const existingItem = existing.find(i =>
+            i.trigger === 'module' && i.moduleNumber === modIdx + 1 &&
+            i.task === t.task
+          );
+          newModuleItems.push(existingItem ? {
+            ...existingItem,
+            moduleDate: modDate,
+            dueDate: d.toISOString().slice(0, 10),
+            group: `${t.group} — Module ${modIdx + 1} (${new Date(modDate).toLocaleDateString('en-AU', { day:'numeric',month:'short',year:'numeric' })})`,
+          } : {
+            id: `chk_${req.params.id}_m${idx2++}`,
+            projectId: req.params.id,
+            phase: t.phase, phaseName: t.phaseName, step: t.step,
+            group: `${t.group} — Module ${modIdx + 1} (${new Date(modDate).toLocaleDateString('en-AU', { day:'numeric',month:'short',year:'numeric' })})`,
+            task: t.task, owner: t.owner,
+            ownerEmail: INTERNAL_STAFF[t.owner] || 'info@risk2solution.com',
+            trigger: 'module', moduleDate: modDate, moduleNumber: modIdx + 1,
+            dueDate: d.toISOString().slice(0, 10),
+            status: 'Not Started', reminderSent: false, completedAt: null,
+            createdAt: new Date().toISOString(),
+          });
+        });
+      });
+      await writeInternalChecklist(req.params.id, [...nonModuleItems, ...newModuleItems]);
+      console.log(`[Internal] Checklist regenerated: ${nonModuleItems.length} base + ${newModuleItems.length} module items`);
+    }
+
     res.json({ project: projects[idx] });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
