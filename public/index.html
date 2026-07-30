@@ -495,6 +495,19 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
           <div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Number of enrolled students</label>
             <input id="ni-students" type="number" min="1" placeholder="e.g. 12" style="width:100%;font-size:13px"/>
           </div>
+          <div>
+            <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">
+              Module delivery dates <span style="color:var(--text3)">(add one per module — the weekend dates the modules run)</span>
+            </label>
+            <div id="ni-module-dates" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px">
+              <div class="module-date-row" style="display:flex;gap:6px;align-items:center">
+                <span style="font-size:11px;color:var(--text3);width:60px;flex-shrink:0">Module 1</span>
+                <input type="date" class="ni-moddate" style="font-size:12px;flex:1"/>
+                <button type="button" onclick="addModuleDate()" style="background:none;border:1px solid var(--teal);color:var(--teal);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px">+ Add</button>
+              </div>
+            </div>
+            <div style="font-size:10px;color:var(--text3)">Aurora will automatically generate and send reminders for each module 2 weeks, 1 week, 1 day before, and post-delivery tasks after each module date.</div>
+          </div>
           <div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Notes</label>
             <textarea id="ni-notes" rows="2" placeholder="Any notes about this cohort…" style="width:100%;font-size:12px"></textarea>
           </div>
@@ -2942,8 +2955,27 @@ function renderInternalChecklist(project, checklist) {
   };
 
   let html = `<div style="padding:20px">
-    <!-- Status control -->
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;background:var(--card2);border-radius:8px;padding:12px 14px;border:1px solid var(--border)">
+    <!-- Module dates editor -->
+    <div style="background:var(--card2);border-radius:8px;padding:12px 14px;margin-bottom:16px;border:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:11px;color:var(--text2);font-weight:500">📅 Module delivery dates</span>
+        <button type="button" onclick="saveModuleDates('${project.id}')" style="background:var(--teal);border:none;color:#0f0f1a;font-size:10px;padding:3px 10px;border-radius:4px;cursor:pointer;font-weight:600">Save & update checklist</button>
+      </div>
+      <div id="modal-module-dates-${project.id}" style="display:flex;flex-direction:column;gap:5px;margin-bottom:6px">
+        ${(project.moduleDates && project.moduleDates.length > 0 ? project.moduleDates : ['']).map((d, i) => `
+        <div class="modal-mod-row-${project.id}" style="display:flex;gap:6px;align-items:center">
+          <span style="font-size:11px;color:var(--text3);width:60px;flex-shrink:0">Module ${i + 1}</span>
+          <input type="date" class="modal-moddate-${project.id}" value="${d}" style="font-size:12px;flex:1;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:3px 6px"/>
+          <button type="button" onclick="removeModalModuleRow(this,'${project.id}')" style="background:none;border:1px solid var(--rose);color:var(--rose);border-radius:4px;padding:2px 6px;cursor:pointer;font-size:10px">✕</button>
+        </div>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:6px">
+        <button type="button" onclick="addModalModuleDate('${project.id}')" style="background:none;border:1px solid var(--teal);color:var(--teal);font-size:10px;padding:2px 8px;border-radius:4px;cursor:pointer">+ Add module date</button>
+      </div>
+      <div style="font-size:10px;color:var(--text3)">Saving regenerates all per-module tasks with correct due dates and sends reminders for modules due within 14 days.</div>
+    </div>
+
+    <!-- Overall progress -->    <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;background:var(--card2);border-radius:8px;padding:12px 14px;border:1px solid var(--border)">
       <span style="font-size:11px;color:var(--text2);flex-shrink:0">Cohort status:</span>
       <select onchange="updateInternalStatus('${project.id}',this.value)" style="font-size:12px;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:3px 8px;flex:1">
         ${['Scheduled','Active','On Hold','Paused','Completed'].map(s =>
@@ -3056,26 +3088,94 @@ async function createInternalProject(btn) {
   const end     = document.getElementById('ni-end').value;
   const students= document.getElementById('ni-students').value;
   const notes   = document.getElementById('ni-notes').value.trim();
+  const status  = document.getElementById('ni-status')?.value || 'Scheduled';
+
+  // Collect module dates
+  const moduleDates = [...document.querySelectorAll('.ni-moddate')]
+    .map(i => i.value).filter(Boolean).sort();
+
   if (!name) { showToast('Please enter a cohort name', 'var(--rose)'); return; }
   if (!start) { showToast('Please enter a programme start date', 'var(--rose)'); return; }
+  if (moduleDates.length === 0) {
+    if (!confirm('No module dates entered. Aurora won\'t be able to send module-specific reminders. Continue anyway?')) return;
+  }
+
   btn.textContent = 'Creating…';
   btn.disabled = true;
   try {
     const data = await api('/api/internal/projects', {
       method: 'POST',
-      body: JSON.stringify({ cohortName: name, programType: type, programStart: start, programEnd: end, studentCount: parseInt(students)||0, notes, status: document.getElementById('ni-status')?.value || 'Scheduled' })
+      body: JSON.stringify({ cohortName: name, programType: type, programStart: start, programEnd: end, studentCount: parseInt(students)||0, notes, status, moduleDates })
     });
     internalProjects.push(data.project);
     renderInternalProjects();
     closeNewInternalModal();
-    showToast(`✓ Cohort "${name}" created — ${data.checklist?.length || 0} checklist items generated`);
-    // Auto-open the new project
+    const autoMsg = data.autoSent > 0 ? ` — ${data.autoSent} immediate reminders sent for upcoming tasks` : '';
+    showToast(`✓ "${name}" created — ${data.checklist?.length || 0} checklist items across ${moduleDates.length} modules${autoMsg}`);
     await openInternalProject(data.project.id);
   } catch(e) {
     showToast('Error: ' + e.message, 'var(--rose)');
     btn.textContent = 'Create cohort & generate checklist';
     btn.disabled = false;
   }
+}
+
+function addModuleDate() {
+  const container = document.getElementById('ni-module-dates');
+  const count = container.querySelectorAll('.module-date-row').length + 1;
+  const row = document.createElement('div');
+  row.className = 'module-date-row';
+  row.style.cssText = 'display:flex;gap:6px;align-items:center';
+  row.innerHTML = `<span style="font-size:11px;color:var(--text3);width:60px;flex-shrink:0">Module ${count}</span>
+    <input type="date" class="ni-moddate" style="font-size:12px;flex:1"/>
+    <button type="button" onclick="this.parentElement.remove();renumberModules()" style="background:none;border:1px solid var(--rose);color:var(--rose);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px">✕</button>`;
+  container.appendChild(row);
+}
+
+function renumberModules() {
+  document.querySelectorAll('.module-date-row').forEach((row, i) => {
+    const lbl = row.querySelector('span');
+    if (lbl) lbl.textContent = `Module ${i + 1}`;
+  });
+}
+
+async function saveModuleDates(projectId) {
+  const dates = [...document.querySelectorAll(`.modal-moddate-${projectId}`)]
+    .map(i => i.value).filter(Boolean).sort();
+  if (dates.length === 0) { showToast('Please enter at least one module date', 'var(--rose)'); return; }
+  try {
+    const data = await api(`/api/internal/projects/${projectId}`, {
+      method: 'PUT', body: JSON.stringify({ moduleDates: dates })
+    });
+    // Update local project
+    const p = internalProjects.find(x => x.id === projectId);
+    if (p) p.moduleDates = dates;
+    showToast(`✓ Module dates saved — ${dates.length} modules. Checklist regenerated.`);
+    // Reload checklist to show new module tasks
+    const chkData = await api(`/api/internal/projects/${projectId}/checklist`);
+    if (currentInternalProject) renderInternalChecklist(currentInternalProject, chkData.checklist || []);
+  } catch(e) { showToast('Error: ' + e.message, 'var(--rose)'); }
+}
+
+function addModalModuleDate(projectId) {
+  const container = document.getElementById('modal-module-dates-' + projectId);
+  const count = container.querySelectorAll(`.modal-mod-row-${projectId}`).length + 1;
+  const row = document.createElement('div');
+  row.className = `modal-mod-row-${projectId}`;
+  row.style.cssText = 'display:flex;gap:6px;align-items:center';
+  row.innerHTML = `<span style="font-size:11px;color:var(--text3);width:60px;flex-shrink:0">Module ${count}</span>
+    <input type="date" class="modal-moddate-${projectId}" style="font-size:12px;flex:1;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:3px 6px"/>
+    <button type="button" onclick="removeModalModuleRow(this,'${projectId}')" style="background:none;border:1px solid var(--rose);color:var(--rose);border-radius:4px;padding:2px 6px;cursor:pointer;font-size:10px">✕</button>`;
+  container.appendChild(row);
+}
+
+function removeModalModuleRow(btn, projectId) {
+  btn.closest(`.modal-mod-row-${projectId}`)?.remove();
+  // Renumber
+  document.querySelectorAll(`.modal-mod-row-${projectId}`).forEach((row, i) => {
+    const lbl = row.querySelector('span');
+    if (lbl) lbl.textContent = `Module ${i + 1}`;
+  });
 }
 
 async function updateInternalStatus(projectId, newStatus) {
