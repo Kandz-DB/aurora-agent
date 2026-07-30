@@ -3927,7 +3927,7 @@ const IOP_CHECKLIST_TEMPLATE = [
     owner: 'Cherry Abadeza', trigger: 'program_start', daysOffset: -57 },
   { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 7, group: 'Enrolment administration',
     task: 'When student returns enrolment form: Add student to Axcelerate (official registration).',
-    owner: 'Diane Kruger', trigger: 'rolling', daysOffset: 0 },
+    owner: 'Cherry Abadeza', trigger: 'rolling', daysOffset: 0 },
   { phase: 1, phaseName: 'Phase 1 — Program Setup & Cohort Launch', step: 7, group: 'Enrolment administration',
     task: 'Confirm the fee amount for each student with Dave (standard, scholarship, partner, or corporate rate). Notify Diane of agreed pricing so she can raise the invoice.',
     owner: 'Cherry Abadeza', trigger: 'rolling', daysOffset: 0 },
@@ -3990,7 +3990,7 @@ const IOP_CHECKLIST_TEMPLATE = [
     owner: 'Diane Kruger', trigger: 'ongoing', daysOffset: 0 },
   { phase: 4, phaseName: 'Phase 4 — During Delivery', step: 15, group: 'Student support and admin during delivery',
     task: 'Keep Axcelerate updated with attendance, progress, and assessment submissions.',
-    owner: 'Diane Kruger', trigger: 'ongoing', daysOffset: 0 },
+    owner: 'Cherry Abadeza', trigger: 'ongoing', daysOffset: 0 },
   // PHASE 5 — Completion / Wrap-up
   { phase: 5, phaseName: 'Phase 5 — Program Completion', step: 16, group: 'Financial completion',
     task: 'Confirm all students have paid in full. Chase any outstanding invoices before issuing awards. Mark in tracker.',
