@@ -4167,10 +4167,6 @@ ASSIGNED TO: ${item.owner}
 
 Please action this task and reply to this email (to info@risk2solution.com) once it is complete. Aurora will automatically mark it as done when your reply is received.
 
-You can also view the full programme checklist in Aurora.
-
-${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}
-
 Aurora
 R2S Project Management Intelligence
 
