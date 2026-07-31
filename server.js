@@ -2370,6 +2370,8 @@ R2S Project Management Intelligence`,
   // ── 8. Internal programme weekly report (Mondays) ────────────────────────
   if (isMonday) {
     try { await sendInternalProjectStatusReport(); } catch(e) { console.error('[InternalReport]', e.message); }
+    // Operational weekly update to delivery team (Cherry, Janita, Diane, CC Dave)
+    try { await sendInternalWeeklyOpsUpdate(); } catch(e) { console.error('[InternalOps]', e.message); }
   }
 
   // ── 9. Wednesday PM checklist (Wednesday = dayOfWeek 3 in AEST) ───────────
@@ -4175,7 +4177,9 @@ R2S Project Management Intelligence
 ---
 Task ID: ${item.id} (include this in your reply to auto-confirm)`;
 
-  await sendEmail(ownerEmail, subject, body, false, ['diane.k@risk2solution.com']);
+  // Only CC Diane if she is NOT the primary recipient (i.e. she's not the assigned owner)
+  const cc = item.owner === 'Diane Kruger' ? [] : [];
+  await sendEmail(ownerEmail, subject, body, false, cc);
   console.log(`[Internal] Reminder sent to ${item.owner} (${ownerEmail}): ${item.task.slice(0, 60)}`);
 }
 
@@ -4335,6 +4339,140 @@ async function sendInternalProjectStatusReport() {
   console.log('[Internal] Weekly programme status report sent');
 }
 
+// ── Determine if a cohort should send its weekly ops update this week ─────────
+// Rules:
+// - Always send from cohort creation until 3 weeks before first module
+// - Resume 3 weeks before each module, stop after that module passes
+// - Stop after final module is delivered (unless wrap-up tasks remain)
+function shouldSendWeeklyOpsUpdate(project) {
+  const now = new Date();
+  now.setHours(0,0,0,0);
+  const moduleDates = (project.moduleDates || [])
+    .map(d => { const dt = new Date(d); dt.setHours(0,0,0,0); return dt; })
+    .filter(d => !isNaN(d))
+    .sort((a,b) => a-b);
+
+  if (!moduleDates.length) return true; // No module dates — always send
+
+  const THREE_WEEKS = 21 * 24 * 60 * 60 * 1000;
+  const futureModules = moduleDates.filter(d => d >= now);
+  const pastModules   = moduleDates.filter(d => d < now);
+
+  // If all modules are in the past (final module delivered) — stop
+  if (!futureModules.length) return false;
+
+  const nextModule = futureModules[0];
+  const daysUntilNext = Math.round((nextModule - now) / (1000*60*60*24));
+
+  // Within 3 weeks of next module → send
+  if (daysUntilNext <= 21) return true;
+
+  // More than 3 weeks until next module — only send if:
+  // (a) no modules have been delivered yet (initial setup phase), OR
+  // (b) a module was delivered within the last 7 days (immediate post-module week — then stop)
+  if (!pastModules.length) return true; // Still in setup phase
+
+  // Last module was delivered — check if it was recent
+  const lastModule = pastModules[pastModules.length - 1];
+  const daysSinceLast = Math.round((now - lastModule) / (1000*60*60*24));
+  // Stop sending between modules (more than 7 days after last, more than 21 days before next)
+  if (daysSinceLast > 7) return false;
+
+  return true;
+}
+
+// ── Weekly operational checklist update to delivery team ─────────────────────
+async function sendInternalWeeklyOpsUpdate() {
+  const projects = await readInternalProjects();
+  const activeProjects = projects.filter(p =>
+    p.status !== 'Completed' && p.status !== 'On Hold' && p.status !== 'Paused'
+  );
+  if (!activeProjects.length) return;
+
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+
+  // RECIPIENTS: Cherry, Janita, Diane + CC Dave
+  const TO  = [
+    process.env.CHERRY_EMAIL || 'cherry.a@risk2solution.com',
+    process.env.JANITA_EMAIL || 'janita.z@risk2solution.com',
+    'diane.k@risk2solution.com',
+  ];
+  const CC  = ['dave.c@risk2solution.com', 'kandia@risk2solution.com'];
+
+  let anySent = false;
+
+  for (const project of activeProjects) {
+    if (!shouldSendWeeklyOpsUpdate(project)) {
+      console.log(`[Internal Ops] Skipping ${project.cohortName} — outside active window`);
+      continue;
+    }
+
+    const checklist = await readInternalChecklist(project.id);
+    const now2 = new Date(); now2.setHours(0,0,0,0);
+    const moduleDates = (project.moduleDates || []).map(d => new Date(d)).filter(d => !isNaN(d)).sort((a,b)=>a-b);
+    const nextModule  = moduleDates.find(d => d >= now2);
+    const daysToNext  = nextModule ? Math.round((nextModule - now2) / (1000*60*60*24)) : null;
+    const programName = project.programType === 'grad_cert'
+      ? 'Graduate Certificate (11056NAT)'
+      : 'Graduate Diploma (11066NAT)';
+
+    // Overdue items
+    const overdue = checklist.filter(i => !i.status.includes('Completed') && i.dueDate && new Date(i.dueDate) < now2);
+    // Due this week (next 7 days)
+    const nextWeek = new Date(now2.getTime() + 7*24*60*60*1000);
+    const dueThisWeek = checklist.filter(i => !i.status.includes('Completed') && i.dueDate && new Date(i.dueDate) >= now2 && new Date(i.dueDate) <= nextWeek);
+    // Due next 3 weeks
+    const threeWeeks = new Date(now2.getTime() + 21*24*60*60*1000);
+    const dueSoon = checklist.filter(i => !i.status.includes('Completed') && i.dueDate && new Date(i.dueDate) > nextWeek && new Date(i.dueDate) <= threeWeeks);
+    // Completed this week
+    const completedThisWeek = checklist.filter(i => i.completedAt && (now2 - new Date(i.completedAt)) <= 7*24*60*60*1000);
+    const totalDone = checklist.filter(i => i.status === 'Completed').length;
+    const pct = checklist.length > 0 ? Math.round(totalDone/checklist.length*100) : 0;
+
+    const contextLine = daysToNext !== null
+      ? daysToNext <= 0 ? `⚡ Module delivery is TODAY`
+      : daysToNext <= 7 ? `🔴 Next module in ${daysToNext} day${daysToNext!==1?'s':''} — this week is critical`
+      : daysToNext <= 14 ? `🟡 Next module in ${daysToNext} days — preparation underway`
+      : `🟢 Next module in ${daysToNext} days`
+      : `Programme active`;
+
+    const body = `Hi team,
+
+Here is the weekly programme update for ${project.cohortName} — ${programName}.
+
+${contextLine}
+Overall progress: ${totalDone}/${checklist.length} tasks complete (${pct}%)
+
+${overdue.length > 0 ? `⚠️ OVERDUE (${overdue.length} task${overdue.length!==1?'s':''}):
+${overdue.map(i => `• [${i.owner}] ${i.task.slice(0,80)} — was due ${i.dueDate}`).join('\n')}
+
+` : ''}${dueThisWeek.length > 0 ? `📋 DUE THIS WEEK (${dueThisWeek.length} task${dueThisWeek.length!==1?'s':''}):
+${dueThisWeek.map(i => `• [${i.owner}] ${i.task.slice(0,80)} — due ${i.dueDate}`).join('\n')}
+
+` : '✅ Nothing due this week\n\n'}${dueSoon.length > 0 ? `📅 COMING UP (next 3 weeks):
+${dueSoon.map(i => `• [${i.owner}] ${i.task.slice(0,80)} — due ${i.dueDate}`).join('\n')}
+
+` : ''}${completedThisWeek.length > 0 ? `✓ COMPLETED THIS WEEK:
+${completedThisWeek.map(i => `• [${i.owner}] ${i.task.slice(0,80)}`).join('\n')}
+
+` : ''}Please action any overdue or this-week items as a priority. Reply to this email confirming completion and Aurora will automatically tick them off in the checklist.
+
+${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}
+
+Aurora
+R2S Project Management Intelligence`;
+
+    const subject = `[Aurora] ${project.cohortName} — Weekly Programme Update${overdue.length > 0 ? ` ⚠️ ${overdue.length} overdue` : daysToNext !== null && daysToNext <= 7 ? ' 🔴 Module this week' : ''}`;
+
+    await sendEmail(TO, subject, body, false, CC);
+    console.log(`[Internal Ops] Weekly update sent for ${project.cohortName} — ${dueThisWeek.length} due this week, ${overdue.length} overdue`);
+    anySent = true;
+  }
+
+  if (!anySent) console.log('[Internal Ops] No cohorts in active window this week — no ops emails sent');
+}
+
 // ── API routes for internal projects ─────────────────────────────────────────
 app.get('/api/internal/projects', async (req, res) => {
   try { res.json({ projects: await readInternalProjects() }); }
@@ -4485,6 +4623,11 @@ app.post('/api/internal/projects/:id/checklist/:itemId/remind', async (req, res)
 
 app.post('/api/internal/report', async (req, res) => {
   try { await sendInternalProjectStatusReport(); res.json({ success: true }); }
+  catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/internal/ops-update', async (req, res) => {
+  try { await sendInternalWeeklyOpsUpdate(); res.json({ success: true }); }
   catch(e) { res.status(500).json({ error: e.message }); }
 });
 
