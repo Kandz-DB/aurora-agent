@@ -783,9 +783,25 @@ async function readConsultantReplies() {
       const fromEmail = msg.from?.emailAddress?.address || '';
       const fromName  = msg.from?.emailAddress?.name || fromEmail;
       const subject   = msg.subject || '';
-      const bodyText  = msg.body?.content?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 3000) || '';
+      // Use 8000 chars for body — task IDs can be buried deep in quoted reply text
+      const bodyText  = msg.body?.content?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 8000) || '';
 
       console.log(`[Poll] Checking: "${subject}" from ${fromEmail}`);
+
+      // ── Check for internal task confirmations FIRST — before any skip logic ──
+      // Staff reply to Aurora emails from their @risk2solution.com addresses
+      // The task ID (chk_ip_xxx) is in the quoted original email body
+      const wasInternalConfirmation = await checkInternalTaskConfirmations(bodyText, subject, fromEmail);
+      if (wasInternalConfirmation) {
+        console.log(`[Poll] Internal task confirmed by ${fromEmail} — tagged and skipped`);
+        try {
+          await axios.patch(`https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
+            { isRead: true, categories: ['Aurora Processed'] },
+            { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+          );
+        } catch(e) {}
+        continue;
+      }
 
       // Skip Aurora's own emails — prevents infinite feedback loops
       const isXeroInvoice = fromEmail.toLowerCase().includes('xero.com') ||
@@ -867,18 +883,6 @@ async function readConsultantReplies() {
           { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
         );
       } catch(tagErr) {}
-
-      // ── Check for internal task confirmations ─────────────────────────────
-      const wasInternalConfirmation = await checkInternalTaskConfirmations(bodyText, subject, fromEmail);
-      if (wasInternalConfirmation) {
-        try {
-          await axios.patch(`https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
-            { isRead: true, categories: ['Aurora Processed'] },
-            { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
-          );
-        } catch(e) {}
-        continue;
-      }
 
       // Determine if this is internal R2S or external (client/other)
       const isInternal = fromEmail.toLowerCase().endsWith('@risk2solution.com') ||
@@ -4210,16 +4214,23 @@ async function checkInternalProjectReminders() {
 
 // ── Detect staff confirmation reply emails ────────────────────────────────────
 async function checkInternalTaskConfirmations(emailBody, emailSubject, fromEmail) {
-  // Look for task ID in email body
-  const taskIdMatch = (emailBody + emailSubject).match(/chk_[a-z0-9_]+/i);
+  // Task IDs look like chk_ip_1234567890_0 — may be buried in quoted reply text
+  const fullText = emailBody + ' ' + emailSubject;
+  const taskIdMatch = fullText.match(/chk_ip_\d+_[a-z0-9_]*/i) ||
+                      fullText.match(/chk_[a-z0-9_]{10,}/i);
   if (!taskIdMatch) return false;
-  const taskId = taskIdMatch[0];
 
-  // Find the item across all internal projects
+  const taskId = taskIdMatch[0].trim();
+  console.log(`[Internal] Possible task confirmation — ID: ${taskId} from ${fromEmail}`);
+
   const projects = await readInternalProjects();
   for (const project of projects) {
     const checklist = await readInternalChecklist(project.id);
     const item = checklist.find(i => i.id === taskId);
+    if (item && item.status === 'Completed') {
+      console.log(`[Internal] Task already completed: ${taskId}`);
+      return true;
+    }
     if (item && item.status !== 'Completed') {
       item.status = 'Completed';
       item.completedAt = new Date().toISOString();
@@ -4234,6 +4245,7 @@ async function checkInternalTaskConfirmations(emailBody, emailSubject, fromEmail
       return true;
     }
   }
+  console.log(`[Internal] Task ID found but no matching item: ${taskId}`);
   return false;
 }
 
