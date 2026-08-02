@@ -4256,83 +4256,215 @@ async function sendInternalProjectStatusReport() {
 
   const RECIPIENTS = ['dave.c@risk2solution.com', 'kandia@risk2solution.com', 'diane.k@risk2solution.com'];
   const now = new Date();
-  const dateStr = now.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const now0 = new Date(now); now0.setHours(0,0,0,0);
+  const dateStr = now.toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+
+  const ownerColors = {
+    'Dave Cohen':'#6aa3ff','Diane Kruger':'#ff608a',
+    'Cherry Abadeza':'#00e8bb','Janita Zhang':'#ffd93d',
+    'Dr Paul Johnston':'#a78bfa','Trainer':'#888',
+  };
+  const fmt = d => new Date(d).toLocaleDateString('en-AU',{day:'numeric',month:'short'});
 
   let reportSections = '';
 
   for (const project of projects) {
-    const checklist = await readInternalChecklist(project.id);
-    const total = checklist.length;
-    const done  = checklist.filter(i => i.status === 'Completed').length;
-    const pct   = total > 0 ? Math.round((done / total) * 100) : 0;
-
-    // Overdue items
-    const overdue = checklist.filter(i => {
-      if (i.status === 'Completed' || !i.dueDate) return false;
-      return new Date(i.dueDate) < now;
-    });
-
-    // Due this week
-    const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-    const dueThisWeek = checklist.filter(i => {
-      if (i.status === 'Completed' || !i.dueDate) return false;
-      const d = new Date(i.dueDate);
-      return d >= now && d <= nextWeek;
-    });
-
-    // Current phase items
-    const currentPhaseItems = checklist.filter(i => i.status !== 'Completed');
-    const currentPhase = currentPhaseItems.length > 0 ? currentPhaseItems[0].phaseName : 'Completed';
-
+    const checklist   = await readInternalChecklist(project.id);
     const programName = project.programType === 'grad_cert' ? 'Graduate Certificate (11056NAT)' : 'Graduate Diploma (11066NAT)';
+    const moduleDates = (project.moduleDates || []).map(d => { const dt=new Date(d); dt.setHours(0,0,0,0); return dt; }).filter(d=>!isNaN(d)).sort((a,b)=>a-b);
+    const nextModule  = moduleDates.find(d => d >= now0);
+    const daysToNext  = nextModule ? Math.round((nextModule-now0)/(1000*60*60*24)) : null;
+
+    const totalDone   = checklist.filter(i => i.status==='Completed').length;
+    const totalTasks  = checklist.length;
+    const pct         = totalTasks>0 ? Math.round(totalDone/totalTasks*100) : 0;
+    const pctColor    = pct>=80?'#00e8bb':pct>=50?'#ffd93d':'#ff608a';
+
+    const overdue     = checklist.filter(i => i.status!=='Completed' && i.dueDate && new Date(i.dueDate)<now0);
+    const nextWeek    = new Date(now0.getTime()+7*24*60*60*1000);
+    const threeWeeks  = new Date(now0.getTime()+21*24*60*60*1000);
+    const dueThisWeek = checklist.filter(i => i.status!=='Completed' && i.dueDate && new Date(i.dueDate)>=now0 && new Date(i.dueDate)<=nextWeek);
+    const dueSoon     = checklist.filter(i => i.status!=='Completed' && i.dueDate && new Date(i.dueDate)>nextWeek && new Date(i.dueDate)<=threeWeeks);
+    const completedThisWeek = checklist.filter(i => i.completedAt && (now0-new Date(i.completedAt))<=7*24*60*60*1000);
+
+    // Per-phase stats
+    const phaseMap = {};
+    checklist.forEach(i => {
+      const k = i.phaseName||'General';
+      if (!phaseMap[k]) phaseMap[k] = { total:0, done:0, overdue:0 };
+      phaseMap[k].total++;
+      if (i.status==='Completed') phaseMap[k].done++;
+      if (i.status!=='Completed' && i.dueDate && new Date(i.dueDate)<now0) phaseMap[k].overdue++;
+    });
+
+    // Module timeline chips
+    const moduleTimeline = moduleDates.map((d,idx) => {
+      const isPast=d<now0, isNext=nextModule&&d.getTime()===nextModule.getTime();
+      const days=Math.round((d-now0)/(1000*60*60*24));
+      return {num:idx+1, date:d.toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}), isPast, isNext, days};
+    });
+
+    const statusBadge = daysToNext===null ? {text:'Programme active',color:'#00e8bb',bg:'#00e8bb15'}
+      : daysToNext<=0   ? {text:'⚡ Module delivery TODAY',color:'#ff608a',bg:'#ff608a20'}
+      : daysToNext<=7   ? {text:`🔴 Module in ${daysToNext} days — CRITICAL`,color:'#ff608a',bg:'#ff608a15'}
+      : daysToNext<=14  ? {text:`🟡 Module in ${daysToNext} days — preparation underway`,color:'#ffd93d',bg:'#ffd93d15'}
+      : daysToNext<=21  ? {text:`🟢 Module in ${daysToNext} days`,color:'#00e8bb',bg:'#00e8bb15'}
+      : {text:`🔵 Module in ${daysToNext} days`,color:'#6aa3ff',bg:'#6aa3ff15'};
 
     reportSections += `
-      <div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:16px;margin-bottom:16px">
+    <!-- Cohort card -->
+    <div style="background:#fff;border-radius:12px;overflow:hidden;margin-bottom:20px;box-shadow:0 2px 12px rgba(0,0,0,0.08)">
+
+      <!-- Card header -->
+      <div style="background:linear-gradient(135deg,#1a1a3e,#0d1b2a);padding:20px 24px">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
           <div>
-            <div style="font-size:14px;font-weight:700;color:#fff">${project.cohortName}</div>
-            <div style="font-size:11px;color:#6aa3ff;margin-top:2px">${programName} · ${project.status}</div>
+            <div style="font-size:16px;font-weight:700;color:#fff;margin-bottom:3px">${project.cohortName}</div>
+            <div style="font-size:11px;color:#8899bb">${programName} · ${project.status}</div>
           </div>
-          <div style="text-align:right">
-            <div style="font-size:20px;font-weight:700;color:${pct >= 80 ? '#00e8bb' : pct >= 50 ? '#ffd93d' : '#ff608a'}">${pct}%</div>
-            <div style="font-size:10px;color:#888">${done}/${total} tasks complete</div>
+          <div style="background:${statusBadge.bg};border:1px solid ${statusBadge.color}44;border-radius:8px;padding:6px 12px;text-align:center">
+            <span style="color:${statusBadge.color};font-size:11px;font-weight:600">${statusBadge.text}</span>
           </div>
         </div>
-        <div style="background:#2a2a4a;border-radius:4px;height:8px;margin-bottom:12px">
-          <div style="width:${pct}%;background:${pct >= 80 ? '#00e8bb' : pct >= 50 ? '#ffd93d' : '#ff608a'};height:8px;border-radius:4px"></div>
+        <!-- Overall progress -->
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-size:11px;color:#8899bb">Overall progress — ${totalDone}/${totalTasks} tasks</span>
+          <span style="font-size:16px;font-weight:700;color:${pctColor}">${pct}%</span>
         </div>
-        <div style="font-size:11px;color:#aaa;margin-bottom:8px">Current phase: ${currentPhase}</div>
-        ${overdue.length > 0 ? `
-        <div style="background:#ff608a22;border:1px solid #ff608a44;border-radius:6px;padding:10px;margin-bottom:8px">
-          <div style="font-size:10px;color:#ff608a;font-weight:600;margin-bottom:6px">⚠ ${overdue.length} OVERDUE TASK${overdue.length > 1 ? 'S' : ''}</div>
-          ${overdue.slice(0, 3).map(i => `<div style="font-size:11px;color:#ffaabb;margin-bottom:3px">• ${i.owner}: ${i.task.slice(0, 80)}${i.task.length > 80 ? '…' : ''} (due ${i.dueDate})</div>`).join('')}
+        <div style="background:#2a2a4a;border-radius:6px;height:12px">
+          <div style="width:${pct}%;background:linear-gradient(90deg,${pctColor},${pct>=80?'#00a878':pct>=50?'#cc8800':'#cc2222'});height:12px;border-radius:6px"></div>
+        </div>
+      </div>
+
+      <!-- Stats row -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-bottom:1px solid #eee">
+        ${[
+          {label:'Completed',val:`${totalDone}`,sub:`of ${totalTasks}`,color:'#00a878'},
+          {label:'Due this week',val:`${dueThisWeek.length}`,sub:'tasks',color:dueThisWeek.length>0?'#cc8800':'#00a878'},
+          {label:'Overdue',val:`${overdue.length}`,sub:'tasks',color:overdue.length>0?'#cc2222':'#00a878'},
+          {label:'Coming up',val:`${dueSoon.length}`,sub:'next 3 weeks',color:'#3366cc'},
+        ].map((s,i) => `<div style="padding:12px;text-align:center;${i<3?'border-right:1px solid #eee':''}">
+          <div style="font-size:20px;font-weight:700;color:${s.color}">${s.val}</div>
+          <div style="font-size:10px;color:#666;margin-top:1px">${s.label}</div>
+          <div style="font-size:9px;color:#aaa">${s.sub}</div>
+        </div>`).join('')}
+      </div>
+
+      <div style="padding:16px 20px">
+
+        <!-- Module timeline -->
+        ${moduleTimeline.length>0 ? `<div style="margin-bottom:14px">
+          <div style="font-size:10px;font-weight:700;color:#333;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Module Timeline</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${moduleTimeline.map(m => `<div style="flex:1;min-width:90px;text-align:center;padding:8px 6px;border-radius:7px;border:2px solid ${m.isNext?'#6aa3ff':m.isPast?'#00e8bb':'#e0e4f0'};background:${m.isNext?'#eff4ff':m.isPast?'#f0fff8':'#f8f9ff'}">
+              <div style="font-size:9px;color:#888;margin-bottom:2px">MOD ${m.num}</div>
+              <div style="font-size:11px;font-weight:600;color:${m.isNext?'#3366cc':m.isPast?'#00a878':'#333'}">${m.date}</div>
+              <div style="font-size:9px;margin-top:2px;color:${m.isPast?'#00a878':m.isNext?'#3366cc':'#aaa'}">${m.isPast?'✓ Delivered':m.isNext?`${m.days}d away`:'Upcoming'}</div>
+            </div>`).join('')}
+          </div>
         </div>` : ''}
-        ${dueThisWeek.length > 0 ? `
-        <div style="background:#ffd93d22;border:1px solid #ffd93d44;border-radius:6px;padding:10px">
-          <div style="font-size:10px;color:#ffd93d;font-weight:600;margin-bottom:6px">📋 DUE THIS WEEK (${dueThisWeek.length} tasks)</div>
-          ${dueThisWeek.slice(0, 5).map(i => `<div style="font-size:11px;color:#ffe88a;margin-bottom:3px">• ${i.owner}: ${i.task.slice(0, 80)}${i.task.length > 80 ? '…' : ''}</div>`).join('')}
-        </div>` : '<div style="font-size:11px;color:#00e8bb">✓ No tasks due this week</div>'}
-      </div>`;
+
+        <!-- Phase breakdown -->
+        <div style="margin-bottom:14px">
+          <div style="font-size:10px;font-weight:700;color:#333;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Progress by Phase</div>
+          ${Object.entries(phaseMap).map(([phase,stats]) => {
+            const p2=stats.total>0?Math.round(stats.done/stats.total*100):0;
+            const c2=p2===100?'#00e8bb':stats.overdue>0?'#ff608a':p2>=50?'#ffd93d':'#6aa3ff';
+            return `<div style="margin-bottom:8px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+                <span style="font-size:11px;color:#444">${phase.replace('Phase ','Ph ')}</span>
+                <div style="display:flex;align-items:center;gap:6px">
+                  ${stats.overdue>0?`<span style="font-size:9px;background:#ff608a15;color:#cc2222;border:1px solid #ff608a44;padding:1px 5px;border-radius:6px">⚠ ${stats.overdue} overdue</span>`:''}
+                  <span style="font-size:11px;font-weight:600;color:${c2}">${stats.done}/${stats.total}</span>
+                </div>
+              </div>
+              <div style="background:#e8eaf6;border-radius:3px;height:8px">
+                <div style="width:${p2}%;background:${c2};height:8px;border-radius:3px"></div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+
+        ${overdue.length>0 ? `<!-- Overdue -->
+        <div style="background:#fff5f7;border:1px solid #ffcccc;border-radius:8px;overflow:hidden;margin-bottom:12px">
+          <div style="padding:8px 12px;background:#ffeeee;border-bottom:1px solid #ffcccc">
+            <span style="font-size:10px;font-weight:700;color:#cc0033;text-transform:uppercase;letter-spacing:1px">⚠ Overdue — Immediate Attention Required (${overdue.length})</span>
+          </div>
+          ${overdue.map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border-bottom:1px solid #ffeeee;background:${idx%2===0?'#fff':'#fff8f8'}">
+            <div style="flex:1;font-size:11px;color:#444">${i.task.slice(0,90)}${i.task.length>90?'…':''}</div>
+            <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'};font-weight:600;flex-shrink:0">${i.owner.split(' ')[0]}</span>
+            <span style="font-size:10px;color:#cc0033;font-weight:600;flex-shrink:0;min-width:50px;text-align:right">${fmt(i.dueDate)}</span>
+          </div>`).join('')}
+        </div>` : `<div style="background:#f0fff8;border:1px solid #00e8bb44;border-radius:8px;padding:10px 12px;margin-bottom:12px;text-align:center">
+          <span style="color:#00a878;font-size:12px;font-weight:600">✓ No overdue tasks</span>
+        </div>`}
+
+        ${dueThisWeek.length>0 ? `<!-- Due this week -->
+        <div style="background:#fffdf0;border:1px solid #ffd93d44;border-radius:8px;overflow:hidden;margin-bottom:12px">
+          <div style="padding:8px 12px;background:#fffae0;border-bottom:1px solid #ffd93d44">
+            <span style="font-size:10px;font-weight:700;color:#997700;text-transform:uppercase;letter-spacing:1px">📋 Due This Week (${dueThisWeek.length})</span>
+          </div>
+          ${dueThisWeek.map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border-bottom:1px solid #fffae0;background:${idx%2===0?'#fff':'#fffdf5'}">
+            <div style="flex:1;font-size:11px;color:#444">${i.task.slice(0,90)}${i.task.length>90?'…':''}</div>
+            <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'};font-weight:600;flex-shrink:0">${i.owner.split(' ')[0]}</span>
+            <span style="font-size:10px;color:#997700;font-weight:600;flex-shrink:0;min-width:50px;text-align:right">${fmt(i.dueDate)}</span>
+          </div>`).join('')}
+        </div>` : ''}
+
+        ${dueSoon.length>0 ? `<!-- Coming up -->
+        <div style="background:#f5f8ff;border:1px solid #6aa3ff44;border-radius:8px;overflow:hidden;margin-bottom:12px">
+          <div style="padding:8px 12px;background:#eef3ff;border-bottom:1px solid #6aa3ff44">
+            <span style="font-size:10px;font-weight:700;color:#3366cc;text-transform:uppercase;letter-spacing:1px">📅 Coming Up — Next 3 Weeks (${dueSoon.length})</span>
+          </div>
+          ${dueSoon.slice(0,8).map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border-bottom:1px solid #eef3ff;background:${idx%2===0?'#fff':'#f8fbff'}">
+            <div style="flex:1;font-size:11px;color:#444">${i.task.slice(0,90)}${i.task.length>90?'…':''}</div>
+            <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'};font-weight:600;flex-shrink:0">${i.owner.split(' ')[0]}</span>
+            <span style="font-size:10px;color:#3366cc;font-weight:600;flex-shrink:0;min-width:50px;text-align:right">${fmt(i.dueDate)}</span>
+          </div>`).join('')}
+          ${dueSoon.length>8?`<div style="padding:8px 12px;text-align:center;font-size:10px;color:#888">+ ${dueSoon.length-8} more tasks</div>`:''}
+        </div>` : ''}
+
+        ${completedThisWeek.length>0 ? `<!-- Completed this week -->
+        <div style="background:#f0fff8;border:1px solid #00e8bb44;border-radius:8px;overflow:hidden">
+          <div style="padding:8px 12px;background:#e6ffef;border-bottom:1px solid #00e8bb44">
+            <span style="font-size:10px;font-weight:700;color:#00a878;text-transform:uppercase;letter-spacing:1px">✓ Completed This Week (${completedThisWeek.length})</span>
+          </div>
+          ${completedThisWeek.map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 12px;border-bottom:1px solid #e6ffef;background:${idx%2===0?'#fff':'#f5fffc'}">
+            <span style="color:#00a878;font-size:13px;flex-shrink:0">✓</span>
+            <div style="flex:1;font-size:11px;color:#666">${i.task.slice(0,90)}${i.task.length>90?'…':''}</div>
+            <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'};font-weight:600;flex-shrink:0">${i.owner.split(' ')[0]}</span>
+          </div>`).join('')}
+        </div>` : ''}
+
+      </div>
+    </div>`;
   }
 
-  const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#0f0f1a;font-family:Arial,sans-serif">
-  <div style="max-width:700px;margin:0 auto;padding:24px">
-    <div style="background:linear-gradient(135deg,#1a1a3e,#0d1b2a);border-radius:12px;padding:24px;margin-bottom:20px;border:1px solid #2a2a5a">
-      <div style="font-size:11px;color:#6aa3ff;text-transform:uppercase;letter-spacing:2px;margin-bottom:6px">Institute of Presilience</div>
-      <div style="font-size:22px;font-weight:700;color:#fff;margin-bottom:4px">Internal Programmes — Weekly Status Report</div>
-      <div style="font-size:13px;color:#aaa">${dateStr} · Generated by Aurora</div>
-    </div>
-    ${reportSections}
-    <div style="text-align:center;color:#444;font-size:11px;padding-top:10px">
-      Aurora · R2S Internal Programme Management · Confidential
-      ${process.env.FRONTEND_URL ? '<br><a href="' + process.env.FRONTEND_URL + '" style="color:#6aa3ff">Open Aurora portal</a>' : ''}
-    </div>
-  </div></body></html>`;
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/></head>
+<body style="margin:0;padding:0;background:#f0f2f8;font-family:Arial,sans-serif">
+<div style="max-width:720px;margin:0 auto;padding:20px">
 
+  <!-- Header -->
+  <div style="background:linear-gradient(135deg,#1a1a3e 0%,#0d1b2a 100%);border-radius:12px;padding:28px;margin-bottom:20px">
+    <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px">Institute of Presilience · Leadership Report</div>
+    <div style="font-size:24px;font-weight:700;color:#fff;margin-bottom:4px">Internal Programmes — Weekly Status</div>
+    <div style="font-size:12px;color:#8899bb">${dateStr} · Generated by Aurora</div>
+  </div>
+
+  ${reportSections}
+
+  <div style="text-align:center;color:#aaa;font-size:10px;padding:12px 0">
+    Aurora · R2S Project Management Intelligence · Confidential — Leadership Distribution
+    ${process.env.FRONTEND_URL ? '<br><a href="' + process.env.FRONTEND_URL + '" style="color:#6aa3ff">Open Aurora portal</a>' : ''}
+  </div>
+
+</div></body></html>`;
+
+  const subject = `IoP Internal Programmes — Weekly Leadership Report (${now.toLocaleDateString('en-AU',{day:'numeric',month:'short'})})`;
   for (const r of RECIPIENTS) {
-    await sendEmail(r, `IoP Internal Programmes — Weekly Status (${now.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })})`, html, false, [], true);
+    await sendEmail(r, subject, html, false, [], true);
   }
-  console.log('[Internal] Weekly programme status report sent');
+  console.log('[Internal] Weekly leadership report sent');
 }
 
 // ── Determine if a cohort should send its weekly ops update this week ─────────
@@ -4378,6 +4510,129 @@ function shouldSendWeeklyOpsUpdate(project) {
 }
 
 // ── Weekly operational checklist update to delivery team ─────────────────────
+async function buildChecklistExcel(project, checklist) {
+  // Build Excel checklist using ExcelJS (or fall back to CSV if not available)
+  try {
+    const ExcelJS = require('exceljs');
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Aurora — R2S Project Management Intelligence';
+
+    const programName = project.programType === 'grad_cert'
+      ? 'Graduate Certificate (11056NAT)'
+      : 'Graduate Diploma (11066NAT)';
+
+    // Group by phase
+    const phases = {};
+    checklist.forEach(i => {
+      const key = i.phaseName || 'General';
+      if (!phases[key]) phases[key] = [];
+      phases[key].push(i);
+    });
+
+    const ownerColors = {
+      'Dave Cohen':       'FF6AA3FF',
+      'Diane Kruger':     'FFFF608A',
+      'Cherry Abadeza':   'FF00E8BB',
+      'Janita Zhang':     'FFFFD93D',
+      'Dr Paul Johnston': 'FFA78BFA',
+      'Trainer':          'FF888888',
+    };
+
+    // Summary sheet
+    const summary = wb.addWorksheet('Summary');
+    summary.columns = [
+      { header: '', key: 'label', width: 30 },
+      { header: '', key: 'value', width: 40 },
+    ];
+    const titleRow = summary.addRow([`${project.cohortName} — ${programName}`, '']);
+    titleRow.font = { bold: true, size: 14, color: { argb: 'FF1A1A3E' } };
+    summary.addRow(['Generated', new Date().toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long', year:'numeric' })]);
+    summary.addRow(['Status', project.status]);
+    summary.addRow(['Programme start', project.programStart || 'TBC']);
+    summary.addRow(['Programme end', project.programEnd || 'TBC']);
+    summary.addRow(['Module dates', (project.moduleDates || []).join(', ') || 'Not set']);
+    summary.addRow([]);
+    const total = checklist.length;
+    const done  = checklist.filter(i => i.status === 'Completed').length;
+    const overdue = checklist.filter(i => i.status !== 'Completed' && i.dueDate && new Date(i.dueDate) < new Date()).length;
+    summary.addRow(['Total tasks', total]);
+    summary.addRow(['Completed', done]);
+    summary.addRow(['Outstanding', total - done]);
+    summary.addRow(['Overdue', overdue]);
+    summary.addRow(['% Complete', `${Math.round(done/total*100)}%`]);
+
+    // One sheet per phase
+    for (const [phaseName, items] of Object.entries(phases)) {
+      const sheetName = phaseName.replace(/[\/\\*\[\]:?]/g, '').slice(0, 31);
+      const ws = wb.addWorksheet(sheetName);
+      ws.columns = [
+        { header: 'Status',    key: 'status',    width: 14 },
+        { header: 'Group',     key: 'group',     width: 35 },
+        { header: 'Task',      key: 'task',      width: 60 },
+        { header: 'Owner',     key: 'owner',     width: 20 },
+        { header: 'Due Date',  key: 'dueDate',   width: 14 },
+        { header: 'Completed', key: 'completedAt',width: 20 },
+        { header: 'Completed By', key: 'completedBy', width: 25 },
+      ];
+
+      // Header row styling
+      ws.getRow(1).eachCell(cell => {
+        cell.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A3E' } };
+        cell.font   = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+        cell.border = { bottom: { style: 'medium', color: { argb: 'FF6AA3FF' } } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      });
+      ws.getRow(1).height = 24;
+
+      items.forEach((item, idx) => {
+        const row = ws.addRow({
+          status:      item.status === 'Completed' ? '✓ Complete' : item.dueDate && new Date(item.dueDate) < new Date() ? '⚠ Overdue' : 'Outstanding',
+          group:       item.group.replace(/ — Module \d+ \(.*?\)/,'').trim(),
+          task:        item.task,
+          owner:       item.owner,
+          dueDate:     item.dueDate || '',
+          completedAt: item.completedAt ? new Date(item.completedAt).toLocaleDateString('en-AU') : '',
+          completedBy: item.completedBy || '',
+        });
+        row.height = 30;
+
+        const isCompleted = item.status === 'Completed';
+        const isOverdue   = !isCompleted && item.dueDate && new Date(item.dueDate) < new Date();
+        const bg = isCompleted ? 'FFE6FFF8' : isOverdue ? 'FFFFF0F0' : idx % 2 === 0 ? 'FFFFFFFF' : 'FFF8F9FF';
+
+        row.eachCell((cell, colNum) => {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+          cell.alignment = { vertical: 'middle', wrapText: true };
+          cell.border = { bottom: { style: 'thin', color: { argb: 'FFE0E0E0' } } };
+          if (colNum === 1) {
+            cell.font = { bold: true, color: { argb: isCompleted ? 'FF00A878' : isOverdue ? 'FFCC0000' : 'FF666666' } };
+          }
+          if (colNum === 4) {
+            const oColor = ownerColors[item.owner] || 'FF888888';
+            cell.font = { color: { argb: oColor }, bold: true };
+          }
+        });
+      });
+
+      ws.views = [{ state: 'frozen', ySplit: 1 }];
+    }
+
+    // Write to buffer
+    const buffer = await wb.xlsx.writeBuffer();
+    return buffer;
+  } catch(xlsxErr) {
+    console.error('[Excel] ExcelJS not available:', xlsxErr.message);
+    // Fallback to CSV
+    const lines = ['Status,Group,Task,Owner,Due Date,Completed At,Completed By'];
+    checklist.forEach(i => {
+      const status = i.status === 'Completed' ? 'Complete' : i.dueDate && new Date(i.dueDate) < new Date() ? 'OVERDUE' : 'Outstanding';
+      const esc = s => `"${(s||'').replace(/"/g,'""')}"`;
+      lines.push([status, esc(i.group), esc(i.task), esc(i.owner), i.dueDate||'', i.completedAt||'', i.completedBy||''].join(','));
+    });
+    return Buffer.from(lines.join('\n'), 'utf8');
+  }
+}
+
 async function sendInternalWeeklyOpsUpdate() {
   const projects = await readInternalProjects();
   const activeProjects = projects.filter(p =>
@@ -4386,15 +4641,21 @@ async function sendInternalWeeklyOpsUpdate() {
   if (!activeProjects.length) return;
 
   const now = new Date();
+  const now0 = new Date(now); now0.setHours(0,0,0,0);
   const dateStr = now.toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
 
-  // RECIPIENTS: Cherry, Janita, Diane + CC Dave
-  const TO  = [
+  const TO = [
     process.env.CHERRY_EMAIL || 'cherry.a@risk2solution.com',
     process.env.JANITA_EMAIL || 'janita.z@risk2solution.com',
     'diane.k@risk2solution.com',
   ];
-  const CC  = ['dave.c@risk2solution.com', 'kandia@risk2solution.com'];
+  const CC = ['dave.c@risk2solution.com', 'kandia@risk2solution.com'];
+
+  const ownerColors = {
+    'Dave Cohen': '#6aa3ff', 'Diane Kruger': '#ff608a',
+    'Cherry Abadeza': '#00e8bb', 'Janita Zhang': '#ffd93d',
+    'Dr Paul Johnston': '#a78bfa', 'Trainer': '#888',
+  };
 
   let anySent = false;
 
@@ -4405,69 +4666,262 @@ async function sendInternalWeeklyOpsUpdate() {
     }
 
     const checklist = await readInternalChecklist(project.id);
-    const now2 = new Date(); now2.setHours(0,0,0,0);
-    const moduleDates = (project.moduleDates || []).map(d => new Date(d)).filter(d => !isNaN(d)).sort((a,b)=>a-b);
-    const nextModule  = moduleDates.find(d => d >= now2);
-    const daysToNext  = nextModule ? Math.round((nextModule - now2) / (1000*60*60*24)) : null;
-    const programName = project.programType === 'grad_cert'
-      ? 'Graduate Certificate (11056NAT)'
-      : 'Graduate Diploma (11066NAT)';
+    const moduleDates = (project.moduleDates || []).map(d => { const dt = new Date(d); dt.setHours(0,0,0,0); return dt; }).filter(d=>!isNaN(d)).sort((a,b)=>a-b);
+    const nextModule  = moduleDates.find(d => d >= now0);
+    const pastModules = moduleDates.filter(d => d < now0);
+    const daysToNext  = nextModule ? Math.round((nextModule - now0)/(1000*60*60*24)) : null;
+    const programName = project.programType === 'grad_cert' ? 'Graduate Certificate (11056NAT)' : 'Graduate Diploma (11066NAT)';
 
-    // Overdue items
-    const overdue = checklist.filter(i => !i.status.includes('Completed') && i.dueDate && new Date(i.dueDate) < now2);
-    // Due this week (next 7 days)
-    const nextWeek = new Date(now2.getTime() + 7*24*60*60*1000);
-    const dueThisWeek = checklist.filter(i => !i.status.includes('Completed') && i.dueDate && new Date(i.dueDate) >= now2 && new Date(i.dueDate) <= nextWeek);
-    // Due next 3 weeks
-    const threeWeeks = new Date(now2.getTime() + 21*24*60*60*1000);
-    const dueSoon = checklist.filter(i => !i.status.includes('Completed') && i.dueDate && new Date(i.dueDate) > nextWeek && new Date(i.dueDate) <= threeWeeks);
-    // Completed this week
-    const completedThisWeek = checklist.filter(i => i.completedAt && (now2 - new Date(i.completedAt)) <= 7*24*60*60*1000);
-    const totalDone = checklist.filter(i => i.status === 'Completed').length;
-    const pct = checklist.length > 0 ? Math.round(totalDone/checklist.length*100) : 0;
+    // Segment tasks
+    const overdue      = checklist.filter(i => i.status !== 'Completed' && i.dueDate && new Date(i.dueDate) < now0);
+    const nextWeek     = new Date(now0.getTime() + 7*24*60*60*1000);
+    const threeWeeks   = new Date(now0.getTime() + 21*24*60*60*1000);
+    const dueThisWeek  = checklist.filter(i => i.status !== 'Completed' && i.dueDate && new Date(i.dueDate) >= now0 && new Date(i.dueDate) <= nextWeek);
+    const dueSoon      = checklist.filter(i => i.status !== 'Completed' && i.dueDate && new Date(i.dueDate) > nextWeek && new Date(i.dueDate) <= threeWeeks);
+    const completedThisWeek = checklist.filter(i => i.completedAt && (now0 - new Date(i.completedAt)) <= 7*24*60*60*1000);
+    const totalDone    = checklist.filter(i => i.status === 'Completed').length;
+    const totalTasks   = checklist.length;
+    const pct          = totalTasks > 0 ? Math.round(totalDone/totalTasks*100) : 0;
 
-    const contextLine = daysToNext !== null
-      ? daysToNext <= 0 ? `⚡ Module delivery is TODAY`
-      : daysToNext <= 7 ? `🔴 Next module in ${daysToNext} day${daysToNext!==1?'s':''} — this week is critical`
-      : daysToNext <= 14 ? `🟡 Next module in ${daysToNext} days — preparation underway`
-      : `🟢 Next module in ${daysToNext} days`
-      : `Programme active`;
+    // Per-phase stats
+    const phaseMap = {};
+    checklist.forEach(i => {
+      const k = i.phaseName || 'General';
+      if (!phaseMap[k]) phaseMap[k] = { total:0, done:0, overdue:0 };
+      phaseMap[k].total++;
+      if (i.status === 'Completed') phaseMap[k].done++;
+      if (i.status !== 'Completed' && i.dueDate && new Date(i.dueDate) < now0) phaseMap[k].overdue++;
+    });
 
-    const body = `Hi team,
+    // Module timeline
+    const moduleTimeline = moduleDates.map((d, idx) => {
+      const isPast = d < now0;
+      const isNext = nextModule && d.getTime() === nextModule.getTime();
+      const days = Math.round((d - now0)/(1000*60*60*24));
+      return { num: idx+1, date: d.toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}), isPast, isNext, days };
+    });
 
-Here is the weekly programme update for ${project.cohortName} — ${programName}.
+    // Status badge
+    const statusBadge = daysToNext === null ? { text:'Programme active', color:'#00e8bb', bg:'#00e8bb15' }
+      : daysToNext <= 0   ? { text:'⚡ Module delivery TODAY', color:'#ff608a', bg:'#ff608a20' }
+      : daysToNext <= 7   ? { text:`🔴 Next module in ${daysToNext} days — CRITICAL WEEK`, color:'#ff608a', bg:'#ff608a15' }
+      : daysToNext <= 14  ? { text:`🟡 Next module in ${daysToNext} days — preparation underway`, color:'#ffd93d', bg:'#ffd93d15' }
+      : daysToNext <= 21  ? { text:`🟢 Next module in ${daysToNext} days`, color:'#00e8bb', bg:'#00e8bb15' }
+      : { text:`🔵 Next module in ${daysToNext} days — setup phase`, color:'#6aa3ff', bg:'#6aa3ff15' };
 
-${contextLine}
-Overall progress: ${totalDone}/${checklist.length} tasks complete (${pct}%)
+    const fmt = d => new Date(d).toLocaleDateString('en-AU',{day:'numeric',month:'short'});
 
-${overdue.length > 0 ? `⚠️ OVERDUE (${overdue.length} task${overdue.length!==1?'s':''}):
-${overdue.map(i => `• [${i.owner}] ${i.task.slice(0,80)} — was due ${i.dueDate}`).join('\n')}
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"/></head>
+<body style="margin:0;padding:0;background:#f0f2f8;font-family:Arial,sans-serif">
+<div style="max-width:720px;margin:0 auto;padding:20px">
 
-` : ''}${dueThisWeek.length > 0 ? `📋 DUE THIS WEEK (${dueThisWeek.length} task${dueThisWeek.length!==1?'s':''}):
-${dueThisWeek.map(i => `• [${i.owner}] ${i.task.slice(0,80)} — due ${i.dueDate}`).join('\n')}
+  <!-- Header -->
+  <div style="background:linear-gradient(135deg,#1a1a3e 0%,#0d1b2a 100%);border-radius:12px;padding:28px;margin-bottom:16px">
+    <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px">Institute of Presilience · Weekly Programme Dashboard</div>
+    <div style="font-size:24px;font-weight:700;color:#fff;margin-bottom:4px">${project.cohortName}</div>
+    <div style="font-size:12px;color:#8899bb;margin-bottom:16px">${programName} · ${dateStr}</div>
+    <!-- Status banner -->
+    <div style="background:${statusBadge.bg};border:1px solid ${statusBadge.color}44;border-radius:8px;padding:10px 14px;display:inline-block">
+      <span style="color:${statusBadge.color};font-size:13px;font-weight:600">${statusBadge.text}</span>
+    </div>
+  </div>
 
-` : '✅ Nothing due this week\n\n'}${dueSoon.length > 0 ? `📅 COMING UP (next 3 weeks):
-${dueSoon.map(i => `• [${i.owner}] ${i.task.slice(0,80)} — due ${i.dueDate}`).join('\n')}
+  <!-- Overall stats row -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+    ${[
+      { label:'Total tasks',    val: totalTasks,        color:'#6aa3ff' },
+      { label:'Completed',      val: `${totalDone} (${pct}%)`, color:'#00e8bb' },
+      { label:'Due this week',  val: dueThisWeek.length, color: dueThisWeek.length > 0 ? '#ffd93d' : '#00e8bb' },
+      { label:'Overdue',        val: overdue.length,    color: overdue.length > 0 ? '#ff608a' : '#00e8bb' },
+    ].map(s => `<div style="background:#fff;border-radius:10px;padding:14px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+      <div style="font-size:22px;font-weight:700;color:${s.color}">${s.val}</div>
+      <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-top:3px">${s.label}</div>
+    </div>`).join('')}
+  </div>
 
-` : ''}${completedThisWeek.length > 0 ? `✓ COMPLETED THIS WEEK:
-${completedThisWeek.map(i => `• [${i.owner}] ${i.task.slice(0,80)}`).join('\n')}
+  <!-- Overall progress bar -->
+  <div style="background:#fff;border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="font-size:12px;font-weight:600;color:#333">Overall Programme Progress</span>
+      <span style="font-size:14px;font-weight:700;color:${pct>=80?'#00a878':pct>=50?'#cc8800':'#cc2222'}">${pct}%</span>
+    </div>
+    <div style="background:#e8eaf6;border-radius:6px;height:14px">
+      <div style="width:${pct}%;background:linear-gradient(90deg,${pct>=80?'#00e8bb':pct>=50?'#ffd93d':'#ff608a'},${pct>=80?'#00a878':pct>=50?'#cc8800':'#cc2222'});height:14px;border-radius:6px;transition:width .3s"></div>
+    </div>
+  </div>
 
-` : ''}Please action any overdue or this-week items as a priority. Reply to this email confirming completion and Aurora will automatically tick them off in the checklist.
+  <!-- Module timeline -->
+  ${moduleTimeline.length > 0 ? `<div style="background:#fff;border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+    <div style="font-size:11px;font-weight:700;color:#333;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Module Delivery Timeline</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${moduleTimeline.map(m => `<div style="flex:1;min-width:100px;text-align:center;padding:10px 8px;border-radius:8px;border:2px solid ${m.isNext?'#6aa3ff':m.isPast?'#00e8bb':'#e0e4f0'};background:${m.isNext?'#6aa3ff15':m.isPast?'#00e8bb15':'#f8f9ff'}">
+        <div style="font-size:10px;color:#888;margin-bottom:3px">MODULE ${m.num}</div>
+        <div style="font-size:12px;font-weight:600;color:${m.isNext?'#6aa3ff':m.isPast?'#00a878':'#333'}">${m.date}</div>
+        <div style="font-size:10px;margin-top:3px;color:${m.isPast?'#00a878':m.isNext?'#6aa3ff':'#aaa'}">${m.isPast?'✓ Delivered':m.isNext?`${m.days}d away`:'Upcoming'}</div>
+      </div>`).join('')}
+    </div>
+  </div>` : ''}
 
-${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}
+  <!-- Phase progress -->
+  <div style="background:#fff;border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+    <div style="font-size:11px;font-weight:700;color:#333;text-transform:uppercase;letter-spacing:1px;margin-bottom:14px">Progress by Phase</div>
+    ${Object.entries(phaseMap).map(([phase, stats]) => {
+      const p2 = stats.total > 0 ? Math.round(stats.done/stats.total*100) : 0;
+      const c2 = p2===100?'#00e8bb':stats.overdue>0?'#ff608a':p2>=50?'#ffd93d':'#6aa3ff';
+      return `<div style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+          <span style="font-size:11px;color:#444;font-weight:500">${phase.replace('Phase ','Ph ')}</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            ${stats.overdue > 0 ? `<span style="font-size:10px;background:#ff608a20;color:#ff608a;border:1px solid #ff608a44;padding:1px 6px;border-radius:8px">⚠ ${stats.overdue} overdue</span>` : ''}
+            <span style="font-size:11px;font-weight:700;color:${c2}">${stats.done}/${stats.total}</span>
+          </div>
+        </div>
+        <div style="background:#e8eaf6;border-radius:4px;height:10px">
+          <div style="width:${p2}%;background:${c2};height:10px;border-radius:4px"></div>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>
 
-Aurora
-R2S Project Management Intelligence`;
+  ${overdue.length > 0 ? `<!-- Overdue — URGENT -->
+  <div style="background:#fff;border-radius:10px;overflow:hidden;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border-left:4px solid #ff3860">
+    <div style="background:#ff386010;padding:12px 16px;border-bottom:1px solid #ff386020">
+      <span style="font-size:11px;font-weight:700;color:#cc0033;text-transform:uppercase;letter-spacing:1px">⚠ Overdue — Requires Immediate Attention (${overdue.length})</span>
+    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+      <thead><tr style="background:#fff5f7">
+        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600">Task</th>
+        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;width:120px">Owner</th>
+        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;width:90px">Was due</th>
+      </tr></thead>
+      <tbody>
+        ${overdue.map((i,idx) => `<tr style="background:${idx%2===0?'#fff':'#fff8f9'}">
+          <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0e0e4">${i.task.slice(0,100)}${i.task.length>100?'…':''}<br><span style="font-size:10px;color:#aaa">${i.group.replace(/ — Module \d+.*/,'').trim()}</span></td>
+          <td style="padding:10px 12px;border-bottom:1px solid #f0e0e4"><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'}">${i.owner.split(' ')[0]}</span></td>
+          <td style="padding:10px 12px;font-size:11px;color:#cc0033;font-weight:600;border-bottom:1px solid #f0e0e4">${fmt(i.dueDate)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>` : `<div style="background:#f0fff8;border:1px solid #00e8bb44;border-radius:10px;padding:14px 16px;margin-bottom:16px;text-align:center">
+    <span style="color:#00a878;font-size:13px;font-weight:600">✓ No overdue tasks — great work!</span>
+  </div>`}
 
-    const subject = `[Aurora] ${project.cohortName} — Weekly Programme Update${overdue.length > 0 ? ` ⚠️ ${overdue.length} overdue` : daysToNext !== null && daysToNext <= 7 ? ' 🔴 Module this week' : ''}`;
+  ${dueThisWeek.length > 0 ? `<!-- Due this week -->
+  <div style="background:#fff;border-radius:10px;overflow:hidden;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border-left:4px solid #ffd93d">
+    <div style="background:#ffd93d10;padding:12px 16px;border-bottom:1px solid #ffd93d20">
+      <span style="font-size:11px;font-weight:700;color:#997700;text-transform:uppercase;letter-spacing:1px">📋 Due This Week (${dueThisWeek.length})</span>
+    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+      <thead><tr style="background:#fffdf0">
+        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600">Task</th>
+        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;width:120px">Owner</th>
+        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;width:90px">Due</th>
+      </tr></thead>
+      <tbody>
+        ${dueThisWeek.map((i,idx) => `<tr style="background:${idx%2===0?'#fff':'#fffef5'}">
+          <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f5f0e0">${i.task.slice(0,100)}${i.task.length>100?'…':''}<br><span style="font-size:10px;color:#aaa">${i.group.replace(/ — Module \d+.*/,'').trim()}</span></td>
+          <td style="padding:10px 12px;border-bottom:1px solid #f5f0e0"><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'}">${i.owner.split(' ')[0]}</span></td>
+          <td style="padding:10px 12px;font-size:11px;color:#997700;font-weight:600;border-bottom:1px solid #f5f0e0">${fmt(i.dueDate)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>` : ''}
 
-    await sendEmail(TO, subject, body, false, CC);
-    console.log(`[Internal Ops] Weekly update sent for ${project.cohortName} — ${dueThisWeek.length} due this week, ${overdue.length} overdue`);
+  ${dueSoon.length > 0 ? `<!-- Coming up -->
+  <div style="background:#fff;border-radius:10px;overflow:hidden;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border-left:4px solid #6aa3ff">
+    <div style="background:#6aa3ff10;padding:12px 16px;border-bottom:1px solid #6aa3ff20">
+      <span style="font-size:11px;font-weight:700;color:#3366cc;text-transform:uppercase;letter-spacing:1px">📅 Coming Up — Next 3 Weeks (${dueSoon.length})</span>
+    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+      <thead><tr style="background:#f5f8ff">
+        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600">Task</th>
+        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;width:120px">Owner</th>
+        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;width:90px">Due</th>
+      </tr></thead>
+      <tbody>
+        ${dueSoon.map((i,idx) => `<tr style="background:${idx%2===0?'#fff':'#f8fbff'}">
+          <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #eaefff">${i.task.slice(0,100)}${i.task.length>100?'…':''}<br><span style="font-size:10px;color:#aaa">${i.group.replace(/ — Module \d+.*/,'').trim()}</span></td>
+          <td style="padding:10px 12px;border-bottom:1px solid #eaefff"><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'}">${i.owner.split(' ')[0]}</span></td>
+          <td style="padding:10px 12px;font-size:11px;color:#3366cc;font-weight:600;border-bottom:1px solid #eaefff">${fmt(i.dueDate)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>` : ''}
+
+  ${completedThisWeek.length > 0 ? `<!-- Completed this week -->
+  <div style="background:#fff;border-radius:10px;overflow:hidden;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border-left:4px solid #00e8bb">
+    <div style="background:#00e8bb10;padding:12px 16px;border-bottom:1px solid #00e8bb20">
+      <span style="font-size:11px;font-weight:700;color:#00a878;text-transform:uppercase;letter-spacing:1px">✓ Completed This Week (${completedThisWeek.length})</span>
+    </div>
+    ${completedThisWeek.map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-bottom:1px solid #f0fdf8;background:${idx%2===0?'#fff':'#f5fffc'}">
+      <span style="color:#00a878;font-size:14px;flex-shrink:0">✓</span>
+      <div style="flex:1;font-size:12px;color:#666">${i.task.slice(0,90)}${i.task.length>90?'…':''}</div>
+      <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'};flex-shrink:0">${i.owner.split(' ')[0]}</span>
+    </div>`).join('')}
+  </div>` : ''}
+
+  <!-- Footer -->
+  <div style="text-align:center;color:#aaa;font-size:10px;padding:12px 0">
+    Aurora · R2S Project Management Intelligence · Confidential<br>
+    Please reply to this email to confirm task completion — Aurora will automatically update the checklist.<br>
+    The full updated checklist is attached as an Excel file.
+  </div>
+
+</div></body></html>`;
+
+    const subject = `[Aurora] ${project.cohortName} — Weekly Programme Dashboard${overdue.length > 0 ? ` ⚠️ ${overdue.length} overdue` : daysToNext !== null && daysToNext <= 7 ? ' 🔴 Module this week' : ''}`;
+
+    // Build Excel attachment
+    let excelBuffer = null;
+    let excelFilename = null;
+    try {
+      excelBuffer = await buildChecklistExcel(project, checklist);
+      excelFilename = `${project.cohortName.replace(/[^a-zA-Z0-9 ]/g,'').trim()} — Checklist ${now.toISOString().slice(0,10)}.xlsx`;
+    } catch(e) {
+      console.error('[Excel] Build failed:', e.message);
+    }
+
+    // Send with attachment if we have one
+    const token = await getOutlookToken();
+    const fromMailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+    if (token && excelBuffer) {
+      try {
+        const toArray = Array.isArray(TO) ? TO : [TO];
+        const ccArray = Array.isArray(CC) ? CC : (CC ? [CC] : []);
+        const message = {
+          subject,
+          body: { contentType: 'HTML', content: html },
+          toRecipients: toArray.map(addr => ({ emailAddress: { address: addr } })),
+          ccRecipients: ccArray.map(addr => ({ emailAddress: { address: addr } })),
+          attachments: [{
+            '@odata.type': '#microsoft.graph.fileAttachment',
+            name: excelFilename,
+            contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            contentBytes: excelBuffer.toString('base64'),
+          }],
+        };
+        await axios.post(
+          `https://graph.microsoft.com/v1.0/users/${fromMailbox}/sendMail`,
+          { message },
+          { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 30000 }
+        );
+        console.log(`[Internal Ops] Dashboard + Excel sent for ${project.cohortName}`);
+      } catch(sendErr) {
+        console.error('[Internal Ops] Send with attachment failed:', sendErr.message);
+        // Fallback without attachment
+        await sendEmail(TO, subject, html, false, CC, true);
+      }
+    } else {
+      await sendEmail(TO, subject, html, false, CC, true);
+    }
     anySent = true;
   }
 
   if (!anySent) console.log('[Internal Ops] No cohorts in active window this week — no ops emails sent');
 }
+
+
 
 // ── API routes for internal projects ─────────────────────────────────────────
 app.get('/api/internal/projects', async (req, res) => {
