@@ -244,7 +244,8 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <button class="btn btn-b btn-sm" onclick="pollNow(this)" style="font-size:11px">▶ Poll inbox now</button>
-    <button class="btn btn-p btn-sm" onclick="sendReportNow(this)" style="font-size:11px" title="Send daily status report to Dave, Kandia and Diane">📊 Send report now</button>
+    <button class="btn btn-p btn-sm" onclick="sendReportNow(this)" style="font-size:11px" title="Send weekly status report to Dave, Kandia and Diane">📊 Send report now</button>
+    <button onclick="testSend('weekly',this)" style="background:none;border:1px solid var(--amber);color:var(--amber);font-size:11px;padding:3px 8px;border-radius:6px;cursor:pointer" title="Test — send weekly report to Kandia only">🧪</button>
     <button class="btn btn-g btn-sm" onclick="downloadBackup()" style="font-size:11px" title="Download all Aurora data as a backup file">⬇ Backup data</button>
   </div>
   <div class="pills">
@@ -438,9 +439,14 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
       <div class="ph-title">Internal Projects</div>
       <div class="ph-sub">Institute of Presilience® programme management — Grad Cert & Grad Dip cohorts</div>
 
-      <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+      <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
         <button class="btn btn-p" onclick="showNewInternalModal()">+ New cohort</button>
-        <button class="btn btn-g" onclick="api('/api/internal/report',{method:'POST'}).then(()=>showToast('Weekly report sent to Dave, Kandia and Diane'))">📊 Send status report</button>
+        <button class="btn btn-g" onclick="api('/api/internal/report',{method:'POST'}).then(()=>showToast('Leadership report sent to Dave, Kandia and Diane'))">📊 Send leadership report</button>
+        <button class="btn btn-g" onclick="api('/api/internal/ops-update',{method:'POST'}).then(()=>showToast('Ops dashboard sent to delivery team'))">📋 Send ops dashboard</button>
+        <div style="height:20px;border-left:1px solid var(--border);margin:0 4px"></div>
+        <span style="font-size:10px;color:var(--text3)">Test sends (to Kandia only):</span>
+        <button onclick="testSend('internal-leadership',this)" style="background:none;border:1px solid var(--amber);color:var(--amber);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer">🧪 Leadership report</button>
+        <button onclick="testSend('internal-ops',this)" style="background:none;border:1px solid var(--amber);color:var(--amber);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer">🧪 Ops dashboard</button>
       </div>
 
       <div id="internal-list"><div style="color:var(--text3);font-size:12px">Loading programmes…</div></div>
@@ -2384,6 +2390,24 @@ async function downloadBackup() {
   a.download = 'aurora-backup-' + new Date().toISOString().slice(0,10) + '.json';
   a.click();
   URL.revokeObjectURL(url);
+}
+
+async function testSend(type, btn) {
+  const orig = btn.textContent;
+  btn.textContent = 'Sending…';
+  btn.disabled = true;
+  try {
+    const data = await api(`/api/test/report/${type}`, { method: 'POST' });
+    btn.textContent = '✓ Sent';
+    btn.style.color = 'var(--teal)';
+    btn.style.borderColor = 'var(--teal)';
+    showToast(`🧪 Test report sent to kandia@risk2solution.com`);
+    setTimeout(() => { btn.textContent = orig; btn.style.color = ''; btn.style.borderColor = ''; btn.disabled = false; }, 4000);
+  } catch(e) {
+    btn.textContent = orig;
+    btn.disabled = false;
+    showToast('Error: ' + e.message, 'var(--rose)');
+  }
 }
 
 async function sendReportNow(btn) {
