@@ -274,6 +274,7 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
     <div class="ni" onclick="nav('comms',this)" id="nav-comms">✉ Comms drafts</div>
     <div class="ni" onclick="nav('invoicing',this)">$ Invoicing</div>
     <div class="ni" onclick="nav('calendar',this)">◫ Calendar</div>
+    <div class="ni" onclick="nav('pmchecklist',this)">✓ PM Checklist</div>
     <div class="nlbl">Knowledge</div>
     <div class="ni" onclick="nav('docs',this)">◧ Documents</div>
     <div class="ni" onclick="nav('reports',this)">≡ Reports</div>
@@ -434,6 +435,18 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
     </div>
 
     <!-- INVOICING -->
+    <!-- PM CHECKLIST PAGE -->
+    <div id="pg-pmchecklist" class="pg">
+      <div class="ph-title">PM Checklist</div>
+      <div class="ph-sub">Weekly accountability check-in status across all active projects</div>
+      <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-p" onclick="loadAllPMChecklists()">↻ Refresh</button>
+        <button class="btn btn-g" onclick="api('/api/pmchecklist/send',{method:'POST'}).then(()=>showToast('Checklist sent to Diane (CC Kandia)'))">📧 Send to Diane now</button>
+        <button onclick="testSend('weekly-pm',this)" style="background:none;border:1px solid var(--amber);color:var(--amber);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer">🧪 Test send to me</button>
+      </div>
+      <div id="pm-checklist-overview"><div style="color:var(--text3);font-size:12px">Loading…</div></div>
+    </div>
+
     <!-- INTERNAL PROJECTS -->
     <div id="pg-internal" class="pg">
       <div class="ph-title">Internal Projects</div>
@@ -633,6 +646,7 @@ function nav(id, el) {
   if (id === 'risks')       renderRisks();
   if (id === 'stakeholders')renderStakeholders();
   if (id === 'internal')    loadInternalProjects().catch(console.error);
+  if (id === 'pmchecklist') loadAllPMChecklists().catch(console.error);
   if (id === 'invoicing')   renderInvoicing().catch(console.error);
   if (id === 'docs')        renderDocs();
 }
@@ -2643,6 +2657,128 @@ async function deleteInvoice(projectId, invId, btn) {
     btn.disabled = false;
     alert('Error: ' + e.message);
   }
+}
+
+// ── PM Checklist overview page ────────────────────────────────────────────────
+async function loadAllPMChecklists() {
+  const el = document.getElementById('pm-checklist-overview');
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading…</div>';
+
+  const activeProjects = projects.filter(p =>
+    p.type === 'standard' && !['Completed','Terminated','Closed'].includes(p.status) && (p.phase||0) < 5
+  );
+
+  if (!activeProjects.length) {
+    el.innerHTML = '<div class="card" style="color:var(--text3);text-align:center;padding:32px">No active projects</div>';
+    return;
+  }
+
+  const allData = await Promise.all(activeProjects.map(async p => {
+    try {
+      const d = await api('/api/projects/' + p.id + '/pmchecklist');
+      return { p, questions: d.questions || [], weekKey: d.weekKey, history: d.history || [] };
+    } catch { return { p, questions: [], weekKey: '', history: [] }; }
+  }));
+
+  const totalQ    = allData.reduce((s,d) => s + d.questions.length, 0);
+  const totalDone = allData.reduce((s,d) => s + d.questions.filter(q=>q.checked).length, 0);
+  const totalPct  = totalQ > 0 ? Math.round(totalDone/totalQ*100) : 0;
+  const pctColor  = totalPct===100?'var(--teal)':totalPct>=60?'var(--amber)':'var(--rose)';
+  const allComplete = allData.every(d => d.questions.every(q=>q.checked));
+
+  let html = `
+  <div class="card" style="padding:14px 16px;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div>
+        <div style="font-size:13px;font-weight:600;color:var(--text)">This week's checklist — ${allData[0]?.weekKey||''}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">${totalDone} of ${totalQ} items complete across ${activeProjects.length} projects</div>
+      </div>
+      <div style="font-size:24px;font-weight:700;color:${pctColor}">${totalPct}%</div>
+    </div>
+    <div style="background:var(--border2);border-radius:4px;height:8px">
+      <div style="width:${totalPct}%;background:${pctColor};height:8px;border-radius:4px;transition:width .3s"></div>
+    </div>
+    <div style="font-size:11px;margin-top:8px;color:${allComplete?'var(--teal)':'var(--amber)'}">
+      ${allComplete?'✓ All items complete this week':`⚠ ${totalQ-totalDone} item${totalQ-totalDone!==1?'s':''} outstanding`}
+    </div>
+  </div>
+  <div style="display:grid;gap:10px">`;
+
+  for (const { p, questions, weekKey, history } of allData) {
+    const done = questions.filter(q=>q.checked).length;
+    const total = questions.length;
+    const pct = total>0?Math.round(done/total*100):0;
+    const pColor = pct===100?'var(--teal)':pct>=60?'var(--amber)':'var(--rose)';
+    const phaseLabel = ['Kick-off','Deployment','Monitoring & Review','Reporting','Close-out','Completed'][p.phase||0];
+
+    html += `<div class="card" style="padding:0;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer" onclick="togglePMChecklistCard('${p.id}')">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${p.clientName}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:1px">${p.projectName||''} · ${phaseLabel}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="text-align:right">
+            <div style="font-size:16px;font-weight:700;color:${pColor}">${pct}%</div>
+            <div style="font-size:10px;color:var(--text3)">${done}/${total}</div>
+          </div>
+          <span id="chevron-${p.id}" style="color:var(--text3);font-size:12px">▶</span>
+        </div>
+      </div>
+      <div style="background:var(--border2);height:4px">
+        <div style="width:${pct}%;background:${pColor};height:4px;transition:width .3s"></div>
+      </div>
+      <div id="pmcard-${p.id}" style="display:none">
+        <div style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border2)">
+          <span style="font-size:10px;color:var(--text3)">Week: ${weekKey}</span>
+          <button class="btn btn-p btn-sm" style="font-size:10px;padding:2px 8px" onclick="openProject('${p.id}');event.stopPropagation()">Open project ↗</button>
+        </div>
+        ${questions.map((q,i) => `
+        <div style="display:flex;align-items:flex-start;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border2);background:${q.checked||q.isHistoric?'rgba(0,232,187,0.03)':'transparent'}">
+          <button type="button" onclick="togglePMChecklist('${p.id}','${q.id}',this,${q.checked||q.isHistoric})"
+            ${q.isHistoric?'disabled title="One-time — previously completed"':''}
+            style="width:18px;height:18px;border-radius:4px;flex-shrink:0;margin-top:1px;border:2px solid ${q.checked||q.isHistoric?'var(--teal)':'var(--border)'};background:${q.checked||q.isHistoric?'var(--teal)':'transparent'};cursor:${q.isHistoric?'default':'pointer'};display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px">
+            ${q.checked||q.isHistoric?'✓':''}
+          </button>
+          <div style="flex:1">
+            <div style="font-size:11px;color:${q.checked||q.isHistoric?'var(--text3)':'var(--text)'};${q.checked||q.isHistoric?'text-decoration:line-through':''};line-height:1.5">${i+1}. ${q.text}</div>
+            <div style="display:flex;gap:6px;margin-top:3px;flex-wrap:wrap">
+              ${q.weekly?'<span style="font-size:9px;padding:1px 5px;background:var(--amber)22;color:var(--amber);border-radius:6px">Weekly</span>':'<span style="font-size:9px;padding:1px 5px;background:var(--blue)22;color:var(--blue);border-radius:6px">One-time</span>'}
+              ${q.isHistoric?`<span style="font-size:9px;color:var(--teal)">✓ Done ${q.previouslyCompletedAt?new Date(q.previouslyCompletedAt).toLocaleDateString('en-AU',{day:'numeric',month:'short'}):''}</span>`:''}
+              ${q.checked&&q.checkedAt&&!q.isHistoric?`<span style="font-size:9px;color:var(--text3)">Checked ${new Date(q.checkedAt).toLocaleDateString('en-AU',{day:'numeric',month:'short'})}</span>`:''}
+            </div>
+          </div>
+        </div>`).join('')}
+        ${history.length>0?`<div style="padding:8px 14px;border-top:1px solid var(--border2)">
+          <button type="button" onclick="togglePMHistoryCard('${p.id}',this)" style="background:none;border:none;color:var(--text3);font-size:10px;cursor:pointer;padding:0">▶ Previous weeks (${history.length})</button>
+          <div id="pmhistory-${p.id}" style="display:none;margin-top:8px">
+            ${history.map(h=>`<div style="padding:5px 0;border-bottom:1px solid var(--border2);font-size:10px;color:var(--text3)">${h.week} — ${PM_CHECKLIST_QUESTIONS.filter(q=>h.items[q.id]?.checked).length}/${PM_CHECKLIST_QUESTIONS.length} completed</div>`).join('')}
+          </div>
+        </div>`:''}
+      </div>
+    </div>`;
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function togglePMChecklistCard(projectId) {
+  const card = document.getElementById('pmcard-' + projectId);
+  const chev = document.getElementById('chevron-' + projectId);
+  if (!card) return;
+  const open = card.style.display === 'none';
+  card.style.display = open ? 'block' : 'none';
+  if (chev) chev.textContent = open ? '▼' : '▶';
+}
+
+function togglePMHistoryCard(projectId, btn) {
+  const div = document.getElementById('pmhistory-' + projectId);
+  if (!div) return;
+  const open = div.style.display === 'none';
+  div.style.display = open ? 'block' : 'none';
+  btn.textContent = (open?'▼':'▶') + btn.textContent.slice(1);
 }
 
 // ── PM Checklist ──────────────────────────────────────────────────────────────
