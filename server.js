@@ -4337,7 +4337,7 @@ async function sendInternalProjectStatusReport() {
       </div>
 
       <!-- Stats row -->
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-bottom:1px solid #eee">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-bottom:1px solid #2a2a4a">
         ${[
           {label:'Completed',val:`${totalDone}`,sub:`of ${totalTasks}`,color:'#00a878'},
           {label:'Due this week',val:`${dueThisWeek.length}`,sub:'tasks',color:dueThisWeek.length>0?'#cc8800':'#00a878'},
@@ -4372,7 +4372,7 @@ async function sendInternalProjectStatusReport() {
             const c2=p2===100?'#00e8bb':stats.overdue>0?'#ff608a':p2>=50?'#ffd93d':'#6aa3ff';
             return `<div style="margin-bottom:8px">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-                <span style="font-size:11px;color:#444">${phase.replace('Phase ','Ph ')}</span>
+                <span style="font-size:11px;color:#cccccc">${phase.replace('Phase ','Ph ')}</span>
                 <div style="display:flex;align-items:center;gap:6px">
                   ${stats.overdue>0?`<span style="font-size:9px;background:#ff608a15;color:#cc2222;border:1px solid #ff608a44;padding:1px 5px;border-radius:6px">⚠ ${stats.overdue} overdue</span>`:''}
                   <span style="font-size:11px;font-weight:600;color:${c2}">${stats.done}/${stats.total}</span>
@@ -4387,25 +4387,25 @@ async function sendInternalProjectStatusReport() {
 
         ${overdue.length>0 ? `<!-- Overdue -->
         <div style="background:#fff5f7;border:1px solid #ffcccc;border-radius:8px;overflow:hidden;margin-bottom:12px">
-          <div style="padding:8px 12px;background:#ffeeee;border-bottom:1px solid #ffcccc">
+          <div style="padding:8px 12px;background:#ff608a15;border-bottom:1px solid #ff608a33">
             <span style="font-size:10px;font-weight:700;color:#cc0033;text-transform:uppercase;letter-spacing:1px">⚠ Overdue — Immediate Attention Required (${overdue.length})</span>
           </div>
           ${overdue.map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border-bottom:1px solid #ffeeee;background:${idx%2===0?'#fff':'#fff8f8'}">
-            <div style="flex:1;font-size:11px;color:#444">${i.task.slice(0,90)}${i.task.length>90?'…':''}</div>
+            <div style="flex:1;font-size:11px;color:#cccccc">${i.task.slice(0,90)}${i.task.length>90?'…':''}</div>
             <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'};font-weight:600;flex-shrink:0">${i.owner.split(' ')[0]}</span>
             <span style="font-size:10px;color:#cc0033;font-weight:600;flex-shrink:0;min-width:50px;text-align:right">${fmt(i.dueDate)}</span>
           </div>`).join('')}
-        </div>` : `<div style="background:#f0fff8;border:1px solid #00e8bb44;border-radius:8px;padding:10px 12px;margin-bottom:12px;text-align:center">
+        </div>` : `<div style="background:#00e8bb15;border:1px solid #00e8bb44;border-radius:8px;padding:10px 12px;margin-bottom:12px;text-align:center">
           <span style="color:#00a878;font-size:12px;font-weight:600">✓ No overdue tasks</span>
         </div>`}
 
         ${dueThisWeek.length>0 ? `<!-- Due this week -->
         <div style="background:#fffdf0;border:1px solid #ffd93d44;border-radius:8px;overflow:hidden;margin-bottom:12px">
-          <div style="padding:8px 12px;background:#fffae0;border-bottom:1px solid #ffd93d44">
+          <div style="padding:8px 12px;background:#ffd93d15;border-bottom:1px solid #ffd93d33">
             <span style="font-size:10px;font-weight:700;color:#997700;text-transform:uppercase;letter-spacing:1px">📋 Due This Week (${dueThisWeek.length})</span>
           </div>
-          ${dueThisWeek.map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border-bottom:1px solid #fffae0;background:${idx%2===0?'#fff':'#fffdf5'}">
-            <div style="flex:1;font-size:11px;color:#444">${i.task.slice(0,90)}${i.task.length>90?'…':''}</div>
+          ${dueThisWeek.map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border-bottom:1px solid #fffae0;background:${idx%2===0?'#1a1a2e':'#141428'}">
+            <div style="flex:1;font-size:11px;color:#cccccc">${i.task.slice(0,90)}${i.task.length>90?'…':''}</div>
             <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'};font-weight:600;flex-shrink:0">${i.owner.split(' ')[0]}</span>
             <span style="font-size:10px;color:#997700;font-weight:600;flex-shrink:0;min-width:50px;text-align:right">${fmt(i.dueDate)}</span>
           </div>`).join('')}
@@ -4413,11 +4413,11 @@ async function sendInternalProjectStatusReport() {
 
         ${dueSoon.length>0 ? `<!-- Coming up -->
         <div style="background:#f5f8ff;border:1px solid #6aa3ff44;border-radius:8px;overflow:hidden;margin-bottom:12px">
-          <div style="padding:8px 12px;background:#eef3ff;border-bottom:1px solid #6aa3ff44">
+          <div style="padding:8px 12px;background:#6aa3ff15;border-bottom:1px solid #6aa3ff33">
             <span style="font-size:10px;font-weight:700;color:#3366cc;text-transform:uppercase;letter-spacing:1px">📅 Coming Up — Next 3 Weeks (${dueSoon.length})</span>
           </div>
-          ${dueSoon.slice(0,8).map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border-bottom:1px solid #eef3ff;background:${idx%2===0?'#fff':'#f8fbff'}">
-            <div style="flex:1;font-size:11px;color:#444">${i.task.slice(0,90)}${i.task.length>90?'…':''}</div>
+          ${dueSoon.slice(0,8).map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border-bottom:1px solid #eef3ff;background:${idx%2===0?'#1a1a2e':'#141428'}">
+            <div style="flex:1;font-size:11px;color:#cccccc">${i.task.slice(0,90)}${i.task.length>90?'…':''}</div>
             <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'};font-weight:600;flex-shrink:0">${i.owner.split(' ')[0]}</span>
             <span style="font-size:10px;color:#3366cc;font-weight:600;flex-shrink:0;min-width:50px;text-align:right">${fmt(i.dueDate)}</span>
           </div>`).join('')}
@@ -4426,12 +4426,12 @@ async function sendInternalProjectStatusReport() {
 
         ${completedThisWeek.length>0 ? `<!-- Completed this week -->
         <div style="background:#f0fff8;border:1px solid #00e8bb44;border-radius:8px;overflow:hidden">
-          <div style="padding:8px 12px;background:#e6ffef;border-bottom:1px solid #00e8bb44">
+          <div style="padding:8px 12px;background:#00e8bb15;border-bottom:1px solid #00e8bb33">
             <span style="font-size:10px;font-weight:700;color:#00a878;text-transform:uppercase;letter-spacing:1px">✓ Completed This Week (${completedThisWeek.length})</span>
           </div>
-          ${completedThisWeek.map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 12px;border-bottom:1px solid #e6ffef;background:${idx%2===0?'#fff':'#f5fffc'}">
+          ${completedThisWeek.map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 12px;border-bottom:1px solid #e6ffef;background:${idx%2===0?'#1a1a2e':'#141428'}">
             <span style="color:#00a878;font-size:13px;flex-shrink:0">✓</span>
-            <div style="flex:1;font-size:11px;color:#666">${i.task.slice(0,90)}${i.task.length>90?'…':''}</div>
+            <div style="flex:1;font-size:11px;color:#aaaaaa">${i.task.slice(0,90)}${i.task.length>90?'…':''}</div>
             <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'};font-weight:600;flex-shrink:0">${i.owner.split(' ')[0]}</span>
           </div>`).join('')}
         </div>` : ''}
@@ -4441,11 +4441,11 @@ async function sendInternalProjectStatusReport() {
   }
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/></head>
-<body style="margin:0;padding:0;background:#f0f2f8;font-family:Arial,sans-serif">
+<body style="margin:0;padding:0;background:#0f0f1a;font-family:Arial,sans-serif">
 <div style="max-width:720px;margin:0 auto;padding:20px">
 
   <!-- Header -->
-  <div style="background:linear-gradient(135deg,#1a1a3e 0%,#0d1b2a 100%);border-radius:12px;padding:28px;margin-bottom:20px">
+  <div style="background:linear-gradient(135deg,#1a1a3e 0%,#0d1b2a 100%);border-radius:12px;padding:28px;margin-bottom:20px;border:1px solid #2a2a4a">
     <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px">Institute of Presilience · Leadership Report</div>
     <div style="font-size:24px;font-weight:700;color:#fff;margin-bottom:4px">Internal Programmes — Weekly Status</div>
     <div style="font-size:12px;color:#8899bb">${dateStr} · Generated by Aurora</div>
@@ -4453,8 +4453,8 @@ async function sendInternalProjectStatusReport() {
 
   ${reportSections}
 
-  <div style="text-align:center;color:#aaa;font-size:10px;padding:12px 0">
-    Aurora · R2S Project Management Intelligence · Confidential — Leadership Distribution
+  <div style="text-align:center;color:#555577;font-size:10px;padding:12px 0">
+    Aurora · R2S Project Management Intelligence · Confidential
     ${process.env.FRONTEND_URL ? '<br><a href="' + process.env.FRONTEND_URL + '" style="color:#6aa3ff">Open Aurora portal</a>' : ''}
   </div>
 
@@ -4633,7 +4633,7 @@ async function buildChecklistExcel(project, checklist) {
   }
 }
 
-async function sendInternalWeeklyOpsUpdate() {
+async function sendInternalWeeklyOpsUpdate(forceAll = false) {
   const projects = await readInternalProjects();
   const activeProjects = projects.filter(p =>
     p.status !== 'Completed' && p.status !== 'On Hold' && p.status !== 'Paused'
@@ -4660,7 +4660,7 @@ async function sendInternalWeeklyOpsUpdate() {
   let anySent = false;
 
   for (const project of activeProjects) {
-    if (!shouldSendWeeklyOpsUpdate(project)) {
+    if (!forceAll && !shouldSendWeeklyOpsUpdate(project)) {
       console.log(`[Internal Ops] Skipping ${project.cohortName} — outside active window`);
       continue;
     }
@@ -5100,10 +5100,10 @@ app.post('/api/test/report/internal-leadership', async (req, res) => {
       reportSections += `<div style="background:#fff;border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.08)">
         <div style="font-size:15px;font-weight:700;color:#1a1a3e;margin-bottom:4px">${project.cohortName}</div>
         <div style="font-size:11px;color:#6aa3ff;margin-bottom:12px">${programName} · <span style="color:${statusBadge.color}">${statusBadge.text}</span></div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;color:#666">${totalDone}/${totalTasks} complete</span><span style="font-weight:700;color:${pctColor}">${pct}%</span></div>
-        <div style="background:#e8eaf6;border-radius:4px;height:10px;margin-bottom:12px"><div style="width:${pct}%;background:${pctColor};height:10px;border-radius:4px"></div></div>
-        ${overdue.length>0?`<div style="background:#fff0f0;border:1px solid #ffcccc;border-radius:6px;padding:10px;margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:#cc0033;margin-bottom:6px">⚠ ${overdue.length} OVERDUE</div>${overdue.map(i=>`<div style="font-size:11px;color:#666;margin-bottom:3px">• <b>${i.owner.split(' ')[0]}</b>: ${i.task.slice(0,70)} — <span style="color:#cc0033">${fmt(i.dueDate)}</span></div>`).join('')}</div>`:''}
-        ${dueThisWeek.length>0?`<div style="background:#fffdf0;border:1px solid #ffd93d44;border-radius:6px;padding:10px"><div style="font-size:10px;font-weight:700;color:#997700;margin-bottom:6px">📋 DUE THIS WEEK (${dueThisWeek.length})</div>${dueThisWeek.map(i=>`<div style="font-size:11px;color:#666;margin-bottom:3px">• <b>${i.owner.split(' ')[0]}</b>: ${i.task.slice(0,70)}</div>`).join('')}</div>`:'<div style="font-size:11px;color:#00a878">✓ Nothing due this week</div>'}
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;color:#aaaaaa">${totalDone}/${totalTasks} complete</span><span style="font-weight:700;color:${pctColor}">${pct}%</span></div>
+        <div style="background:#2a2a4a;border-radius:4px;height:10px;margin-bottom:12px"><div style="width:${pct}%;background:${pctColor};height:10px;border-radius:4px"></div></div>
+        ${overdue.length>0?`<div style="background:#fff0f0;border:1px solid #ffcccc;border-radius:6px;padding:10px;margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:#cc0033;margin-bottom:6px">⚠ ${overdue.length} OVERDUE</div>${overdue.map(i=>`<div style="font-size:11px;color:#aaaaaa;margin-bottom:3px">• <b>${i.owner.split(' ')[0]}</b>: ${i.task.slice(0,70)} — <span style="color:#cc0033">${fmt(i.dueDate)}</span></div>`).join('')}</div>`:''}
+        ${dueThisWeek.length>0?`<div style="background:#fffdf0;border:1px solid #ffd93d44;border-radius:6px;padding:10px"><div style="font-size:10px;font-weight:700;color:#997700;margin-bottom:6px">📋 DUE THIS WEEK (${dueThisWeek.length})</div>${dueThisWeek.map(i=>`<div style="font-size:11px;color:#aaaaaa;margin-bottom:3px">• <b>${i.owner.split(' ')[0]}</b>: ${i.task.slice(0,70)}</div>`).join('')}</div>`:'<div style="font-size:11px;color:#00a878">✓ Nothing due this week</div>'}
       </div>`;
     }
     const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f0f2f8;font-family:Arial,sans-serif"><div style="max-width:700px;margin:0 auto;padding:20px">
@@ -5118,11 +5118,9 @@ app.post('/api/test/report/internal-leadership', async (req, res) => {
 
 app.post('/api/test/report/internal-ops', async (req, res) => {
   try {
-    // Temporarily override the TO/CC in sendInternalWeeklyOpsUpdate by monkey-patching sendEmail
-    const origSendEmail = global._sendEmailOrig || sendEmail;
     global._testMode = true;
     global._testEmail = TEST_EMAIL;
-    await sendInternalWeeklyOpsUpdate();
+    await sendInternalWeeklyOpsUpdate(true); // forceAll=true bypasses the active-window gate
     global._testMode = false;
     res.json({ success: true, sentTo: TEST_EMAIL });
   } catch(e) {
