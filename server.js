@@ -4848,6 +4848,15 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
 
     const subject = `${global._testMode?'[TEST] ':''}[Aurora] ${project.cohortName} — Weekly Programme Dashboard${overdue.length > 0 ? ` ⚠️ ${overdue.length} overdue` : daysToNext !== null && daysToNext <= 7 ? ' 🔴 Module this week' : ''}`;
 
+    // Dark theme colour variables
+    const BG    = '#0f0f1a';
+    const CARD  = '#1a1a2e';
+    const CARD2 = '#141428';
+    const BORDER= '#2a2a4a';
+    const TEXT  = '#e0e0e0';
+    const TEXT2 = '#aaaaaa';
+    const TEXT3 = '#666680';
+
     // Build Excel attachment
     let excelBuffer = null;
     let excelFilename = null;
