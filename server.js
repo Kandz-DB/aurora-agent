@@ -4714,6 +4714,15 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
 
     const fmt = d => new Date(d).toLocaleDateString('en-AU',{day:'numeric',month:'short'});
 
+    // Dark theme colour variables — must be before the html template
+    const BG    = '#0f0f1a';
+    const CARD  = '#1a1a2e';
+    const CARD2 = '#141428';
+    const BORDER= '#2a2a4a';
+    const TEXT  = '#e0e0e0';
+    const TEXT2 = '#aaaaaa';
+    const TEXT3 = '#666680';
+
     const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/></head>
 <body style="margin:0;padding:0;background:${BG};font-family:Arial,sans-serif">
@@ -4847,15 +4856,6 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
 </div></body></html>`;
 
     const subject = `${global._testMode?'[TEST] ':''}[Aurora] ${project.cohortName} — Weekly Programme Dashboard${overdue.length > 0 ? ` ⚠️ ${overdue.length} overdue` : daysToNext !== null && daysToNext <= 7 ? ' 🔴 Module this week' : ''}`;
-
-    // Dark theme colour variables
-    const BG    = '#0f0f1a';
-    const CARD  = '#1a1a2e';
-    const CARD2 = '#141428';
-    const BORDER= '#2a2a4a';
-    const TEXT  = '#e0e0e0';
-    const TEXT2 = '#aaaaaa';
-    const TEXT3 = '#666680';
 
     // Build Excel attachment
     let excelBuffer = null;
