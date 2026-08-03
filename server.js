@@ -4657,9 +4657,12 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
     'Dr Paul Johnston': '#a78bfa', 'Trainer': '#888',
   };
 
+  const fmt = d => { try { return new Date(d).toLocaleDateString('en-AU',{day:'numeric',month:'short'}); } catch { return '—'; } }
+
   let anySent = false;
 
   for (const project of activeProjects) {
+    try {
     if (!forceAll && !shouldSendWeeklyOpsUpdate(project)) {
       console.log(`[Internal Ops] Skipping ${project.cohortName} — outside active window`);
       continue;
@@ -4897,6 +4900,11 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
       console.log(`[Internal Ops] ✓ Dashboard sent (no Excel) for ${project.cohortName}`);
     }
     anySent = true;
+    } catch(projectErr) {
+      console.error(`[Internal Ops] Error processing ${project.cohortName}:`, projectErr.message);
+      global._testMode = false;
+      throw projectErr; // re-throw so the endpoint catches it
+    }
   }
 
   if (!anySent) console.log('[Internal Ops] No cohorts in active window this week — no ops emails sent');
@@ -5128,11 +5136,14 @@ app.post('/api/test/report/internal-ops', async (req, res) => {
   try {
     global._testMode = true;
     global._testEmail = TEST_EMAIL;
-    await sendInternalWeeklyOpsUpdate(true); // forceAll=true bypasses the active-window gate
+    console.log('[Test Ops] Starting ops dashboard test send...');
+    await sendInternalWeeklyOpsUpdate(true);
     global._testMode = false;
+    console.log('[Test Ops] Done');
     res.json({ success: true, sentTo: TEST_EMAIL });
   } catch(e) {
     global._testMode = false;
+    console.error('[Test Ops] ERROR:', e.message, e.stack?.slice(0,300));
     res.status(500).json({ error: e.message });
   }
 });
