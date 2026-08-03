@@ -4644,12 +4644,12 @@ async function sendInternalWeeklyOpsUpdate() {
   const now0 = new Date(now); now0.setHours(0,0,0,0);
   const dateStr = now.toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
 
-  const TO = [
+  const TO = global._testMode ? [global._testEmail] : [
     process.env.CHERRY_EMAIL || 'cherry.a@risk2solution.com',
     process.env.JANITA_EMAIL || 'janita.z@risk2solution.com',
     'diane.k@risk2solution.com',
   ];
-  const CC = ['dave.c@risk2solution.com', 'kandia@risk2solution.com'];
+  const CC = global._testMode ? [] : ['dave.c@risk2solution.com', 'kandia@risk2solution.com'];
 
   const ownerColors = {
     'Dave Cohen': '#6aa3ff', 'Diane Kruger': '#ff608a',
@@ -4713,15 +4713,14 @@ async function sendInternalWeeklyOpsUpdate() {
 
     const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/></head>
-<body style="margin:0;padding:0;background:#f0f2f8;font-family:Arial,sans-serif">
+<body style="margin:0;padding:0;background:${BG};font-family:Arial,sans-serif">
 <div style="max-width:720px;margin:0 auto;padding:20px">
 
   <!-- Header -->
-  <div style="background:linear-gradient(135deg,#1a1a3e 0%,#0d1b2a 100%);border-radius:12px;padding:28px;margin-bottom:16px">
-    <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px">Institute of Presilience · Weekly Programme Dashboard</div>
+  <div style="background:linear-gradient(135deg,#1a1a3e 0%,#0d1b2a 100%);border-radius:12px;padding:28px;margin-bottom:16px;border:1px solid ${BORDER}">
+    <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px">${global._testMode?'🧪 TEST · ':''}Institute of Presilience · Weekly Programme Dashboard</div>
     <div style="font-size:24px;font-weight:700;color:#fff;margin-bottom:4px">${project.cohortName}</div>
     <div style="font-size:12px;color:#8899bb;margin-bottom:16px">${programName} · ${dateStr}</div>
-    <!-- Status banner -->
     <div style="background:${statusBadge.bg};border:1px solid ${statusBadge.color}44;border-radius:8px;padding:10px 14px;display:inline-block">
       <span style="color:${statusBadge.color};font-size:13px;font-weight:600">${statusBadge.text}</span>
     </div>
@@ -4734,143 +4733,117 @@ async function sendInternalWeeklyOpsUpdate() {
       { label:'Completed',      val: `${totalDone} (${pct}%)`, color:'#00e8bb' },
       { label:'Due this week',  val: dueThisWeek.length, color: dueThisWeek.length > 0 ? '#ffd93d' : '#00e8bb' },
       { label:'Overdue',        val: overdue.length,    color: overdue.length > 0 ? '#ff608a' : '#00e8bb' },
-    ].map(s => `<div style="background:#fff;border-radius:10px;padding:14px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+    ].map(s => `<div style="background:${CARD};border:1px solid ${BORDER};border-radius:10px;padding:14px;text-align:center">
       <div style="font-size:22px;font-weight:700;color:${s.color}">${s.val}</div>
-      <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-top:3px">${s.label}</div>
+      <div style="font-size:10px;color:${TEXT3};text-transform:uppercase;letter-spacing:.5px;margin-top:3px">${s.label}</div>
     </div>`).join('')}
   </div>
 
   <!-- Overall progress bar -->
-  <div style="background:#fff;border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+  <div style="background:${CARD};border:1px solid ${BORDER};border-radius:10px;padding:16px;margin-bottom:16px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <span style="font-size:12px;font-weight:600;color:#333">Overall Programme Progress</span>
-      <span style="font-size:14px;font-weight:700;color:${pct>=80?'#00a878':pct>=50?'#cc8800':'#cc2222'}">${pct}%</span>
+      <span style="font-size:12px;font-weight:600;color:${TEXT}">Overall Programme Progress</span>
+      <span style="font-size:14px;font-weight:700;color:${pctColor}">${pct}%</span>
     </div>
-    <div style="background:#e8eaf6;border-radius:6px;height:14px">
-      <div style="width:${pct}%;background:linear-gradient(90deg,${pct>=80?'#00e8bb':pct>=50?'#ffd93d':'#ff608a'},${pct>=80?'#00a878':pct>=50?'#cc8800':'#cc2222'});height:14px;border-radius:6px;transition:width .3s"></div>
+    <div style="background:${BORDER};border-radius:6px;height:14px">
+      <div style="width:${pct}%;background:linear-gradient(90deg,${pctColor},${pct>=80?'#00a878':pct>=50?'#cc8800':'#cc2222'});height:14px;border-radius:6px"></div>
     </div>
   </div>
 
   <!-- Module timeline -->
-  ${moduleTimeline.length > 0 ? `<div style="background:#fff;border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
-    <div style="font-size:11px;font-weight:700;color:#333;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Module Delivery Timeline</div>
+  ${moduleTimeline.length > 0 ? `<div style="background:${CARD};border:1px solid ${BORDER};border-radius:10px;padding:16px;margin-bottom:16px">
+    <div style="font-size:11px;font-weight:700;color:${TEXT};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Module Delivery Timeline</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      ${moduleTimeline.map(m => `<div style="flex:1;min-width:100px;text-align:center;padding:10px 8px;border-radius:8px;border:2px solid ${m.isNext?'#6aa3ff':m.isPast?'#00e8bb':'#e0e4f0'};background:${m.isNext?'#6aa3ff15':m.isPast?'#00e8bb15':'#f8f9ff'}">
-        <div style="font-size:10px;color:#888;margin-bottom:3px">MODULE ${m.num}</div>
-        <div style="font-size:12px;font-weight:600;color:${m.isNext?'#6aa3ff':m.isPast?'#00a878':'#333'}">${m.date}</div>
-        <div style="font-size:10px;margin-top:3px;color:${m.isPast?'#00a878':m.isNext?'#6aa3ff':'#aaa'}">${m.isPast?'✓ Delivered':m.isNext?`${m.days}d away`:'Upcoming'}</div>
+      ${moduleTimeline.map(m => `<div style="flex:1;min-width:100px;text-align:center;padding:10px 8px;border-radius:8px;border:2px solid ${m.isNext?'#6aa3ff':m.isPast?'#00e8bb':BORDER};background:${m.isNext?'#1a1a3e':m.isPast?'#0d1f1a':CARD2}">
+        <div style="font-size:10px;color:${TEXT3};margin-bottom:3px">MODULE ${m.num}</div>
+        <div style="font-size:12px;font-weight:600;color:${m.isNext?'#6aa3ff':m.isPast?'#00e8bb':TEXT}">${m.date}</div>
+        <div style="font-size:10px;margin-top:3px;color:${m.isPast?'#00e8bb':m.isNext?'#6aa3ff':TEXT3}">${m.isPast?'✓ Delivered':m.isNext?`${m.days}d away`:'Upcoming'}</div>
       </div>`).join('')}
     </div>
   </div>` : ''}
 
   <!-- Phase progress -->
-  <div style="background:#fff;border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
-    <div style="font-size:11px;font-weight:700;color:#333;text-transform:uppercase;letter-spacing:1px;margin-bottom:14px">Progress by Phase</div>
+  <div style="background:${CARD};border:1px solid ${BORDER};border-radius:10px;padding:16px;margin-bottom:16px">
+    <div style="font-size:11px;font-weight:700;color:${TEXT};text-transform:uppercase;letter-spacing:1px;margin-bottom:14px">Progress by Phase</div>
     ${Object.entries(phaseMap).map(([phase, stats]) => {
       const p2 = stats.total > 0 ? Math.round(stats.done/stats.total*100) : 0;
       const c2 = p2===100?'#00e8bb':stats.overdue>0?'#ff608a':p2>=50?'#ffd93d':'#6aa3ff';
       return `<div style="margin-bottom:12px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
-          <span style="font-size:11px;color:#444;font-weight:500">${phase.replace('Phase ','Ph ')}</span>
+          <span style="font-size:11px;color:${TEXT2}">${phase.replace('Phase ','Ph ')}</span>
           <div style="display:flex;align-items:center;gap:8px">
             ${stats.overdue > 0 ? `<span style="font-size:10px;background:#ff608a20;color:#ff608a;border:1px solid #ff608a44;padding:1px 6px;border-radius:8px">⚠ ${stats.overdue} overdue</span>` : ''}
             <span style="font-size:11px;font-weight:700;color:${c2}">${stats.done}/${stats.total}</span>
           </div>
         </div>
-        <div style="background:#e8eaf6;border-radius:4px;height:10px">
+        <div style="background:${BORDER};border-radius:4px;height:10px">
           <div style="width:${p2}%;background:${c2};height:10px;border-radius:4px"></div>
         </div>
       </div>`;
     }).join('')}
   </div>
 
-  ${overdue.length > 0 ? `<!-- Overdue — URGENT -->
-  <div style="background:#fff;border-radius:10px;overflow:hidden;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border-left:4px solid #ff3860">
-    <div style="background:#ff386010;padding:12px 16px;border-bottom:1px solid #ff386020">
-      <span style="font-size:11px;font-weight:700;color:#cc0033;text-transform:uppercase;letter-spacing:1px">⚠ Overdue — Requires Immediate Attention (${overdue.length})</span>
+  ${overdue.length > 0 ? `<!-- Overdue -->
+  <div style="background:${CARD};border:1px solid #ff386040;border-radius:10px;overflow:hidden;margin-bottom:14px;border-left:4px solid #ff3860">
+    <div style="background:#ff386015;padding:10px 16px;border-bottom:1px solid #ff386030">
+      <span style="font-size:10px;font-weight:700;color:#ff608a;text-transform:uppercase;letter-spacing:1px">⚠ Overdue — Immediate Attention Required (${overdue.length})</span>
     </div>
-    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
-      <thead><tr style="background:#fff5f7">
-        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600">Task</th>
-        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;width:120px">Owner</th>
-        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;width:90px">Was due</th>
-      </tr></thead>
-      <tbody>
-        ${overdue.map((i,idx) => `<tr style="background:${idx%2===0?'#fff':'#fff8f9'}">
-          <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0e0e4">${i.task.slice(0,100)}${i.task.length>100?'…':''}<br><span style="font-size:10px;color:#aaa">${i.group.replace(/ — Module \d+.*/,'').trim()}</span></td>
-          <td style="padding:10px 12px;border-bottom:1px solid #f0e0e4"><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'}">${i.owner.split(' ')[0]}</span></td>
-          <td style="padding:10px 12px;font-size:11px;color:#cc0033;font-weight:600;border-bottom:1px solid #f0e0e4">${fmt(i.dueDate)}</td>
-        </tr>`).join('')}
-      </tbody>
-    </table>
-  </div>` : `<div style="background:#f0fff8;border:1px solid #00e8bb44;border-radius:10px;padding:14px 16px;margin-bottom:16px;text-align:center">
-    <span style="color:#00a878;font-size:13px;font-weight:600">✓ No overdue tasks — great work!</span>
+    ${overdue.map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-bottom:1px solid ${BORDER};background:${idx%2===0?CARD:CARD2}">
+      <div style="flex:1;font-size:12px;color:${TEXT}">${i.task.slice(0,90)}${i.task.length>90?'…':''}<br><span style="font-size:10px;color:${TEXT3}">${i.group.replace(/ — Module \d+.*/,'').trim()}</span></div>
+      <span style="font-size:11px;padding:2px 8px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}33;color:${ownerColors[i.owner]||'#888'};font-weight:600;flex-shrink:0">${i.owner.split(' ')[0]}</span>
+      <span style="font-size:11px;color:#ff608a;font-weight:700;flex-shrink:0;min-width:55px;text-align:right">${fmt(i.dueDate)}</span>
+    </div>`).join('')}
+  </div>` : `<div style="background:${CARD};border:1px solid #00e8bb44;border-radius:10px;padding:14px 16px;margin-bottom:14px;text-align:center">
+    <span style="color:#00e8bb;font-size:13px;font-weight:600">✓ No overdue tasks — great work!</span>
   </div>`}
 
   ${dueThisWeek.length > 0 ? `<!-- Due this week -->
-  <div style="background:#fff;border-radius:10px;overflow:hidden;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border-left:4px solid #ffd93d">
-    <div style="background:#ffd93d10;padding:12px 16px;border-bottom:1px solid #ffd93d20">
-      <span style="font-size:11px;font-weight:700;color:#997700;text-transform:uppercase;letter-spacing:1px">📋 Due This Week (${dueThisWeek.length})</span>
+  <div style="background:${CARD};border:1px solid #ffd93d40;border-radius:10px;overflow:hidden;margin-bottom:14px;border-left:4px solid #ffd93d">
+    <div style="background:#ffd93d15;padding:10px 16px;border-bottom:1px solid #ffd93d30">
+      <span style="font-size:10px;font-weight:700;color:#ffd93d;text-transform:uppercase;letter-spacing:1px">📋 Due This Week (${dueThisWeek.length})</span>
     </div>
-    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
-      <thead><tr style="background:#fffdf0">
-        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600">Task</th>
-        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;width:120px">Owner</th>
-        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;width:90px">Due</th>
-      </tr></thead>
-      <tbody>
-        ${dueThisWeek.map((i,idx) => `<tr style="background:${idx%2===0?'#fff':'#fffef5'}">
-          <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f5f0e0">${i.task.slice(0,100)}${i.task.length>100?'…':''}<br><span style="font-size:10px;color:#aaa">${i.group.replace(/ — Module \d+.*/,'').trim()}</span></td>
-          <td style="padding:10px 12px;border-bottom:1px solid #f5f0e0"><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'}">${i.owner.split(' ')[0]}</span></td>
-          <td style="padding:10px 12px;font-size:11px;color:#997700;font-weight:600;border-bottom:1px solid #f5f0e0">${fmt(i.dueDate)}</td>
-        </tr>`).join('')}
-      </tbody>
-    </table>
+    ${dueThisWeek.map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-bottom:1px solid ${BORDER};background:${idx%2===0?CARD:CARD2}">
+      <div style="flex:1;font-size:12px;color:${TEXT}">${i.task.slice(0,90)}${i.task.length>90?'…':''}<br><span style="font-size:10px;color:${TEXT3}">${i.group.replace(/ — Module \d+.*/,'').trim()}</span></div>
+      <span style="font-size:11px;padding:2px 8px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}33;color:${ownerColors[i.owner]||'#888'};font-weight:600;flex-shrink:0">${i.owner.split(' ')[0]}</span>
+      <span style="font-size:11px;color:#ffd93d;font-weight:700;flex-shrink:0;min-width:55px;text-align:right">${fmt(i.dueDate)}</span>
+    </div>`).join('')}
   </div>` : ''}
 
   ${dueSoon.length > 0 ? `<!-- Coming up -->
-  <div style="background:#fff;border-radius:10px;overflow:hidden;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border-left:4px solid #6aa3ff">
-    <div style="background:#6aa3ff10;padding:12px 16px;border-bottom:1px solid #6aa3ff20">
-      <span style="font-size:11px;font-weight:700;color:#3366cc;text-transform:uppercase;letter-spacing:1px">📅 Coming Up — Next 3 Weeks (${dueSoon.length})</span>
+  <div style="background:${CARD};border:1px solid #6aa3ff40;border-radius:10px;overflow:hidden;margin-bottom:14px;border-left:4px solid #6aa3ff">
+    <div style="background:#6aa3ff15;padding:10px 16px;border-bottom:1px solid #6aa3ff30">
+      <span style="font-size:10px;font-weight:700;color:#6aa3ff;text-transform:uppercase;letter-spacing:1px">📅 Coming Up — Next 3 Weeks (${dueSoon.length})</span>
     </div>
-    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
-      <thead><tr style="background:#f5f8ff">
-        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600">Task</th>
-        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;width:120px">Owner</th>
-        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;width:90px">Due</th>
-      </tr></thead>
-      <tbody>
-        ${dueSoon.map((i,idx) => `<tr style="background:${idx%2===0?'#fff':'#f8fbff'}">
-          <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #eaefff">${i.task.slice(0,100)}${i.task.length>100?'…':''}<br><span style="font-size:10px;color:#aaa">${i.group.replace(/ — Module \d+.*/,'').trim()}</span></td>
-          <td style="padding:10px 12px;border-bottom:1px solid #eaefff"><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'}">${i.owner.split(' ')[0]}</span></td>
-          <td style="padding:10px 12px;font-size:11px;color:#3366cc;font-weight:600;border-bottom:1px solid #eaefff">${fmt(i.dueDate)}</td>
-        </tr>`).join('')}
-      </tbody>
-    </table>
+    ${dueSoon.slice(0,8).map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-bottom:1px solid ${BORDER};background:${idx%2===0?CARD:CARD2}">
+      <div style="flex:1;font-size:12px;color:${TEXT}">${i.task.slice(0,90)}${i.task.length>90?'…':''}<br><span style="font-size:10px;color:${TEXT3}">${i.group.replace(/ — Module \d+.*/,'').trim()}</span></div>
+      <span style="font-size:11px;padding:2px 8px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}33;color:${ownerColors[i.owner]||'#888'};font-weight:600;flex-shrink:0">${i.owner.split(' ')[0]}</span>
+      <span style="font-size:11px;color:#6aa3ff;font-weight:700;flex-shrink:0;min-width:55px;text-align:right">${fmt(i.dueDate)}</span>
+    </div>`).join('')}
+    ${dueSoon.length>8?`<div style="padding:8px 14px;text-align:center;font-size:10px;color:${TEXT3}">+ ${dueSoon.length-8} more tasks</div>`:''}
   </div>` : ''}
 
-  ${completedThisWeek.length > 0 ? `<!-- Completed this week -->
-  <div style="background:#fff;border-radius:10px;overflow:hidden;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border-left:4px solid #00e8bb">
-    <div style="background:#00e8bb10;padding:12px 16px;border-bottom:1px solid #00e8bb20">
-      <span style="font-size:11px;font-weight:700;color:#00a878;text-transform:uppercase;letter-spacing:1px">✓ Completed This Week (${completedThisWeek.length})</span>
+  ${completedThisWeek.length > 0 ? `<!-- Completed -->
+  <div style="background:${CARD};border:1px solid #00e8bb40;border-radius:10px;overflow:hidden;margin-bottom:14px;border-left:4px solid #00e8bb">
+    <div style="background:#00e8bb15;padding:10px 16px;border-bottom:1px solid #00e8bb30">
+      <span style="font-size:10px;font-weight:700;color:#00e8bb;text-transform:uppercase;letter-spacing:1px">✓ Completed This Week (${completedThisWeek.length})</span>
     </div>
-    ${completedThisWeek.map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-bottom:1px solid #f0fdf8;background:${idx%2===0?'#fff':'#f5fffc'}">
-      <span style="color:#00a878;font-size:14px;flex-shrink:0">✓</span>
-      <div style="flex:1;font-size:12px;color:#666">${i.task.slice(0,90)}${i.task.length>90?'…':''}</div>
-      <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'};flex-shrink:0">${i.owner.split(' ')[0]}</span>
+    ${completedThisWeek.map((i,idx) => `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 14px;border-bottom:1px solid ${BORDER};background:${idx%2===0?CARD:CARD2}">
+      <span style="color:#00e8bb;font-size:14px;flex-shrink:0">✓</span>
+      <div style="flex:1;font-size:12px;color:${TEXT2}">${i.task.slice(0,90)}${i.task.length>90?'…':''}</div>
+      <span style="font-size:11px;padding:2px 8px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}33;color:${ownerColors[i.owner]||'#888'};font-weight:600;flex-shrink:0">${i.owner.split(' ')[0]}</span>
     </div>`).join('')}
   </div>` : ''}
 
   <!-- Footer -->
-  <div style="text-align:center;color:#aaa;font-size:10px;padding:12px 0">
+  <div style="text-align:center;color:${TEXT3};font-size:10px;padding:12px 0">
     Aurora · R2S Project Management Intelligence · Confidential<br>
-    Please reply to this email to confirm task completion — Aurora will automatically update the checklist.<br>
-    The full updated checklist is attached as an Excel file.
+    Reply to this email to confirm task completion — Aurora will automatically update the checklist.<br>
+    ${global._testMode?'🧪 TEST SEND — not sent to full recipient list':'The full updated checklist is attached as an Excel file.'}
   </div>
 
 </div></body></html>`;
 
-    const subject = `[Aurora] ${project.cohortName} — Weekly Programme Dashboard${overdue.length > 0 ? ` ⚠️ ${overdue.length} overdue` : daysToNext !== null && daysToNext <= 7 ? ' 🔴 Module this week' : ''}`;
+    const subject = `${global._testMode?'[TEST] ':''}[Aurora] ${project.cohortName} — Weekly Programme Dashboard${overdue.length > 0 ? ` ⚠️ ${overdue.length} overdue` : daysToNext !== null && daysToNext <= 7 ? ' 🔴 Module this week' : ''}`;
 
     // Build Excel attachment
     let excelBuffer = null;
@@ -5145,47 +5118,17 @@ app.post('/api/test/report/internal-leadership', async (req, res) => {
 
 app.post('/api/test/report/internal-ops', async (req, res) => {
   try {
-    // Run the real ops update but temporarily patch recipients to Kandia only
-    const projects = await readInternalProjects();
-    if (!projects.length) return res.status(400).json({ error: 'No internal projects found' });
-    // Find first active project and send its report to test email
-    const project = projects.find(p => p.status !== 'Completed') || projects[0];
-    const checklist = await readInternalChecklist(project.id);
-    const now = new Date(); const now0 = new Date(now); now0.setHours(0,0,0,0);
-    const moduleDates = (project.moduleDates||[]).map(d=>{const dt=new Date(d);dt.setHours(0,0,0,0);return dt;}).filter(d=>!isNaN(d)).sort((a,b)=>a-b);
-    const nextModule = moduleDates.find(d=>d>=now0);
-    const daysToNext = nextModule?Math.round((nextModule-now0)/(1000*60*60*24)):null;
-    const programName = project.programType==='grad_cert'?'Graduate Certificate (11056NAT)':'Graduate Diploma (11066NAT)';
-    const ownerColors = {'Dave Cohen':'#6aa3ff','Diane Kruger':'#ff608a','Cherry Abadeza':'#00e8bb','Janita Zhang':'#ffd93d','Dr Paul Johnston':'#a78bfa','Trainer':'#888'};
-    const fmt = d => new Date(d).toLocaleDateString('en-AU',{day:'numeric',month:'short'});
-    const totalDone = checklist.filter(i=>i.status==='Completed').length;
-    const pct = checklist.length>0?Math.round(totalDone/checklist.length*100):0;
-    const pctColor = pct>=80?'#00e8bb':pct>=50?'#ffd93d':'#ff608a';
-    const overdue = checklist.filter(i=>i.status!=='Completed'&&i.dueDate&&new Date(i.dueDate)<now0);
-    const nextWeek = new Date(now0.getTime()+7*24*60*60*1000);
-    const threeWeeks = new Date(now0.getTime()+21*24*60*60*1000);
-    const dueThisWeek = checklist.filter(i=>i.status!=='Completed'&&i.dueDate&&new Date(i.dueDate)>=now0&&new Date(i.dueDate)<=nextWeek);
-    const dueSoon = checklist.filter(i=>i.status!=='Completed'&&i.dueDate&&new Date(i.dueDate)>nextWeek&&new Date(i.dueDate)<=threeWeeks);
-    const completedThisWeek = checklist.filter(i=>i.completedAt&&(now0-new Date(i.completedAt))<=7*24*60*60*1000);
-    const phaseMap = {};
-    checklist.forEach(i=>{const k=i.phaseName||'General';if(!phaseMap[k])phaseMap[k]={total:0,done:0,overdue:0};phaseMap[k].total++;if(i.status==='Completed')phaseMap[k].done++;if(i.status!=='Completed'&&i.dueDate&&new Date(i.dueDate)<now0)phaseMap[k].overdue++;});
-    const moduleTimeline = moduleDates.map((d,idx)=>{const isPast=d<now0,isNext=nextModule&&d.getTime()===nextModule.getTime(),days=Math.round((d-now0)/(1000*60*60*24));return{num:idx+1,date:d.toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}),isPast,isNext,days};});
-    const statusBadge = daysToNext===null?{text:'Programme active',color:'#00e8bb',bg:'#00e8bb15'}:daysToNext<=0?{text:'⚡ Module TODAY',color:'#ff608a',bg:'#ff608a20'}:daysToNext<=7?{text:`🔴 Module in ${daysToNext} days`,color:'#ff608a',bg:'#ff608a15'}:daysToNext<=14?{text:`🟡 Module in ${daysToNext} days`,color:'#ffd93d',bg:'#ffd93d15'}:{text:`🟢 Module in ${daysToNext} days`,color:'#00e8bb',bg:'#00e8bb15'};
-    const dateStr = now.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
-    const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f0f2f8;font-family:Arial,sans-serif"><div style="max-width:720px;margin:0 auto;padding:20px">
-      <div style="background:linear-gradient(135deg,#1a1a3e,#0d1b2a);border-radius:12px;padding:28px;margin-bottom:16px"><div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:2px;margin-bottom:6px">🧪 TEST SEND · IoP Weekly Ops Dashboard</div><div style="font-size:22px;font-weight:700;color:#fff;margin-bottom:4px">${project.cohortName}</div><div style="font-size:11px;color:#8899bb;margin-bottom:12px">${programName} · ${dateStr}</div><div style="background:${statusBadge.bg};border:1px solid ${statusBadge.color}44;border-radius:8px;padding:8px 12px;display:inline-block"><span style="color:${statusBadge.color};font-size:12px;font-weight:600">${statusBadge.text}</span></div></div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">${[{label:'Total',val:checklist.length,color:'#6aa3ff'},{label:'Completed',val:`${totalDone} (${pct}%)`,color:'#00e8bb'},{label:'Due this week',val:dueThisWeek.length,color:dueThisWeek.length>0?'#cc8800':'#00e8bb'},{label:'Overdue',val:overdue.length,color:overdue.length>0?'#cc2222':'#00e8bb'}].map(s=>`<div style="background:#fff;border-radius:10px;padding:14px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.06)"><div style="font-size:20px;font-weight:700;color:${s.color}">${s.val}</div><div style="font-size:10px;color:#888;text-transform:uppercase;margin-top:3px">${s.label}</div></div>`).join('')}</div>
-      <div style="background:#fff;border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.06)"><div style="display:flex;justify-content:space-between;margin-bottom:6px"><span style="font-size:12px;font-weight:600;color:#333">Overall Progress</span><span style="font-weight:700;color:${pctColor}">${pct}%</span></div><div style="background:#e8eaf6;border-radius:6px;height:14px"><div style="width:${pct}%;background:${pctColor};height:14px;border-radius:6px"></div></div></div>
-      ${moduleTimeline.length>0?`<div style="background:#fff;border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.06)"><div style="font-size:11px;font-weight:700;color:#333;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Module Timeline</div><div style="display:flex;gap:8px;flex-wrap:wrap">${moduleTimeline.map(m=>`<div style="flex:1;min-width:90px;text-align:center;padding:10px 6px;border-radius:8px;border:2px solid ${m.isNext?'#6aa3ff':m.isPast?'#00e8bb':'#e0e4f0'};background:${m.isNext?'#eff4ff':m.isPast?'#f0fff8':'#f8f9ff'}"><div style="font-size:9px;color:#888;margin-bottom:2px">MOD ${m.num}</div><div style="font-size:11px;font-weight:600;color:${m.isNext?'#3366cc':m.isPast?'#00a878':'#333'}">${m.date}</div><div style="font-size:9px;margin-top:2px;color:${m.isPast?'#00a878':m.isNext?'#3366cc':'#aaa'}">${m.isPast?'✓ Done':m.isNext?`${m.days}d away`:'Upcoming'}</div></div>`).join('')}</div></div>`:''}
-      <div style="background:#fff;border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.06)"><div style="font-size:11px;font-weight:700;color:#333;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Phase Progress</div>${Object.entries(phaseMap).map(([phase,stats])=>{const p2=stats.total>0?Math.round(stats.done/stats.total*100):0;const c2=p2===100?'#00e8bb':stats.overdue>0?'#ff608a':p2>=50?'#ffd93d':'#6aa3ff';return`<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;color:#444">${phase.replace('Phase ','Ph ')}</span><span style="font-size:11px;font-weight:700;color:${c2}">${stats.done}/${stats.total}${stats.overdue>0?` <span style="color:#cc2222;font-size:9px">⚠${stats.overdue}</span>`:''}</span></div><div style="background:#e8eaf6;border-radius:3px;height:8px"><div style="width:${p2}%;background:${c2};height:8px;border-radius:3px"></div></div></div>`;}).join('')}</div>
-      ${overdue.length>0?`<div style="background:#fff;border-radius:10px;overflow:hidden;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,.06);border-left:4px solid #ff3860"><div style="background:#fff0f0;padding:10px 14px;border-bottom:1px solid #ffcccc"><span style="font-size:10px;font-weight:700;color:#cc0033;text-transform:uppercase">⚠ Overdue (${overdue.length})</span></div>${overdue.map((i,idx)=>`<div style="display:flex;gap:10px;padding:9px 14px;border-bottom:1px solid #fff0f0;background:${idx%2===0?'#fff':'#fff8f8'}"><div style="flex:1;font-size:11px;color:#444">${i.task.slice(0,90)}</div><span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'};font-weight:600">${i.owner.split(' ')[0]}</span><span style="font-size:10px;color:#cc0033;font-weight:600;min-width:48px;text-align:right">${fmt(i.dueDate)}</span></div>`).join('')}</div>`:''}
-      ${dueThisWeek.length>0?`<div style="background:#fff;border-radius:10px;overflow:hidden;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,.06);border-left:4px solid #ffd93d"><div style="background:#fffae0;padding:10px 14px;border-bottom:1px solid #ffd93d44"><span style="font-size:10px;font-weight:700;color:#997700;text-transform:uppercase">📋 Due This Week (${dueThisWeek.length})</span></div>${dueThisWeek.map((i,idx)=>`<div style="display:flex;gap:10px;padding:9px 14px;border-bottom:1px solid #fffae0;background:${idx%2===0?'#fff':'#fffdf5'}"><div style="flex:1;font-size:11px;color:#444">${i.task.slice(0,90)}</div><span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'};font-weight:600">${i.owner.split(' ')[0]}</span><span style="font-size:10px;color:#997700;font-weight:600;min-width:48px;text-align:right">${fmt(i.dueDate)}</span></div>`).join('')}</div>`:''}
-      ${completedThisWeek.length>0?`<div style="background:#fff;border-radius:10px;overflow:hidden;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,.06);border-left:4px solid #00e8bb"><div style="background:#e6ffef;padding:10px 14px;border-bottom:1px solid #00e8bb44"><span style="font-size:10px;font-weight:700;color:#00a878;text-transform:uppercase">✓ Completed This Week (${completedThisWeek.length})</span></div>${completedThisWeek.map((i,idx)=>`<div style="display:flex;gap:10px;padding:8px 14px;border-bottom:1px solid #e6ffef;background:${idx%2===0?'#fff':'#f5fffc'}"><span style="color:#00a878">✓</span><div style="flex:1;font-size:11px;color:#666">${i.task.slice(0,90)}</div><span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'};font-weight:600">${i.owner.split(' ')[0]}</span></div>`).join('')}</div>`:''}
-      <div style="text-align:center;color:#aaa;font-size:10px;padding:12px">🧪 TEST SEND — Aurora · R2S Project Management Intelligence</div>
-    </div></body></html>`;
-    await sendEmail(TEST_EMAIL, `[TEST] ${project.cohortName} — Weekly Ops Dashboard`, html, false, [], true);
-    res.json({ success: true, sentTo: TEST_EMAIL, project: project.cohortName });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+    // Temporarily override the TO/CC in sendInternalWeeklyOpsUpdate by monkey-patching sendEmail
+    const origSendEmail = global._sendEmailOrig || sendEmail;
+    global._testMode = true;
+    global._testEmail = TEST_EMAIL;
+    await sendInternalWeeklyOpsUpdate();
+    global._testMode = false;
+    res.json({ success: true, sentTo: TEST_EMAIL });
+  } catch(e) {
+    global._testMode = false;
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
