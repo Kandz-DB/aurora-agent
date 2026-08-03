@@ -4851,42 +4851,50 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
     try {
       excelBuffer = await buildChecklistExcel(project, checklist);
       excelFilename = `${project.cohortName.replace(/[^a-zA-Z0-9 ]/g,'').trim()} — Checklist ${now.toISOString().slice(0,10)}.xlsx`;
+      console.log(`[Internal Ops] Excel built: ${excelFilename}`);
     } catch(e) {
-      console.error('[Excel] Build failed:', e.message);
+      console.error('[Excel] Build failed (will send without attachment):', e.message);
     }
 
-    // Send with attachment if we have one
-    const token = await getOutlookToken();
-    const fromMailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
-    if (token && excelBuffer) {
-      try {
-        const toArray = Array.isArray(TO) ? TO : [TO];
-        const ccArray = Array.isArray(CC) ? CC : (CC ? [CC] : []);
-        const message = {
-          subject,
-          body: { contentType: 'HTML', content: html },
-          toRecipients: toArray.map(addr => ({ emailAddress: { address: addr } })),
-          ccRecipients: ccArray.map(addr => ({ emailAddress: { address: addr } })),
-          attachments: [{
-            '@odata.type': '#microsoft.graph.fileAttachment',
-            name: excelFilename,
-            contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            contentBytes: excelBuffer.toString('base64'),
-          }],
-        };
-        await axios.post(
-          `https://graph.microsoft.com/v1.0/users/${fromMailbox}/sendMail`,
-          { message },
-          { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 30000 }
-        );
-        console.log(`[Internal Ops] Dashboard + Excel sent for ${project.cohortName}`);
-      } catch(sendErr) {
-        console.error('[Internal Ops] Send with attachment failed:', sendErr.message);
-        // Fallback without attachment
+    console.log(`[Internal Ops] Sending to: ${JSON.stringify(TO)} CC: ${JSON.stringify(CC)}`);
+
+    // Send with attachment if we have one, otherwise plain HTML
+    if (excelBuffer) {
+      const token = await getOutlookToken();
+      const fromMailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
+      if (token) {
+        try {
+          const toArray = Array.isArray(TO) ? TO : [TO];
+          const ccArray = Array.isArray(CC) ? CC : (CC ? [CC] : []);
+          const message = {
+            subject,
+            body: { contentType: 'HTML', content: html },
+            toRecipients: toArray.map(addr => ({ emailAddress: { address: addr } })),
+            ccRecipients: ccArray.map(addr => ({ emailAddress: { address: addr } })),
+            attachments: [{
+              '@odata.type': '#microsoft.graph.fileAttachment',
+              name: excelFilename,
+              contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              contentBytes: excelBuffer.toString('base64'),
+            }],
+          };
+          await axios.post(
+            `https://graph.microsoft.com/v1.0/users/${fromMailbox}/sendMail`,
+            { message },
+            { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 30000 }
+          );
+          console.log(`[Internal Ops] ✓ Dashboard + Excel sent for ${project.cohortName}`);
+        } catch(sendErr) {
+          console.error('[Internal Ops] Graph send failed, falling back:', sendErr.message);
+          await sendEmail(TO, subject, html, false, CC, true);
+        }
+      } else {
         await sendEmail(TO, subject, html, false, CC, true);
       }
     } else {
+      // No Excel — send plain HTML
       await sendEmail(TO, subject, html, false, CC, true);
+      console.log(`[Internal Ops] ✓ Dashboard sent (no Excel) for ${project.cohortName}`);
     }
     anySent = true;
   }
