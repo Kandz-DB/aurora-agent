@@ -2040,7 +2040,7 @@ async function sendWeeklyExecutiveReport(projects) {
       const weekKey = getWeekKey();
       const weekData = state.weeks?.[weekKey] || {};
       const phase = p.phase || 0;
-      const relevantQs = PM_CHECKLIST_QUESTIONS.filter(q => q.phase.includes(phase));
+      const relevantQs = PM_CHECKLIST_QUESTIONS; // All questions for every project
       const checkedCount = relevantQs.filter(q => weekData[q.id]?.checked).length;
       const total = relevantQs.length;
       const pct = total > 0 ? Math.round((checkedCount / total) * 100) : 0;
@@ -5263,20 +5263,20 @@ async function writePMChecklist(projectId, data) {
 // Build the checklist state for a project — returns current week's state + history
 async function getPMChecklistState(project) {
   const state = await readPMChecklist(project.id);
-  const phase = project.phase || 0;
   const weekKey = getWeekKey();
 
   // Initialise this week's entry if needed
   if (!state.weeks) state.weeks = {};
   if (!state.weeks[weekKey]) state.weeks[weekKey] = {};
 
-  // Build question list relevant to this project's phase
-  const questions = PM_CHECKLIST_QUESTIONS.filter(q => q.phase.includes(phase));
+  // ALL 11 questions shown for every project regardless of phase
+  const questions = PM_CHECKLIST_QUESTIONS;
 
   return questions.map(q => {
     const thisWeek = state.weeks[weekKey][q.id] || { checked: false, checkedAt: null };
 
-    // For one-time questions, check if ever ticked in ANY previous week
+    // Weekly items: always start fresh each week — never carry over
+    // One-time items: check if ever ticked in ANY previous week
     let previouslyCompleted = false;
     let previouslyCompletedAt = null;
     if (!q.weekly) {
@@ -5291,14 +5291,18 @@ async function getPMChecklistState(project) {
         }
       }
     }
+    // Weekly items are NEVER carried over — always unchecked at start of new week
+    const effectivelyChecked = q.weekly
+      ? thisWeek.checked  // only this week's tick counts
+      : (thisWeek.checked || previouslyCompleted);
 
     return {
       ...q,
-      checked: thisWeek.checked || (previouslyCompleted && !q.weekly),
-      checkedAt: thisWeek.checkedAt || previouslyCompletedAt,
-      previouslyCompleted,
+      checked: effectivelyChecked,
+      checkedAt: thisWeek.checkedAt || (!q.weekly ? previouslyCompletedAt : null),
+      previouslyCompleted: !q.weekly && previouslyCompleted,
       previouslyCompletedAt,
-      isHistoric: !thisWeek.checked && previouslyCompleted && !q.weekly,
+      isHistoric: !q.weekly && !thisWeek.checked && previouslyCompleted,
     };
   });
 }
@@ -5357,6 +5361,7 @@ async function sendWeeklyPMChecklist() {
             <div style="font-size:12px;color:${q.checked ? '#aaa' : '#e0e0e0'};${q.checked ? 'text-decoration:line-through;' : ''}">${i + 1}. ${q.text}</div>
             ${q.isHistoric ? `<div style="font-size:10px;color:#00e8bb;margin-top:2px">✓ Previously completed ${q.previouslyCompletedAt ? new Date(q.previouslyCompletedAt).toLocaleDateString('en-AU', {day:'numeric',month:'short',year:'numeric'}) : ''} — one-time task</div>` : ''}
             ${q.checked && q.checkedAt && !q.isHistoric ? `<div style="font-size:10px;color:#888;margin-top:2px">Checked ${new Date(q.checkedAt).toLocaleDateString('en-AU', {day:'numeric',month:'short'})}</div>` : ''}
+            ${q.weekly && !q.checked ? `<div style="font-size:10px;color:#ffd93d;margin-top:2px">↻ Weekly task — please complete and tick off this week</div>` : ''}
           </div>
         </div>`).join('')}
       </div>`;
@@ -5373,7 +5378,8 @@ async function sendWeeklyPMChecklist() {
     <div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:16px;margin-bottom:20px;color:#ccc;font-size:13px;line-height:1.7">
       Hi Diane,<br><br>
       For each project currently running, please complete the following check-in to confirm everything is on track and up to date.
-      Items marked with <span style="color:#00e8bb">✓ Previously completed</span> were ticked off in a prior week and do not need to be re-checked unless they are a weekly item.
+      Items marked <span style="color:#00e8bb">✓ Previously completed</span> are <strong>one-time tasks</strong> — already done, no need to re-check.<br/>
+      Items marked <span style="color:#ffd93d">↻ Weekly</span> must be completed and ticked off <strong>fresh every week</strong> — they have been reset for this week.
       <br><br>
       Once you have reviewed each section, please reply to this email confirming you have completed the checklist. Aurora will log your responses automatically in the portal.
     </div>
