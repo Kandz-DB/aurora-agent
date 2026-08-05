@@ -3735,9 +3735,13 @@ app.post('/api/projects/:id/deliverables/:delId/book', express.json(), async (re
     };
 
     // Create calendar event (tentative — not confirmed until invite is sent)
+    // Continue even if calendar booking fails — still create the draft invite
     const eventId = await createCalendarBooking(booking, true);
-    if (!eventId) return res.status(500).json({ error: 'Calendar booking failed — check Outlook connection' });
-    console.log(`[Booking] Calendar event created: ${eventTitle} on ${date} at ${displayTime}`);
+    if (!eventId) {
+      console.error(`[Booking] Calendar event creation failed for ${eventTitle} — continuing to create draft invite`);
+    } else {
+      console.log(`[Booking] Calendar event created: ${eventTitle} on ${date} at ${displayTime}`);
+    }
 
     // Build attendee list for the invite email
     const attendees = [
@@ -3803,17 +3807,18 @@ W: www.risk2solution.com`;
     // Log activity
     await db.logActivity(project.id, {
       type: 'calendar_booking',
-      summary: `Meeting booked: ${eventTitle} on ${dateFormatted} at ${displayTime} — invite draft saved to Outlook Drafts`,
+      summary: `Meeting ${eventId ? 'booked in calendar' : 'draft invite created (calendar unavailable)'}: ${eventTitle} on ${dateFormatted} at ${displayTime}`,
     });
 
     // Alert Diane
     await sendEmail('diane.k@risk2solution.com',
-      `[Aurora] Meeting booked — invite draft ready: ${eventTitle}`,
-      `Aurora has created a calendar event and saved a draft meeting invite to your Outlook Drafts folder.\n\nEvent: ${eventTitle}\nDate: ${dateFormatted}\nTime: ${displayTime} AEST\nDuration: ${durationMinutes || 60} minutes\nLocation: ${location || 'TBC'}\n\nOpen Outlook → Drafts → review the invite → hit Send when ready.\n\nAurora\nR2S Project Management Intelligence`,
+      `[Aurora] ${eventId ? 'Meeting booked' : 'Draft invite ready'}: ${eventTitle}`,
+      `Aurora has ${eventId ? 'created a calendar event and ' : ''}saved a draft meeting invite to your Outlook Drafts folder.\n\nEvent: ${eventTitle}\nDate: ${dateFormatted}\nTime: ${displayTime} AEST\nDuration: ${durationMinutes || 60} minutes\nLocation: ${location || 'TBC'}\n${!eventId ? '\nNote: The calendar event could not be created automatically — please add it manually in Outlook.\n' : ''}
+Open Outlook → Drafts → review the invite → hit Send when ready.\n\nAurora\nR2S Project Management Intelligence`,
       true
     );
 
-    res.json({ success: true, eventId, booking });
+    res.json({ success: true, eventId: eventId || null, calendarCreated: !!eventId, booking });
   } catch (e) {
     console.error('[Booking]', e.message);
     res.status(500).json({ error: e.message });
