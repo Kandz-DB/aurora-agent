@@ -5419,48 +5419,172 @@ async function sendPMChecklistFollowUp() {
   );
   if (!active.length) return;
 
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
   const weekKey = getWeekKey();
-  const summaryLines = [];
-  let allComplete = true;
-  let incompleteCount = 0;
+
+  // Build per-project data
+  const projectData = [];
+  let totalDone = 0, totalItems = 0, totalOutstanding = 0;
 
   for (const p of active) {
     const questions = await getPMChecklistState(p);
-    const done = questions.filter(q => q.checked).length;
-    const total = questions.length;
-    const incomplete = questions.filter(q => !q.checked && !q.isHistoric);
-    if (incomplete.length > 0) {
-      allComplete = false;
-      incompleteCount += incomplete.length;
-    }
-    summaryLines.push({ project: p, done, total, incomplete });
+    const done      = questions.filter(q => q.checked || q.isHistoric).length;
+    const total     = questions.length;
+    const outstanding = questions.filter(q => !q.checked && !q.isHistoric);
+    const completedThisWeek = questions.filter(q => q.checked && !q.isHistoric);
+    totalDone += done;
+    totalItems += total;
+    totalOutstanding += outstanding.length;
+    projectData.push({ p, questions, done, total, outstanding, completedThisWeek });
   }
 
-  const dateStr = new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
-  const statusLine = allComplete
-    ? '✅ Diane has completed all PM checklist items for this week across all active projects.'
-    : `⚠️ ${incompleteCount} checklist item${incompleteCount !== 1 ? 's' : ''} remain${incompleteCount === 1 ? 's' : ''} incomplete across ${summaryLines.filter(s => s.incomplete.length > 0).length} project${summaryLines.filter(s => s.incomplete.length > 0).length !== 1 ? 's' : ''}.`;
+  const allComplete = totalOutstanding === 0;
+  const pct = totalItems > 0 ? Math.round(totalDone / totalItems * 100) : 0;
+  const pctColor = allComplete ? '#00e8bb' : pct >= 70 ? '#ffd93d' : '#ff608a';
+  const phaseLabel = p => ['Kick-off','Deployment','Monitoring & Review','Reporting','Close-out','Completed'][p.phase||0];
 
-  const body = `Hi,
+  // Build project rows
+  let projectRows = '';
+  for (const { p, done, total, outstanding, completedThisWeek } of projectData) {
+    const rowPct = total > 0 ? Math.round(done/total*100) : 0;
+    const rowColor = rowPct === 100 ? '#00e8bb' : rowPct >= 70 ? '#ffd93d' : '#ff608a';
 
-Weekly PM checklist follow-up for ${dateStr}:
+    projectRows += `
+    <!-- Project row -->
+    <tr><td style="padding:0 0 10px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border:1px solid ${outstanding.length>0?'#ff386044':'#2a2a4a'};border-left:4px solid ${outstanding.length>0?'#ff3860':rowPct===100?'#00e8bb':'#ffd93d'};border-radius:8px;">
 
-${statusLine}
+        <!-- Project header -->
+        <tr><td style="padding:12px 16px;border-bottom:1px solid #2a2a4a;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td>
+              <div style="font-size:13px;font-weight:700;color:#ffffff;font-family:Arial,sans-serif;">${p.clientName}</div>
+              <div style="font-size:10px;color:#8899bb;margin-top:2px;font-family:Arial,sans-serif;">${p.projectName||''} &middot; ${phaseLabel(p)}</div>
+            </td>
+            <td align="right" style="padding-left:12px;white-space:nowrap;">
+              <div style="font-size:18px;font-weight:700;color:${rowColor};font-family:Arial,sans-serif;">${rowPct}%</div>
+              <div style="font-size:10px;color:#8899bb;font-family:Arial,sans-serif;">${done}/${total} complete</div>
+            </td>
+          </tr></table>
+          <!-- Mini progress bar -->
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:8px;background:#2a2a4a;border-radius:3px;height:6px;">
+          <tr><td style="height:6px;">
+            <div style="width:${rowPct}%;background:${rowColor};height:6px;border-radius:3px;min-width:${rowPct>0?'4px':'0'};"></div>
+          </td></tr></table>
+        </td></tr>
 
-Summary by project:
-${summaryLines.map(s => `• ${s.project.clientName}: ${s.done}/${s.total} complete${s.incomplete.length > 0 ? ` — OUTSTANDING: ${s.incomplete.map(q => q.text.slice(0, 60)).join('; ')}` : ' ✓'}`).join('\n')}
+        ${outstanding.length > 0 ? `
+        <!-- Outstanding items -->
+        <tr><td style="padding:10px 16px;${completedThisWeek.length>0?'border-bottom:1px solid #2a2a4a;':''}">
+          <div style="font-size:9px;font-weight:700;color:#ff608a;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;font-family:Arial,sans-serif;">&#9888; Outstanding (${outstanding.length})</div>
+          ${outstanding.map(q => `
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:4px;"><tr>
+            <td width="14" style="vertical-align:top;padding-top:1px;">
+              <div style="width:12px;height:12px;border:2px solid #3a3a6a;border-radius:3px;background:#141428;"></div>
+            </td>
+            <td style="padding-left:8px;font-size:11px;color:#cccccc;font-family:Arial,sans-serif;line-height:1.4;">
+              ${q.text}
+              ${q.weekly ? '<span style="font-size:9px;color:#ffd93d;background:#ffd93d22;padding:1px 5px;border-radius:4px;margin-left:4px;font-family:Arial,sans-serif;">Weekly</span>' : ''}
+            </td>
+          </tr></table>`).join('')}
+        </td></tr>` : ''}
 
-${!allComplete ? `\nPlease follow up with Diane to ensure the outstanding items are completed before end of week.\n` : '\nAll good — nothing further required.\n'}
-Aurora
-R2S Project Management Intelligence`;
+        ${completedThisWeek.length > 0 ? `
+        <!-- Completed this week -->
+        <tr><td style="padding:10px 16px;">
+          <div style="font-size:9px;font-weight:700;color:#00e8bb;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;font-family:Arial,sans-serif;">&#10003; Completed this week (${completedThisWeek.length})</div>
+          ${completedThisWeek.map(q => `
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:4px;"><tr>
+            <td width="14" style="vertical-align:top;padding-top:1px;color:#00e8bb;font-size:12px;font-family:Arial,sans-serif;">&#10003;</td>
+            <td style="padding-left:8px;font-size:11px;color:#888;font-family:Arial,sans-serif;text-decoration:line-through;line-height:1.4;">${q.text}</td>
+          </tr></table>`).join('')}
+        </td></tr>` : ''}
 
-  // Always send to Kandia and Diane
-  await sendEmail(
-    'kandia@risk2solution.com',
-    `[Aurora] PM Checklist follow-up — ${allComplete ? 'All complete ✓' : `${incompleteCount} item${incompleteCount !== 1 ? 's' : ''} outstanding`}`,
-    body, true, ['diane.k@risk2solution.com']
-  );
-  console.log(`[PMChecklist] Follow-up sent — ${allComplete ? 'all complete' : `${incompleteCount} outstanding`}`);
+      </table>
+    </td></tr>`;
+  }
+
+  const html = `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office">
+<head><meta charset="utf-8"/><!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]--></head>
+<body style="margin:0;padding:0;background:#0f0f1a;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0f0f1a;">
+<tr><td align="center" style="padding:16px 8px;">
+<table width="680" cellpadding="0" cellspacing="0" border="0" style="max-width:680px;width:100%;">
+
+  <!-- HEADER -->
+  <tr><td style="padding-bottom:12px;">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a3e;border-radius:10px;border:1px solid #2a2a4a;">
+    <tr><td style="padding:24px 28px;">
+      <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;font-family:Arial,sans-serif;">Aurora &middot; Wednesday PM Checklist Review</div>
+      <div style="font-size:22px;font-weight:700;color:#ffffff;margin-bottom:4px;font-family:Arial,sans-serif;">Diane's Weekly Check-in Status</div>
+      <div style="font-size:12px;color:#8899bb;margin-bottom:16px;font-family:Arial,sans-serif;">${dateStr} &middot; Week ${weekKey}</div>
+      <!-- Status badge -->
+      <table cellpadding="0" cellspacing="0" border="0"><tr><td style="background:${allComplete?'#00e8bb15':'#ff608a15'};border:1px solid ${allComplete?'#00e8bb':'#ff608a'};border-radius:6px;padding:8px 16px;">
+        <span style="color:${allComplete?'#00e8bb':'#ff608a'};font-size:13px;font-weight:700;font-family:Arial,sans-serif;">${allComplete ? '&#10003; All items complete this week' : `&#9888; ${totalOutstanding} item${totalOutstanding!==1?'s':''} outstanding across ${projectData.filter(d=>d.outstanding.length>0).length} project${projectData.filter(d=>d.outstanding.length>0).length!==1?'s':''}`}</span>
+      </td></tr></table>
+    </td></tr>
+    </table>
+  </td></tr>
+
+  <!-- SUMMARY TILES -->
+  <tr><td style="padding-bottom:12px;">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+      ${[
+        { label:'Active projects', val:String(active.length),      color:'#6aa3ff' },
+        { label:'Items complete',  val:`${totalDone}/${totalItems}`, color:'#00e8bb' },
+        { label:'Outstanding',     val:String(totalOutstanding),   color:totalOutstanding>0?'#ff608a':'#00e8bb' },
+        { label:'Overall',         val:`${pct}%`,                  color:pctColor },
+      ].map((s,i) => `<td width="25%" style="padding:0 ${i<3?'6px':'0'} 0 0;vertical-align:top;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;">
+        <tr><td align="center" style="padding:14px 8px;">
+          <div style="font-size:20px;font-weight:700;color:${s.color};font-family:Arial,sans-serif;">${s.val}</div>
+          <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-top:4px;font-family:Arial,sans-serif;">${s.label}</div>
+        </td></tr>
+        </table>
+      </td>`).join('')}
+    </tr>
+    </table>
+  </td></tr>
+
+  <!-- OVERALL PROGRESS BAR -->
+  <tr><td style="padding-bottom:16px;">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;">
+    <tr><td style="padding:14px 18px;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+      <tr>
+        <td style="font-size:12px;font-weight:700;color:#e0e0e0;font-family:Arial,sans-serif;">Overall PM Checklist Completion</td>
+        <td align="right" style="font-size:16px;font-weight:700;color:${pctColor};font-family:Arial,sans-serif;">${pct}%</td>
+      </tr></table>
+      <div style="margin-top:8px;background:#2a2a4a;border-radius:4px;height:10px;">
+        <div style="width:${pct}%;background:${pctColor};height:10px;border-radius:4px;min-width:${pct>0?'4px':'0'};"></div>
+      </div>
+    </td></tr>
+    </table>
+  </td></tr>
+
+  <!-- PROJECT CARDS -->
+  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+  ${projectRows}
+  </table>
+
+  <!-- FOOTER -->
+  <tr><td align="center" style="padding-top:8px;font-size:10px;color:#555577;font-family:Arial,sans-serif;line-height:1.6;">
+    Aurora &middot; R2S Project Management Intelligence &middot; Confidential<br/>
+    This report is for your review only. Diane has not been copied on this email.
+  </td></tr>
+
+</table>
+</td></tr></table>
+</body></html>`;
+
+  const subject = `[Aurora] PM Checklist — ${allComplete ? 'All complete ✓' : `${totalOutstanding} outstanding across ${projectData.filter(d=>d.outstanding.length>0).length} project${projectData.filter(d=>d.outstanding.length>0).length!==1?'s':''}`} · ${now.toLocaleDateString('en-AU',{day:'numeric',month:'short'})}`;
+
+  // Send to Kandia ONLY — no CC to Diane
+  await sendEmail('kandia@risk2solution.com', subject, html, false, [], true);
+  console.log(`[PMChecklist] Follow-up dashboard sent to Kandia only — ${allComplete ? 'all complete' : `${totalOutstanding} outstanding`}`);
 }
 
 // ── API routes for PM checklist ───────────────────────────────────────────────
