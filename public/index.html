@@ -2188,7 +2188,9 @@ async function confirmBooking(projectId, delId, delName, btn) {
 
     if (data.success) {
       if (status) {
-        status.innerHTML = '✓ Calendar booking created · <strong>Draft meeting invite saved to Outlook Drafts</strong> — open Outlook to review and send to attendees';
+        status.innerHTML = data.calendarCreated
+          ? '✓ Calendar event created · <strong>Draft invite saved to Outlook Drafts</strong> — open Outlook to review and send'
+          : '✓ <strong>Draft invite saved to Outlook Drafts</strong> — calendar event could not be created automatically, please add manually in Outlook';
         status.style.color = 'var(--teal)';
       }
       btn.textContent = '✓ Booked';
