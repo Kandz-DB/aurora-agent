@@ -4478,40 +4478,10 @@ async function sendInternalProjectStatusReport() {
 // - Resume 3 weeks before each module, stop after that module passes
 // - Stop after final module is delivered (unless wrap-up tasks remain)
 function shouldSendWeeklyOpsUpdate(project) {
-  const now = new Date();
-  now.setHours(0,0,0,0);
-  const moduleDates = (project.moduleDates || [])
-    .map(d => { const dt = new Date(d); dt.setHours(0,0,0,0); return dt; })
-    .filter(d => !isNaN(d))
-    .sort((a,b) => a-b);
-
-  if (!moduleDates.length) return true; // No module dates — always send
-
-  const THREE_WEEKS = 21 * 24 * 60 * 60 * 1000;
-  const futureModules = moduleDates.filter(d => d >= now);
-  const pastModules   = moduleDates.filter(d => d < now);
-
-  // If all modules are in the past (final module delivered) — stop
-  if (!futureModules.length) return false;
-
-  const nextModule = futureModules[0];
-  const daysUntilNext = Math.round((nextModule - now) / (1000*60*60*24));
-
-  // Within 3 weeks of next module → send
-  if (daysUntilNext <= 21) return true;
-
-  // More than 3 weeks until next module — only send if:
-  // (a) no modules have been delivered yet (initial setup phase), OR
-  // (b) a module was delivered within the last 7 days (immediate post-module week — then stop)
-  if (!pastModules.length) return true; // Still in setup phase
-
-  // Last module was delivered — check if it was recent
-  const lastModule = pastModules[pastModules.length - 1];
-  const daysSinceLast = Math.round((now - lastModule) / (1000*60*60*24));
-  // Stop sending between modules (more than 7 days after last, more than 21 days before next)
-  if (daysSinceLast > 7) return false;
-
-  return true;
+  // Send every Monday for any Active or Scheduled cohort
+  // Only stop when the cohort is Completed, On Hold, or Paused
+  // The per-module task sections naturally show what's relevant each week
+  return !['Completed', 'On Hold', 'Paused'].includes(project.status);
 }
 
 // ── Weekly operational checklist update to delivery team ─────────────────────
@@ -5211,6 +5181,22 @@ app.post('/api/test/report/internal-leadership', async (req, res) => {
     await sendEmail(TEST_EMAIL, `[TEST] IoP Internal Programmes — Leadership Report`, html, false, [], true);
     res.json({ success: true, sentTo: TEST_EMAIL });
   } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/pmchecklist/followup', async (req, res) => {
+  try { await sendPMChecklistFollowUp(); res.json({ success: true }); }
+  catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/test/report/weekly-pm', async (req, res) => {
+  try {
+    console.log('[Test] Sending PM checklist follow-up to Kandia...');
+    await sendPMChecklistFollowUp();
+    res.json({ success: true, sentTo: 'kandia@risk2solution.com' });
+  } catch(e) {
+    console.error('[Test] PM follow-up error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/test/report/internal-ops', async (req, res) => {
