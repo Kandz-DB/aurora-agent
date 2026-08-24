@@ -5621,3 +5621,212 @@ app.post('/api/pmchecklist/send', async (req, res) => {
   try { await sendWeeklyPMChecklist(); res.json({ success: true }); }
   catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GENERIC INTERNAL PROJECT — upload/extract/manual creation
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Extract project requirements from text using Claude
+async function extractInternalProjectRequirements(text, filename) {
+  const prompt = `You are an AI assistant for Risk 2 Solution (R2S), an Australian risk and resilience consulting firm.
+
+A staff member has uploaded a document or email. Extract all project/task requirements from it.
+
+Document content:
+---
+${text.slice(0, 8000)}
+---
+
+Return a JSON object (no markdown, no backticks) with these fields:
+{
+  "projectName": "short descriptive project name",
+  "description": "2-3 sentence summary of what this project/task requires",
+  "deadline": "YYYY-MM-DD if found, else null",
+  "priority": "High|Medium|Low",
+  "tasks": [
+    {
+      "task": "specific action item",
+      "owner": "most relevant staff member from: Dave Cohen, Diane Kruger, Cherry Abadeza, Janita Zhang, Dr Paul Johnston, Kandia Du Bruyn, or null if unclear",
+      "dueDate": "YYYY-MM-DD if found, else null",
+      "notes": "any relevant context"
+    }
+  ],
+  "deliverables": ["list", "of", "outputs", "required"],
+  "stakeholders": ["names or organisations mentioned"],
+  "notes": "any other important information"
+}`;
+
+  try {
+    const result = await aurora('internal_extract', prompt);
+    const clean = result.replace(/```json|```/g, '').trim();
+    return JSON.parse(clean);
+  } catch(e) {
+    console.error('[Extract] Failed:', e.message);
+    return null;
+  }
+}
+
+// Read internal projects (generic type)
+async function readGenericInternalProjects() {
+  try {
+    if (db.read) return await db.read('generic_internal_projects.json', []);
+    const f = require('path').join(db.DATA, 'generic_internal_projects.json');
+    return require('fs').existsSync(f) ? JSON.parse(require('fs').readFileSync(f, 'utf8')) : [];
+  } catch { return []; }
+}
+
+async function writeGenericInternalProjects(projects) {
+  if (db.write) return await db.write('generic_internal_projects.json', projects);
+  require('fs').writeFileSync(require('path').join(db.DATA, 'generic_internal_projects.json'), JSON.stringify(projects, null, 2));
+}
+
+async function readGenericProjectTasks(projectId) {
+  try {
+    if (db.read) return await db.read(`generic_tasks_${projectId}.json`, []);
+    const f = require('path').join(db.DATA, `generic_tasks_${projectId}.json`);
+    return require('fs').existsSync(f) ? JSON.parse(require('fs').readFileSync(f, 'utf8')) : [];
+  } catch { return []; }
+}
+
+async function writeGenericProjectTasks(projectId, tasks) {
+  if (db.write) return await db.write(`generic_tasks_${projectId}.json`, tasks);
+  require('fs').writeFileSync(require('path').join(db.DATA, `generic_tasks_${projectId}.json`), JSON.stringify(tasks, null, 2));
+}
+
+// Extract from uploaded file
+const genericUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+app.post('/api/generic-internal/extract', genericUpload.single('file'), async (req, res) => {
+  try {
+    let text = '';
+    if (req.file) {
+      const buf = req.file.buffer;
+      const mime = req.file.mimetype;
+      if (mime === 'application/pdf') {
+        try { const pdfParse = require('pdf-parse'); const parsed = await pdfParse(buf); text = parsed.text; }
+        catch(e) { text = buf.toString('utf8').replace(/[^\x20-\x7E\n]/g, ' '); }
+      } else if (mime.includes('word') || mime.includes('docx')) {
+        try { const mammoth = require('mammoth'); const r = await mammoth.extractRawText({ buffer: buf }); text = r.value; }
+        catch(e) { text = buf.toString('utf8'); }
+      } else {
+        text = buf.toString('utf8');
+      }
+    } else if (req.body?.text) {
+      text = req.body.text;
+    }
+
+    if (!text || text.length < 20) return res.status(400).json({ error: 'Could not extract text from file' });
+
+    const extracted = await extractInternalProjectRequirements(text, req.file?.originalname || 'pasted text');
+    res.json({ extracted, textLength: text.length });
+  } catch(e) {
+    console.error('[GenericInternal] Extract error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// CRUD routes for generic internal projects
+app.get('/api/generic-internal/projects', async (req, res) => {
+  try { res.json({ projects: await readGenericInternalProjects() }); }
+  catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/generic-internal/projects', express.json(), async (req, res) => {
+  try {
+    const { projectName, description, deadline, priority, status, notes, tags } = req.body;
+    if (!projectName) return res.status(400).json({ error: 'projectName required' });
+    const id = `gip_${Date.now()}`;
+    const project = { id, projectName, description, deadline, priority: priority||'Medium', status: status||'Active', notes, tags: tags||[], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const projects = await readGenericInternalProjects();
+    projects.push(project);
+    await writeGenericInternalProjects(projects);
+    // Save tasks if provided
+    if (req.body.tasks && req.body.tasks.length) {
+      const tasks = req.body.tasks.map((t, i) => ({
+        id: `gt_${id}_${i}`, projectId: id,
+        task: t.task, owner: t.owner||null, ownerEmail: INTERNAL_STAFF[t.owner]||null,
+        dueDate: t.dueDate||null, status: 'Not Started', notes: t.notes||'',
+        createdAt: new Date().toISOString(),
+      }));
+      await writeGenericProjectTasks(id, tasks);
+      // Send task reminders
+      for (const task of tasks.filter(t => t.ownerEmail)) {
+        try {
+          await sendEmail(task.ownerEmail,
+            `[Aurora] New task assigned: ${projectName}`,
+            `Hi ${task.owner?.split(' ')[0]||''},\n\nYou have been assigned a task for the internal project: ${projectName}\n\nTask: ${task.task}\nDue: ${task.dueDate || 'TBC'}\nPriority: ${priority||'Medium'}\n${task.notes ? 'Notes: ' + task.notes : ''}\n\nPlease reply to this email once complete — Aurora will mark it as done automatically.\n\nTask ID: ${task.id}\n\nAurora\nR2S Project Management Intelligence`,
+            false, []
+          );
+        } catch(e) { console.error('[GenericInternal] Task email error:', e.message); }
+      }
+    }
+    console.log(`[GenericInternal] Created: ${projectName}`);
+    res.json({ project });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/generic-internal/projects/:id', express.json(), async (req, res) => {
+  try {
+    const projects = await readGenericInternalProjects();
+    const idx = projects.findIndex(p => p.id === req.params.id);
+    if (idx < 0) return res.status(404).json({ error: 'Not found' });
+    Object.assign(projects[idx], req.body, { updatedAt: new Date().toISOString() });
+    await writeGenericInternalProjects(projects);
+    res.json({ project: projects[idx] });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/generic-internal/projects/:id', async (req, res) => {
+  try {
+    const projects = await readGenericInternalProjects();
+    const filtered = projects.filter(p => p.id !== req.params.id);
+    await writeGenericInternalProjects(filtered);
+    res.json({ success: true, projects: filtered });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/generic-internal/projects/:id/tasks', async (req, res) => {
+  try { res.json({ tasks: await readGenericProjectTasks(req.params.id) }); }
+  catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/generic-internal/projects/:id/tasks', express.json(), async (req, res) => {
+  try {
+    const tasks = await readGenericProjectTasks(req.params.id);
+    const task = { id: `gt_${req.params.id}_${Date.now()}`, projectId: req.params.id, ...req.body, status: req.body.status||'Not Started', createdAt: new Date().toISOString() };
+    task.ownerEmail = INTERNAL_STAFF[task.owner] || null;
+    tasks.push(task);
+    await writeGenericProjectTasks(req.params.id, tasks);
+    // Send assignment email
+    if (task.ownerEmail) {
+      const projects = await readGenericInternalProjects();
+      const project = projects.find(p => p.id === req.params.id);
+      await sendEmail(task.ownerEmail,
+        `[Aurora] New task assigned: ${project?.projectName || 'Internal project'}`,
+        `Hi ${task.owner?.split(' ')[0]||''},\n\nYou have been assigned a new task.\n\nProject: ${project?.projectName||''}\nTask: ${task.task}\nDue: ${task.dueDate||'TBC'}\n${task.notes ? 'Notes: ' + task.notes : ''}\n\nReply to this email once complete.\n\nTask ID: ${task.id}\n\nAurora\nR2S Project Management Intelligence`,
+        false, []
+      );
+    }
+    res.json({ task });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/generic-internal/projects/:id/tasks/:taskId', express.json(), async (req, res) => {
+  try {
+    const tasks = await readGenericProjectTasks(req.params.id);
+    const idx = tasks.findIndex(t => t.id === req.params.taskId);
+    if (idx < 0) return res.status(404).json({ error: 'Task not found' });
+    Object.assign(tasks[idx], req.body);
+    if (req.body.status === 'Complete' && !tasks[idx].completedAt) tasks[idx].completedAt = new Date().toISOString();
+    await writeGenericProjectTasks(req.params.id, tasks);
+    res.json({ task: tasks[idx] });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/generic-internal/projects/:id/tasks/:taskId', async (req, res) => {
+  try {
+    const tasks = await readGenericProjectTasks(req.params.id);
+    await writeGenericProjectTasks(req.params.id, tasks.filter(t => t.id !== req.params.taskId));
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
