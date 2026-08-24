@@ -3698,6 +3698,79 @@ async function doLogin() {
 
 </script>
 
+<!-- NEW GENERIC PROJECT MODAL -->
+<div class="modal-bg" id="new-generic-modal-bg" onclick="if(event.target===this)closeNewGenericModal()">
+  <div class="modal" style="max-width:680px;max-height:90vh;overflow-y:auto">
+    <div class="modal-hdr" style="position:sticky;top:0;background:var(--card);z-index:1">
+      <div><div class="modal-title" id="generic-modal-title">New Internal Project</div><div class="modal-sub">General internal project — track tasks and assign to staff</div></div>
+      <button class="modal-close" onclick="closeNewGenericModal()">✕</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:12px">
+      <div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Project name *</label>
+        <input id="gp-name" placeholder="e.g. ASQA Renewal 2026" style="width:100%;font-size:13px"/></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Deadline</label>
+          <input id="gp-deadline" type="date" style="width:100%;font-size:12px"/></div>
+        <div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Priority</label>
+          <select id="gp-priority" style="width:100%;font-size:12px">
+            <option value="High">High</option><option value="Medium" selected>Medium</option><option value="Low">Low</option>
+          </select></div>
+      </div>
+      <div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Description</label>
+        <textarea id="gp-description" rows="3" placeholder="What is this project about?" style="width:100%;font-size:12px;resize:vertical"></textarea></div>
+      <div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Notes</label>
+        <textarea id="gp-notes" rows="2" placeholder="Any additional context…" style="width:100%;font-size:12px;resize:vertical"></textarea></div>
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <label style="font-size:11px;color:var(--text2);font-weight:600">Tasks / Deliverables</label>
+          <button type="button" onclick="addGenericTaskRow()" style="background:none;border:1px solid var(--teal);color:var(--teal);font-size:10px;padding:2px 8px;border-radius:4px;cursor:pointer">+ Add task</button>
+        </div>
+        <div id="gp-tasks-container"></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="btn btn-p" onclick="createGenericProject(this)">Create project &amp; assign tasks</button>
+        <button class="btn btn-g" onclick="closeNewGenericModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- UPLOAD/EXTRACT MODAL -->
+<div class="modal-bg" id="upload-extract-modal-bg" onclick="if(event.target===this)closeUploadExtractModal()">
+  <div class="modal" style="max-width:600px">
+    <div class="modal-hdr">
+      <div><div class="modal-title">Extract from documents &amp; email</div><div class="modal-sub">Upload files and/or paste text — Aurora combines everything and extracts project requirements</div></div>
+      <button class="modal-close" onclick="closeUploadExtractModal()">✕</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:14px">
+      <div>
+        <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:6px">Upload files <span style="color:var(--text3)">(PDF, Word, .txt — multiple allowed)</span></label>
+        <div id="extract-dropzone" onclick="document.getElementById('extract-files').click()"
+          style="border:2px dashed var(--border);border-radius:8px;padding:20px;text-align:center;cursor:pointer;"
+          ondragover="event.preventDefault();this.style.borderColor='var(--teal)'"
+          ondragleave="this.style.borderColor='var(--border)'"
+          ondrop="handleExtractDrop(event)">
+          <div style="font-size:24px;margin-bottom:6px">📎</div>
+          <div style="font-size:12px;color:var(--text2)">Click to choose files or drag &amp; drop here</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:4px">PDF, Word, .txt — up to 50MB each</div>
+        </div>
+        <input type="file" id="extract-files" multiple accept=".pdf,.doc,.docx,.txt" style="display:none" onchange="updateFileList()"/>
+        <div id="extract-file-list" style="margin-top:8px;"></div>
+      </div>
+      <div style="text-align:center;font-size:11px;color:var(--text3)">— and/or —</div>
+      <div>
+        <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:6px">Paste email or additional text <span style="color:var(--text3)">(copy from Outlook: Ctrl+A → Ctrl+C → paste here)</span></label>
+        <textarea id="extract-text" rows="5" placeholder="Paste email content, instructions, or any other text here…" style="width:100%;font-size:12px;resize:vertical"></textarea>
+      </div>
+      <div id="extract-status" style="font-size:11px;color:var(--text3)"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-p" onclick="runExtract(this)">⚡ Extract requirements</button>
+        <button class="btn btn-g" onclick="closeUploadExtractModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- LOGIN SCREEN -->
 <div id="login-screen" style="position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:999;flex-direction:column;gap:0">
   <div class="login-box">
