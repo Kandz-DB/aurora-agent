@@ -5702,63 +5702,63 @@ async function writeGenericProjectTasks(projectId, tasks) {
 // Extract from uploaded file
 const genericUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
-app.post('/api/generic-internal/extract', genericUpload.single('file'), async (req, res) => {
+app.post('/api/generic-internal/extract', (req, res, next) => {
+  // Use multer only if content-type is multipart (file upload)
+  if (req.headers['content-type'] && req.headers['content-type'].includes('multipart')) {
+    genericUpload.single('file')(req, res, next);
+  } else {
+    next();
+  }
+}, express.json(), async (req, res) => {
+  // Always return JSON — never let errors produce HTML
+  res.setHeader('Content-Type', 'application/json');
   try {
     let text = '';
     if (req.file) {
       const buf = req.file.buffer;
-      const mime = req.file.mimetype || '';
       const filename = req.file.originalname || '';
-      console.log(`[Extract] File: ${filename} (${mime}, ${buf.length} bytes)`);
+      console.log(`[Extract] File: ${filename} (${req.file.mimetype}, ${buf.length} bytes)`);
 
-      if (mime === 'application/pdf' || filename.endsWith('.pdf')) {
+      if (filename.endsWith('.pdf')) {
         try { const pdfParse = require('pdf-parse'); const parsed = await pdfParse(buf); text = parsed.text; }
         catch(e) { text = buf.toString('utf8').replace(/[^\x20-\x7E\n]/g, ' '); }
-      } else if (mime.includes('word') || filename.endsWith('.docx') || filename.endsWith('.doc')) {
+      } else if (filename.endsWith('.docx') || filename.endsWith('.doc')) {
         try { const mammoth = require('mammoth'); const r = await mammoth.extractRawText({ buffer: buf }); text = r.value; }
         catch(e) { text = buf.toString('utf8').replace(/[^\x20-\x7E\n]/g, ' '); }
-      } else if (filename.endsWith('.eml') || mime.includes('message/rfc822') || mime.includes('rfc822')) {
-        // Parse .eml email format
-        const raw = buf.toString('utf8', 0, Math.min(buf.length, 50000));
-        // Extract headers and body
-        const lines = raw.split(/\r?\n/);
-        const headers = [];
-        let bodyStart = 0;
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i].trim() === '') { bodyStart = i + 1; break; }
-          headers.push(lines[i]);
-        }
-        const headerText = headers.filter(h => /^(Subject|From|To|Date|Cc):/i.test(h)).join('\n');
-        const bodyLines = lines.slice(bodyStart);
-        // Strip HTML tags if present
-        let body = bodyLines.join('\n');
-        if (body.includes('<html') || body.includes('<body')) {
-          body = body.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
-        }
-        // Handle quoted-printable encoding
-        body = body.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
-        text = headerText + '\n\n' + body;
       } else {
-        // Plain text, .txt, .msg etc
-        text = buf.toString('utf8').replace(/[^\x20-\x7E\n\r\t]/g, ' ');
+        // .eml, .txt, .msg — treat as text
+        const raw = buf.toString('utf8');
+        // Strip HTML if present
+        if (raw.includes('<html') || raw.includes('<body') || raw.includes('<div')) {
+          text = raw.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                    .replace(/<[^>]+>/g, ' ')
+                    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+                    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+                    .replace(/\s+/g, ' ');
+        } else {
+          // Handle quoted-printable
+          text = raw.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/gi, (_, h) => {
+            try { return String.fromCharCode(parseInt(h, 16)); } catch { return ''; }
+          });
+        }
       }
     } else if (req.body?.text) {
       text = req.body.text;
     }
 
-    text = text.replace(/\s+/g, ' ').trim();
-    console.log(`[Extract] Text length: ${text.length} chars`);
+    text = (text || '').replace(/\s+/g, ' ').trim();
+    console.log(`[Extract] Text extracted: ${text.length} chars`);
 
-    if (!text || text.length < 20) {
-      return res.status(400).json({ error: 'Could not extract readable text from file. Try pasting the content directly.' });
+    if (text.length < 20) {
+      return res.status(400).json({ error: 'Could not extract readable text. Try pasting the content directly into the text box.' });
     }
 
     const extracted = await extractInternalProjectRequirements(text, req.file?.originalname || 'pasted text');
-    if (!extracted) return res.status(500).json({ error: 'AI extraction failed — please try again or create the project manually.' });
+    if (!extracted) return res.status(500).json({ error: 'Extraction failed — please try again or create the project manually.' });
 
     res.json({ extracted, textLength: text.length });
   } catch(e) {
-    console.error('[GenericInternal] Extract error:', e.message);
+    console.error('[Extract] Error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
