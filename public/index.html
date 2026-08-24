@@ -3581,10 +3581,17 @@ async function runExtract(btn) {
       fd.append('file', file);
       const token = sessionStorage.getItem('aurora_token')||'';
       const res = await fetch('/api/generic-internal/extract', { method:'POST', headers:{ 'Authorization':'Bearer '+token }, body:fd });
-      data = await res.json();
-      if (!res.ok) throw new Error(data.error||'Extraction failed');
+      const responseText = await res.text();
+      try { data = JSON.parse(responseText); }
+      catch(e) { throw new Error('Server error — check Azure logs. Response: ' + responseText.slice(0, 100)); }
+      if (!res.ok) throw new Error(data.error||'Extraction failed: ' + res.status);
     } else {
-      data = await api('/api/generic-internal/extract', { method:'POST', body: JSON.stringify({ text }) });
+      const token = sessionStorage.getItem('aurora_token')||'';
+      const res = await fetch('/api/generic-internal/extract', { method:'POST', headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ text }) });
+      const responseText = await res.text();
+      try { data = JSON.parse(responseText); }
+      catch(e) { throw new Error('Server error — check Azure logs. Response: ' + responseText.slice(0, 100)); }
+      if (!res.ok) throw new Error(data.error||'Extraction failed: ' + res.status);
     }
     const ex = data.extracted;
     if (!ex) throw new Error('Could not extract requirements');
