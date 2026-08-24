@@ -5703,59 +5703,62 @@ async function writeGenericProjectTasks(projectId, tasks) {
 const genericUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 app.post('/api/generic-internal/extract', (req, res, next) => {
-  // Use multer only if content-type is multipart (file upload)
-  if (req.headers['content-type'] && req.headers['content-type'].includes('multipart')) {
-    genericUpload.single('file')(req, res, next);
-  } else {
+  res.setHeader('Content-Type', 'application/json');
+  genericUpload.fields([{ name: 'file', maxCount: 1 }, { name: 'text', maxCount: 1 }])(req, res, (err) => {
+    if (err) { return res.status(400).json({ error: 'Upload error: ' + err.message }); }
     next();
-  }
-}, express.json(), async (req, res) => {
-  // Always return JSON — never let errors produce HTML
+  });
+}, async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
     let text = '';
-    if (req.file) {
-      const buf = req.file.buffer;
-      const filename = req.file.originalname || '';
-      console.log(`[Extract] File: ${filename} (${req.file.mimetype}, ${buf.length} bytes)`);
+    const uploadedFile = req.files?.file?.[0];
+
+    if (uploadedFile) {
+      const buf = uploadedFile.buffer;
+      const filename = (uploadedFile.originalname || '').toLowerCase();
+      console.log(`[Extract] File: ${uploadedFile.originalname} (${buf.length} bytes)`);
 
       if (filename.endsWith('.pdf')) {
-        try { const pdfParse = require('pdf-parse'); const parsed = await pdfParse(buf); text = parsed.text; }
+        try { const pp = require('pdf-parse'); const parsed = await pp(buf); text = parsed.text; }
         catch(e) { text = buf.toString('utf8').replace(/[^\x20-\x7E\n]/g, ' '); }
       } else if (filename.endsWith('.docx') || filename.endsWith('.doc')) {
-        try { const mammoth = require('mammoth'); const r = await mammoth.extractRawText({ buffer: buf }); text = r.value; }
+        try { const m = require('mammoth'); const r = await m.extractRawText({ buffer: buf }); text = r.value; }
         catch(e) { text = buf.toString('utf8').replace(/[^\x20-\x7E\n]/g, ' '); }
       } else {
-        // .eml, .txt, .msg — treat as text
-        const raw = buf.toString('utf8');
-        // Strip HTML if present
+        let raw = buf.toString('utf8');
+        raw = raw.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/gi, (_, h) => {
+          try { return String.fromCharCode(parseInt(h, 16)); } catch { return ''; }
+        });
         if (raw.includes('<html') || raw.includes('<body') || raw.includes('<div')) {
-          text = raw.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-                    .replace(/<[^>]+>/g, ' ')
-                    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
-                    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-                    .replace(/\s+/g, ' ');
-        } else {
-          // Handle quoted-printable
-          text = raw.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/gi, (_, h) => {
-            try { return String.fromCharCode(parseInt(h, 16)); } catch { return ''; }
-          });
+          raw = raw.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                   .replace(/<[^>]+>/g, ' ')
+                   .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+                   .replace(/&lt;/g, '<').replace(/&gt;/g, '>');
         }
+        text = raw;
       }
-    } else if (req.body?.text) {
-      text = req.body.text;
+    } else {
+      // Text field from FormData
+      const textField = req.files?.text?.[0];
+      if (textField) {
+        text = textField.buffer.toString('utf8');
+      } else {
+        text = req.body?.text || '';
+      }
     }
 
-    text = (text || '').replace(/\s+/g, ' ').trim();
-    console.log(`[Extract] Text extracted: ${text.length} chars`);
+    text = (text || '').replace(/\s+/g, ' ').trim().slice(0, 12000);
+    console.log(`[Extract] Text: ${text.length} chars`);
 
     if (text.length < 20) {
-      return res.status(400).json({ error: 'Could not extract readable text. Try pasting the content directly into the text box.' });
+      return res.status(400).json({ error: 'Could not extract readable text. Please paste the content directly.' });
     }
 
-    const extracted = await extractInternalProjectRequirements(text, req.file?.originalname || 'pasted text');
-    if (!extracted) return res.status(500).json({ error: 'Extraction failed — please try again or create the project manually.' });
+    const extracted = await extractInternalProjectRequirements(text, uploadedFile?.originalname || 'pasted text');
+    if (!extracted) return res.status(500).json({ error: 'AI extraction failed — please try again.' });
 
+    console.log(`[Extract] Success: "${extracted.projectName}" with ${extracted.tasks?.length || 0} tasks`);
     res.json({ extracted, textLength: text.length });
   } catch(e) {
     console.error('[Extract] Error:', e.message);
@@ -5763,7 +5766,7 @@ app.post('/api/generic-internal/extract', (req, res, next) => {
   }
 });
 
-// CRUD routes for generic internal projects
+
 app.get('/api/generic-internal/projects', async (req, res) => {
   try { res.json({ projects: await readGenericInternalProjects() }); }
   catch(e) { res.status(500).json({ error: e.message }); }
