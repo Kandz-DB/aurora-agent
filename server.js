@@ -92,9 +92,10 @@ const upload = multer({
 const CAP_USD = parseFloat(process.env.MONTHLY_SPEND_CAP_USD || '20');
 
 const TASK_MODELS = {
-  chat:              'claude-haiku-4-5-20251001', // Haiku for chat to save credits
+  chat:              'claude-haiku-4-5-20251001',
   document_analysis: 'claude-haiku-4-5-20251001',
-  contract_extract:  'claude-sonnet-4-6', // Sonnet for accuracy with tables and financials
+  contract_extract:  'claude-sonnet-4-6',
+  internal_extract:  'claude-sonnet-4-6',
   status_email:      'claude-haiku-4-5-20251001',
   checkin_email:     'claude-haiku-4-5-20251001',
   escalation_email:  'claude-haiku-4-5-20251001',
@@ -108,6 +109,7 @@ const TASK_MODELS = {
 
 const TASK_TOKENS = {
   chat: 800, document_analysis: 1500, contract_extract: 2000,
+  internal_extract: 2000,
   status_email: 400, checkin_email: 350, escalation_email: 450,
   invoice_reminder: 300, reminder_email: 300, closeout_email: 400,
   status_report: 800, portfolio_report: 900, closeout_report: 900,
@@ -5658,8 +5660,12 @@ Return a JSON object (no markdown, no backticks) with these fields:
 
   try {
     const result = await aurora('internal_extract', prompt);
-    const clean = result.replace(/```json|```/g, '').trim();
-    return JSON.parse(clean);
+    // Strip any markdown formatting
+    const clean = result.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    // Try to find JSON object in the response
+    const jsonMatch = clean.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('No JSON found in response');
+    return JSON.parse(jsonMatch[0]);
   } catch(e) {
     console.error('[Extract] Failed:', e.message);
     return null;
@@ -5701,23 +5707,55 @@ app.post('/api/generic-internal/extract', genericUpload.single('file'), async (r
     let text = '';
     if (req.file) {
       const buf = req.file.buffer;
-      const mime = req.file.mimetype;
-      if (mime === 'application/pdf') {
+      const mime = req.file.mimetype || '';
+      const filename = req.file.originalname || '';
+      console.log(`[Extract] File: ${filename} (${mime}, ${buf.length} bytes)`);
+
+      if (mime === 'application/pdf' || filename.endsWith('.pdf')) {
         try { const pdfParse = require('pdf-parse'); const parsed = await pdfParse(buf); text = parsed.text; }
         catch(e) { text = buf.toString('utf8').replace(/[^\x20-\x7E\n]/g, ' '); }
-      } else if (mime.includes('word') || mime.includes('docx')) {
+      } else if (mime.includes('word') || filename.endsWith('.docx') || filename.endsWith('.doc')) {
         try { const mammoth = require('mammoth'); const r = await mammoth.extractRawText({ buffer: buf }); text = r.value; }
-        catch(e) { text = buf.toString('utf8'); }
+        catch(e) { text = buf.toString('utf8').replace(/[^\x20-\x7E\n]/g, ' '); }
+      } else if (filename.endsWith('.eml') || mime.includes('message/rfc822') || mime.includes('rfc822')) {
+        // Parse .eml email format
+        const raw = buf.toString('utf8', 0, Math.min(buf.length, 50000));
+        // Extract headers and body
+        const lines = raw.split(/\r?\n/);
+        const headers = [];
+        let bodyStart = 0;
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].trim() === '') { bodyStart = i + 1; break; }
+          headers.push(lines[i]);
+        }
+        const headerText = headers.filter(h => /^(Subject|From|To|Date|Cc):/i.test(h)).join('\n');
+        const bodyLines = lines.slice(bodyStart);
+        // Strip HTML tags if present
+        let body = bodyLines.join('\n');
+        if (body.includes('<html') || body.includes('<body')) {
+          body = body.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+        }
+        // Handle quoted-printable encoding
+        body = body.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
+        text = headerText + '\n\n' + body;
       } else {
-        text = buf.toString('utf8');
+        // Plain text, .txt, .msg etc
+        text = buf.toString('utf8').replace(/[^\x20-\x7E\n\r\t]/g, ' ');
       }
     } else if (req.body?.text) {
       text = req.body.text;
     }
 
-    if (!text || text.length < 20) return res.status(400).json({ error: 'Could not extract text from file' });
+    text = text.replace(/\s+/g, ' ').trim();
+    console.log(`[Extract] Text length: ${text.length} chars`);
+
+    if (!text || text.length < 20) {
+      return res.status(400).json({ error: 'Could not extract readable text from file. Try pasting the content directly.' });
+    }
 
     const extracted = await extractInternalProjectRequirements(text, req.file?.originalname || 'pasted text');
+    if (!extracted) return res.status(500).json({ error: 'AI extraction failed — please try again or create the project manually.' });
+
     res.json({ extracted, textLength: text.length });
   } catch(e) {
     console.error('[GenericInternal] Extract error:', e.message);
