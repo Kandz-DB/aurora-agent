@@ -5700,7 +5700,7 @@ async function writeGenericProjectTasks(projectId, tasks) {
 }
 
 // Extract from uploaded file
-const genericUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const genericUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 app.post('/api/generic-internal/extract', (req, res, next) => {
   res.setHeader('Content-Type', 'application/json');
