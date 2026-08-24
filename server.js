@@ -42,7 +42,8 @@ const INTERNAL_EMAILS = [
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // ── Auth — simple password protection ────────────────────────────────────────
 const AURORA_PASSWORD = process.env.AURORA_PASSWORD || 'r2s-aurora-2026';
