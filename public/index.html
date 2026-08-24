@@ -441,8 +441,9 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
       <div class="ph-sub">Weekly accountability check-in status across all active projects</div>
       <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
         <button class="btn btn-p" onclick="loadAllPMChecklists()">↻ Refresh</button>
-        <button class="btn btn-g" onclick="api('/api/pmchecklist/send',{method:'POST'}).then(()=>showToast('Checklist sent to Diane (CC Kandia)'))">📧 Send to Diane now</button>
-        <button onclick="testSend('weekly-pm',this)" style="background:none;border:1px solid var(--amber);color:var(--amber);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer">🧪 Test send to me</button>
+        <button class="btn btn-g" onclick="api('/api/pmchecklist/send',{method:'POST'}).then(()=>showToast('Checklist sent to Diane (CC Kandia)'))">📧 Send checklist to Diane</button>
+        <button class="btn btn-p" onclick="api('/api/pmchecklist/followup',{method:'POST'}).then(()=>showToast('Follow-up report sent to you')).catch(e=>showToast('Error: '+e.message,'var(--rose)'))">📊 Send follow-up report to me</button>
+        <button onclick="testSend('weekly-pm',this)" style="background:none;border:1px solid var(--amber);color:var(--amber);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer">🧪 Test</button>
       </div>
       <div id="pm-checklist-overview"><div style="color:var(--text3);font-size:12px">Loading…</div></div>
     </div>
@@ -450,19 +451,35 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
     <!-- INTERNAL PROJECTS -->
     <div id="pg-internal" class="pg">
       <div class="ph-title">Internal Projects</div>
-      <div class="ph-sub">Institute of Presilience® programme management — Grad Cert & Grad Dip cohorts</div>
+      <div class="ph-sub">IoP programme management &amp; general internal projects</div>
 
-      <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
-        <button class="btn btn-p" onclick="showNewInternalModal()">+ New cohort</button>
-        <button class="btn btn-g" onclick="api('/api/internal/report',{method:'POST'}).then(()=>showToast('Leadership report sent to Dave, Kandia and Diane'))">📊 Send leadership report</button>
-        <button class="btn btn-g" onclick="api('/api/internal/ops-update',{method:'POST'}).then(()=>showToast('Ops dashboard sent to delivery team'))">📋 Send ops dashboard</button>
-        <div style="height:20px;border-left:1px solid var(--border);margin:0 4px"></div>
-        <span style="font-size:10px;color:var(--text3)">Test sends (to Kandia only):</span>
-        <button onclick="testSend('internal-leadership',this)" style="background:none;border:1px solid var(--amber);color:var(--amber);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer">🧪 Leadership report</button>
-        <button onclick="testSend('internal-ops',this)" style="background:none;border:1px solid var(--amber);color:var(--amber);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer">🧪 Ops dashboard</button>
+      <!-- Tab switcher -->
+      <div style="display:flex;gap:0;margin-bottom:16px;border-bottom:1px solid var(--border)">
+        <button id="int-tab-iop" onclick="switchInternalTab('iop')" style="background:none;border:none;border-bottom:2px solid var(--teal);color:var(--teal);font-size:12px;font-weight:600;padding:8px 16px;cursor:pointer">🎓 IoP Programmes</button>
+        <button id="int-tab-general" onclick="switchInternalTab('general')" style="background:none;border:none;border-bottom:2px solid transparent;color:var(--text3);font-size:12px;padding:8px 16px;cursor:pointer">📋 General Projects</button>
       </div>
 
-      <div id="internal-list"><div style="color:var(--text3);font-size:12px">Loading programmes…</div></div>
+      <!-- IoP tab -->
+      <div id="int-panel-iop">
+        <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-p" onclick="showNewInternalModal()">+ New cohort</button>
+          <button class="btn btn-g" onclick="api('/api/internal/report',{method:'POST'}).then(()=>showToast('Leadership report sent'))">📊 Leadership report</button>
+          <button class="btn btn-g" onclick="api('/api/internal/ops-update',{method:'POST'}).then(()=>showToast('Ops dashboard sent'))">📋 Ops dashboard</button>
+          <div style="height:20px;border-left:1px solid var(--border);margin:0 4px"></div>
+          <button onclick="testSend('internal-leadership',this)" style="background:none;border:1px solid var(--amber);color:var(--amber);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer">🧪 Leadership</button>
+          <button onclick="testSend('internal-ops',this)" style="background:none;border:1px solid var(--amber);color:var(--amber);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer">🧪 Ops</button>
+        </div>
+        <div id="internal-list"><div style="color:var(--text3);font-size:12px">Loading programmes…</div></div>
+      </div>
+
+      <!-- General Projects tab -->
+      <div id="int-panel-general" style="display:none">
+        <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-p" onclick="showNewGenericProjectModal()">+ New project</button>
+          <button class="btn btn-g" onclick="showUploadExtractModal()">📎 Upload / paste to extract</button>
+        </div>
+        <div id="generic-project-list"><div style="color:var(--text3);font-size:12px">Loading…</div></div>
+      </div>
     </div>
 
     <!-- INTERNAL PROJECT MODAL -->
@@ -3364,7 +3381,309 @@ async function deleteInternalProject(id) {
   } catch(e) { showToast('Error: ' + e.message, 'var(--rose)'); }
 }
 
+// ── General Internal Projects ─────────────────────────────────────────────────
+const STAFF_LIST = ['Dave Cohen','Diane Kruger','Cherry Abadeza','Janita Zhang','Dr Paul Johnston','Kandia Du Bruyn'];
+const PRIORITY_COLORS = { High:'var(--rose)', Medium:'var(--amber)', Low:'var(--teal)' };
+let genericProjects = [];
+let editingGenericProject = null;
+
+function switchInternalTab(tab) {
+  document.getElementById('int-panel-iop').style.display = tab==='iop'?'block':'none';
+  document.getElementById('int-panel-general').style.display = tab==='general'?'block':'none';
+  document.getElementById('int-tab-iop').style.borderBottomColor = tab==='iop'?'var(--teal)':'transparent';
+  document.getElementById('int-tab-iop').style.color = tab==='iop'?'var(--teal)':'var(--text3)';
+  document.getElementById('int-tab-iop').style.fontWeight = tab==='iop'?'600':'400';
+  document.getElementById('int-tab-general').style.borderBottomColor = tab==='general'?'var(--teal)':'transparent';
+  document.getElementById('int-tab-general').style.color = tab==='general'?'var(--teal)':'var(--text3)';
+  document.getElementById('int-tab-general').style.fontWeight = tab==='general'?'600':'400';
+  if (tab==='general') loadGenericProjects();
+}
+
+async function loadGenericProjects() {
+  const el = document.getElementById('generic-project-list');
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading…</div>';
+  try {
+    const data = await api('/api/generic-internal/projects');
+    genericProjects = data.projects || [];
+    renderGenericProjects();
+  } catch(e) { el.innerHTML = `<div style="color:var(--rose);font-size:12px">Error: ${e.message}</div>`; }
+}
+
+function renderGenericProjects() {
+  const el = document.getElementById('generic-project-list');
+  if (!el) return;
+  if (!genericProjects.length) {
+    el.innerHTML = `<div class="card" style="text-align:center;padding:32px;color:var(--text3)">
+      <div style="font-size:32px;margin-bottom:12px">📋</div>
+      <div style="font-size:14px;margin-bottom:6px;color:var(--text2)">No general projects yet</div>
+      <div style="font-size:12px;margin-bottom:16px">Upload a document or email to extract requirements, or create a project manually.</div>
+      <button class="btn btn-p" onclick="showUploadExtractModal()">📎 Upload document / email</button>
+    </div>`;
+    return;
+  }
+  el.innerHTML = genericProjects.map(p => {
+    const pc = PRIORITY_COLORS[p.priority] || 'var(--text3)';
+    const statusColor = p.status==='Active'?'var(--teal)':p.status==='Complete'?'var(--text3)':'var(--amber)';
+    return `<div class="card" style="margin-bottom:10px;cursor:pointer;padding:14px 16px;border-left:3px solid ${pc}" onclick="openGenericProject('${p.id}')">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">
+        <div>
+          <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:2px">${p.projectName}</div>
+          <div style="font-size:11px;color:var(--text3)">${p.description?p.description.slice(0,80)+'…':''}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:12px">
+          <span style="font-size:10px;padding:2px 8px;border-radius:10px;background:${pc}22;color:${pc};border:1px solid ${pc}44">${p.priority}</span>
+          <span style="font-size:10px;padding:2px 8px;border-radius:10px;background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor}44">${p.status}</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:16px;font-size:11px;color:var(--text3)">
+        ${p.deadline?`<span>📅 Due ${new Date(p.deadline).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'})}</span>`:''}
+        <span>Created ${new Date(p.createdAt).toLocaleDateString('en-AU',{day:'numeric',month:'short'})}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function openGenericProject(id) {
+  const p = genericProjects.find(x => x.id === id);
+  if (!p) return;
+  editingGenericProject = p;
+  // Pre-fill form
+  document.getElementById('generic-modal-title').textContent = p.projectName;
+  document.getElementById('gp-name').value = p.projectName||'';
+  document.getElementById('gp-deadline').value = p.deadline||'';
+  document.getElementById('gp-priority').value = p.priority||'Medium';
+  document.getElementById('gp-description').value = p.description||'';
+  document.getElementById('gp-notes').value = p.notes||'';
+  // Load tasks
+  const data = await api(`/api/generic-internal/projects/${id}/tasks`);
+  const container = document.getElementById('gp-tasks-container');
+  container.innerHTML = '';
+  (data.tasks||[]).forEach(t => addGenericTaskRow(t));
+  document.getElementById('new-generic-modal-bg').classList.add('open');
+}
+
+function showNewGenericProjectModal() {
+  editingGenericProject = null;
+  document.getElementById('generic-modal-title').textContent = 'New Internal Project';
+  document.getElementById('gp-name').value = '';
+  document.getElementById('gp-deadline').value = '';
+  document.getElementById('gp-priority').value = 'Medium';
+  document.getElementById('gp-description').value = '';
+  document.getElementById('gp-notes').value = '';
+  document.getElementById('gp-tasks-container').innerHTML = '';
+  addGenericTaskRow(); // start with one empty row
+  document.getElementById('new-generic-modal-bg').classList.add('open');
+}
+
+function closeNewGenericModal() {
+  document.getElementById('new-generic-modal-bg').classList.remove('open');
+  editingGenericProject = null;
+}
+
+function addGenericTaskRow(task) {
+  const container = document.getElementById('gp-tasks-container');
+  const div = document.createElement('div');
+  div.className = 'generic-task-row';
+  div.style.cssText = 'display:grid;grid-template-columns:1fr auto auto auto;gap:6px;margin-bottom:6px;align-items:center';
+  div.setAttribute('data-task-id', task?.id||'');
+  div.innerHTML = `
+    <input placeholder="Task description *" value="${task?.task||''}" class="gp-task-desc" style="font-size:12px"/>
+    <select class="gp-task-owner" style="font-size:11px;width:130px">
+      <option value="">Assign to…</option>
+      ${STAFF_LIST.map(s=>`<option value="${s}" ${task?.owner===s?'selected':''}>${s.split(' ')[0]}</option>`).join('')}
+    </select>
+    <input type="date" class="gp-task-date" value="${task?.dueDate||''}" style="font-size:11px;width:130px" title="Due date"/>
+    <button type="button" onclick="this.closest('.generic-task-row').remove()" style="background:none;border:1px solid var(--rose);color:var(--rose);border-radius:4px;padding:2px 7px;cursor:pointer;font-size:11px;flex-shrink:0">✕</button>`;
+  // Status badge for existing tasks
+  if (task?.id) {
+    const statusSpan = document.createElement('span');
+    statusSpan.style.cssText = `font-size:10px;padding:2px 7px;border-radius:8px;cursor:pointer;border:1px solid var(--border);color:${task.status==='Complete'?'var(--teal)':'var(--text3)'}`;
+    statusSpan.textContent = task.status||'Not Started';
+    statusSpan.title = 'Click to toggle complete';
+    statusSpan.onclick = async () => {
+      const newStatus = task.status==='Complete'?'Not Started':'Complete';
+      task.status = newStatus;
+      await api(`/api/generic-internal/projects/${task.projectId}/tasks/${task.id}`, { method:'PUT', body:JSON.stringify({ status:newStatus }) });
+      statusSpan.textContent = newStatus;
+      statusSpan.style.color = newStatus==='Complete'?'var(--teal)':'var(--text3)';
+    };
+    div.appendChild(statusSpan);
+  }
+  container.appendChild(div);
+}
+
+async function createGenericProject(btn) {
+  const name = document.getElementById('gp-name').value.trim();
+  if (!name) { showToast('Please enter a project name', 'var(--rose)'); return; }
+  const orig = btn.textContent;
+  btn.textContent = 'Saving…'; btn.disabled = true;
+  // Collect tasks
+  const tasks = [...document.querySelectorAll('.generic-task-row')].map(row => ({
+    task: row.querySelector('.gp-task-desc')?.value?.trim(),
+    owner: row.querySelector('.gp-task-owner')?.value||null,
+    dueDate: row.querySelector('.gp-task-date')?.value||null,
+    id: row.getAttribute('data-task-id')||null,
+  })).filter(t => t.task);
+  const payload = {
+    projectName: name,
+    deadline: document.getElementById('gp-deadline').value||null,
+    priority: document.getElementById('gp-priority').value,
+    description: document.getElementById('gp-description').value.trim(),
+    notes: document.getElementById('gp-notes').value.trim(),
+    tasks,
+  };
+  try {
+    if (editingGenericProject) {
+      // Update existing
+      await api(`/api/generic-internal/projects/${editingGenericProject.id}`, { method:'PUT', body:JSON.stringify(payload) });
+      // Update/add tasks
+      for (const t of tasks) {
+        if (t.id) await api(`/api/generic-internal/projects/${editingGenericProject.id}/tasks/${t.id}`, { method:'PUT', body:JSON.stringify(t) });
+        else if (t.task) await api(`/api/generic-internal/projects/${editingGenericProject.id}/tasks`, { method:'POST', body:JSON.stringify(t) });
+      }
+      showToast('✓ Project updated');
+    } else {
+      await api('/api/generic-internal/projects', { method:'POST', body:JSON.stringify(payload) });
+      showToast(`✓ Project created — ${tasks.filter(t=>t.owner).length} task assignment emails sent`);
+    }
+    closeNewGenericModal();
+    loadGenericProjects();
+  } catch(e) {
+    btn.textContent = orig; btn.disabled = false;
+    showToast('Error: ' + e.message, 'var(--rose)');
+  }
+}
+
+// Upload/Extract
+function showUploadExtractModal() {
+  document.getElementById('extract-file').value = '';
+  document.getElementById('extract-text').value = '';
+  document.getElementById('extract-status').textContent = '';
+  document.getElementById('upload-extract-modal-bg').classList.add('open');
+}
+function closeUploadExtractModal() {
+  document.getElementById('upload-extract-modal-bg').classList.remove('open');
+}
+
+async function runExtract(btn) {
+  const file = document.getElementById('extract-file').files[0];
+  const text = document.getElementById('extract-text').value.trim();
+  const status = document.getElementById('extract-status');
+  if (!file && !text) { showToast('Please upload a file or paste some text', 'var(--rose)'); return; }
+  btn.textContent = '⚡ Extracting…'; btn.disabled = true;
+  status.textContent = 'Aurora is reading the document and extracting requirements…';
+  status.style.color = 'var(--text3)';
+  try {
+    let data;
+    if (file) {
+      const fd = new FormData();
+      fd.append('file', file);
+      const token = sessionStorage.getItem('aurora_token')||'';
+      const res = await fetch('/api/generic-internal/extract', { method:'POST', headers:{ 'Authorization':'Bearer '+token }, body:fd });
+      data = await res.json();
+      if (!res.ok) throw new Error(data.error||'Extraction failed');
+    } else {
+      data = await api('/api/generic-internal/extract', { method:'POST', body: JSON.stringify({ text }) });
+    }
+    const ex = data.extracted;
+    if (!ex) throw new Error('Could not extract requirements');
+    status.textContent = `✓ Extracted: "${ex.projectName}" with ${ex.tasks?.length||0} tasks`;
+    status.style.color = 'var(--teal)';
+    // Close and pre-fill new project modal
+    closeUploadExtractModal();
+    editingGenericProject = null;
+    document.getElementById('generic-modal-title').textContent = 'New Project — from extracted requirements';
+    document.getElementById('gp-name').value = ex.projectName||'';
+    document.getElementById('gp-deadline').value = ex.deadline||'';
+    document.getElementById('gp-priority').value = ex.priority||'Medium';
+    document.getElementById('gp-description').value = ex.description||'';
+    document.getElementById('gp-notes').value = [
+      ex.notes||'',
+      ex.stakeholders?.length ? 'Stakeholders: '+ex.stakeholders.join(', ') : '',
+      ex.deliverables?.length ? 'Deliverables: '+ex.deliverables.join('; ') : '',
+    ].filter(Boolean).join('\n');
+    const container = document.getElementById('gp-tasks-container');
+    container.innerHTML = '';
+    (ex.tasks||[]).forEach(t => addGenericTaskRow(t));
+    document.getElementById('new-generic-modal-bg').classList.add('open');
+    showToast(`✓ Requirements extracted — review and create project`);
+  } catch(e) {
+    status.textContent = 'Error: ' + e.message;
+    status.style.color = 'var(--rose)';
+  }
+  btn.textContent = '⚡ Extract requirements'; btn.disabled = false;
+}
+
 </script>
+
+<!-- UPLOAD/EXTRACT MODAL -->
+<div class="modal-bg" id="upload-extract-modal-bg" onclick="if(event.target===this)closeUploadExtractModal()">
+  <div class="modal" style="max-width:600px">
+    <div class="modal-hdr">
+      <div><div class="modal-title">Extract from document or email</div><div class="modal-sub">Upload a file or paste text — Aurora will extract project requirements, tasks and due dates</div></div>
+      <button class="modal-close" onclick="closeUploadExtractModal()">✕</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:14px">
+      <div>
+        <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:6px">Upload file (PDF, Word, .eml, .txt)</label>
+        <input type="file" id="extract-file" accept=".pdf,.doc,.docx,.eml,.txt,.msg" style="font-size:12px;color:var(--text2)"/>
+      </div>
+      <div style="text-align:center;font-size:11px;color:var(--text3)">— or —</div>
+      <div>
+        <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:6px">Paste email / document text</label>
+        <textarea id="extract-text" rows="6" placeholder="Paste the email, document or instructions here…" style="width:100%;font-size:12px;resize:vertical"></textarea>
+      </div>
+      <div id="extract-status" style="font-size:11px;color:var(--text3)"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-p" onclick="runExtract(this)">⚡ Extract requirements</button>
+        <button class="btn btn-g" onclick="closeUploadExtractModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- NEW GENERIC PROJECT MODAL -->
+<div class="modal-bg" id="new-generic-modal-bg" onclick="if(event.target===this)closeNewGenericModal()">
+  <div class="modal" style="max-width:680px;max-height:90vh;overflow-y:auto">
+    <div class="modal-hdr" style="position:sticky;top:0;background:var(--card);z-index:1">
+      <div><div class="modal-title" id="generic-modal-title">New Internal Project</div><div class="modal-sub">General internal project — track tasks and assign to staff</div></div>
+      <button class="modal-close" onclick="closeNewGenericModal()">✕</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Project name *</label>
+          <input id="gp-name" placeholder="e.g. ASQA Renewal 2026" style="width:100%;font-size:13px"/></div>
+        <div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Deadline</label>
+          <input id="gp-deadline" type="date" style="width:100%;font-size:12px"/></div>
+        <div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Priority</label>
+          <select id="gp-priority" style="width:100%;font-size:12px">
+            <option value="High">High</option><option value="Medium" selected>Medium</option><option value="Low">Low</option>
+          </select></div>
+        <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Description</label>
+          <textarea id="gp-description" rows="3" placeholder="What is this project about?" style="width:100%;font-size:12px;resize:vertical"></textarea></div>
+        <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Notes</label>
+          <textarea id="gp-notes" rows="2" placeholder="Any additional context…" style="width:100%;font-size:12px;resize:vertical"></textarea></div>
+      </div>
+
+      <!-- Tasks section -->
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <label style="font-size:11px;color:var(--text2);font-weight:600">Tasks / Deliverables</label>
+          <button type="button" onclick="addGenericTaskRow()" style="background:none;border:1px solid var(--teal);color:var(--teal);font-size:10px;padding:2px 8px;border-radius:4px;cursor:pointer">+ Add task</button>
+        </div>
+        <div id="gp-tasks-container">
+          <!-- Task rows added dynamically -->
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="btn btn-p" onclick="createGenericProject(this)">Create project & assign tasks</button>
+        <button class="btn btn-g" onclick="closeNewGenericModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- LOGIN SCREEN -->
 <div class="login-screen" id="login-screen">
