@@ -3650,25 +3650,66 @@ async function runExtract(btn) {
   }
   btn.textContent = orig; btn.disabled = false;
 }
-// ── Startup initialisation ────────────────────────────────────────────────────
+// ── Startup ───────────────────────────────────────────────────────────────────
 (function() {
   const token = sessionStorage.getItem('aurora_token');
-  const loginScreen = document.getElementById('login-screen');
+  const ls = document.getElementById('login-screen');
   if (token) {
-    if (loginScreen) loginScreen.style.display = 'none';
+    if (ls) ls.style.display = 'none';
     loadProjects().then(() => {
       renderProjects();
       loadSuggestions();
     }).catch(() => {
       sessionStorage.removeItem('aurora_token');
-      if (loginScreen) loginScreen.style.display = 'flex';
+      if (ls) ls.style.display = 'flex';
     });
   } else {
-    if (loginScreen) loginScreen.style.display = 'flex';
+    if (ls) ls.style.display = 'flex';
   }
 })();
 
+async function doLogin() {
+  const pwd = document.getElementById('login-pwd').value;
+  const err = document.getElementById('login-error');
+  if (!err) return;
+  if (!pwd) { err.textContent = 'Please enter the password.'; return; }
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pwd }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      sessionStorage.setItem('aurora_token', data.token);
+      const ls = document.getElementById('login-screen');
+      if (ls) ls.style.display = 'none';
+      loadProjects().then(() => { renderProjects(); loadSuggestions(); });
+    } else {
+      err.textContent = 'Incorrect password. Please try again.';
+      document.getElementById('login-pwd').value = '';
+      document.getElementById('login-pwd').focus();
+    }
+  } catch(e) {
+    err.textContent = 'Connection error. Please try again.';
+  }
+}
+
 
 </script>
+
+<!-- LOGIN SCREEN -->
+<div id="login-screen" style="position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:999;flex-direction:column;gap:0">
+  <div class="login-box">
+    <div class="login-logo">A</div>
+    <div class="login-title">Aurora</div>
+    <div class="login-sub">R2S Project Management Intelligence</div>
+    <input id="login-pwd" class="login-input" type="password" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()"/>
+    <button class="login-btn" onclick="doLogin()">Sign in</button>
+    <div id="login-error" class="login-error"></div>
+    <div class="login-brand">Risk 2 Solution &copy; 2026</div>
+  </div>
+</div>
+
 </body>
 </html>
