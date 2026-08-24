@@ -5705,27 +5705,29 @@ const genericUpload = multer({ storage: multer.memoryStorage(), limits: { fileSi
 
 app.post('/api/generic-internal/extract', (req, res, next) => {
   res.setHeader('Content-Type', 'application/json');
-  genericUpload.fields([{ name: 'file', maxCount: 1 }, { name: 'text', maxCount: 1 }])(req, res, (err) => {
+  genericUpload.any()(req, res, (err) => {
     if (err) { return res.status(400).json({ error: 'Upload error: ' + err.message }); }
     next();
   });
 }, async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
-    let text = '';
-    const uploadedFile = req.files?.file?.[0];
+    const textParts = [];
 
-    if (uploadedFile) {
-      const buf = uploadedFile.buffer;
-      const filename = (uploadedFile.originalname || '').toLowerCase();
-      console.log(`[Extract] File: ${uploadedFile.originalname} (${buf.length} bytes)`);
-
+    // Process all uploaded files
+    const files = req.files || [];
+    for (const file of files) {
+      if (file.fieldname === 'pastedText') continue; // handled below
+      const buf = file.buffer;
+      const filename = (file.originalname || '').toLowerCase();
+      console.log(`[Extract] File: ${file.originalname} (${buf.length} bytes)`);
+      let fileText = '';
       if (filename.endsWith('.pdf')) {
-        try { const pp = require('pdf-parse'); const parsed = await pp(buf); text = parsed.text; }
-        catch(e) { text = buf.toString('utf8').replace(/[^\x20-\x7E\n]/g, ' '); }
+        try { const pp = require('pdf-parse'); const parsed = await pp(buf); fileText = parsed.text; }
+        catch(e) { fileText = buf.toString('utf8').replace(/[^\x20-\x7E\n]/g, ' '); }
       } else if (filename.endsWith('.docx') || filename.endsWith('.doc')) {
-        try { const m = require('mammoth'); const r = await m.extractRawText({ buffer: buf }); text = r.value; }
-        catch(e) { text = buf.toString('utf8').replace(/[^\x20-\x7E\n]/g, ' '); }
+        try { const m = require('mammoth'); const r = await m.extractRawText({ buffer: buf }); fileText = r.value; }
+        catch(e) { fileText = buf.toString('utf8').replace(/[^\x20-\x7E\n]/g, ' '); }
       } else {
         let raw = buf.toString('utf8');
         raw = raw.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/gi, (_, h) => {
@@ -5737,30 +5739,29 @@ app.post('/api/generic-internal/extract', (req, res, next) => {
                    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
                    .replace(/&lt;/g, '<').replace(/&gt;/g, '>');
         }
-        text = raw;
+        fileText = raw;
       }
-    } else {
-      // Text field from FormData
-      const textField = req.files?.text?.[0];
-      if (textField) {
-        text = textField.buffer.toString('utf8');
-      } else {
-        text = req.body?.text || '';
+      if (fileText.trim()) {
+        textParts.push(`--- Document: ${file.originalname} ---\n${fileText.trim()}`);
       }
     }
 
-    text = (text || '').replace(/\s+/g, ' ').trim().slice(0, 12000);
-    console.log(`[Extract] Text: ${text.length} chars`);
+    // Add pasted text
+    const pastedText = (req.files?.find?.(f => f.fieldname === 'pastedText')?.buffer?.toString('utf8') || req.body?.pastedText || '').trim();
+    if (pastedText) textParts.push(`--- Pasted text ---\n${pastedText}`);
 
-    if (text.length < 20) {
-      return res.status(400).json({ error: 'Could not extract readable text. Please paste the content directly.' });
+    const combinedText = textParts.join('\n\n').replace(/\s+/g, ' ').trim().slice(0, 15000);
+    console.log(`[Extract] Combined text: ${combinedText.length} chars from ${textParts.length} source(s)`);
+
+    if (combinedText.length < 20) {
+      return res.status(400).json({ error: 'No readable text found. Please paste text or upload a supported file.' });
     }
 
-    const extracted = await extractInternalProjectRequirements(text, uploadedFile?.originalname || 'pasted text');
+    const extracted = await extractInternalProjectRequirements(combinedText, files.map(f => f.originalname).join(', ') || 'pasted text');
     if (!extracted) return res.status(500).json({ error: 'AI extraction failed — please try again.' });
 
     console.log(`[Extract] Success: "${extracted.projectName}" with ${extracted.tasks?.length || 0} tasks`);
-    res.json({ extracted, textLength: text.length });
+    res.json({ extracted, textLength: combinedText.length, sources: textParts.length });
   } catch(e) {
     console.error('[Extract] Error:', e.message);
     res.status(500).json({ error: e.message });
