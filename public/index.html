@@ -3650,6 +3650,24 @@ async function runExtract(btn) {
   }
   btn.textContent = orig; btn.disabled = false;
 }
+// ── Startup initialisation ────────────────────────────────────────────────────
+(function() {
+  const token = sessionStorage.getItem('aurora_token');
+  const loginScreen = document.getElementById('login-screen');
+  if (token) {
+    if (loginScreen) loginScreen.style.display = 'none';
+    loadProjects().then(() => {
+      renderProjects();
+      loadSuggestions();
+    }).catch(() => {
+      sessionStorage.removeItem('aurora_token');
+      if (loginScreen) loginScreen.style.display = 'flex';
+    });
+  } else {
+    if (loginScreen) loginScreen.style.display = 'flex';
+  }
+})();
+
 
 </script>
 </body>
