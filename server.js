@@ -2374,6 +2374,8 @@ R2S Project Management Intelligence`,
     try { await sendInternalProjectStatusReport(); } catch(e) { console.error('[InternalReport]', e.message); }
     // Operational weekly update to delivery team (Cherry, Janita, Diane, CC Dave)
     try { await sendInternalWeeklyOpsUpdate(); } catch(e) { console.error('[InternalOps]', e.message); }
+    // General internal projects weekly update
+    try { await sendGeneralInternalProjectsUpdate(); } catch(e) { console.error('[GenProjects]', e.message); }
   }
 
   // ── 9. Wednesday PM checklist (Wednesday = dayOfWeek 3 in AEST) ───────────
@@ -5201,6 +5203,22 @@ app.post('/api/test/report/weekly-pm', async (req, res) => {
   }
 });
 
+app.post('/api/general-internal/report', async (req, res) => {
+  try { await sendGeneralInternalProjectsUpdate(); res.json({ success: true }); }
+  catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/test/report/general-internal', async (req, res) => {
+  try {
+    console.log('[Test] Sending general internal projects update to Kandia...');
+    await sendGeneralInternalProjectsUpdate(true);
+    res.json({ success: true, sentTo: 'kandia@risk2solution.com' });
+  } catch(e) {
+    console.error('[Test] General internal error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/test/report/internal-ops', async (req, res) => {
   try {
     global._testMode = true;
@@ -5872,3 +5890,192 @@ app.delete('/api/generic-internal/projects/:id/tasks/:taskId', async (req, res) 
     res.json({ success: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GENERAL INTERNAL PROJECTS — Weekly Monday update
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function sendGeneralInternalProjectsUpdate(testMode = false) {
+  const projects = await readGenericInternalProjects();
+  const active = projects.filter(p => p.status === 'Active' || p.status === 'In Progress');
+  if (!active.length) {
+    console.log('[GenProjects] No active general internal projects — skipping weekly update');
+    return;
+  }
+
+  const now = new Date();
+  const now0 = new Date(now); now0.setHours(0,0,0,0);
+  const nextWeek = new Date(now0.getTime() + 7*24*60*60*1000);
+  const threeWeeks = new Date(now0.getTime() + 21*24*60*60*1000);
+  const dateStr = now.toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+  const fmt = d => new Date(d).toLocaleDateString('en-AU', { day:'numeric', month:'short' });
+
+  // Collect all assigned staff across all active projects
+  const assignedEmails = new Set(['diane.k@risk2solution.com', 'kandia@risk2solution.com']);
+  const allProjectData = [];
+
+  for (const p of active) {
+    const tasks = await readGenericProjectTasks(p.id);
+    const done = tasks.filter(t => t.status === 'Complete').length;
+    const total = tasks.length;
+    const pct = total > 0 ? Math.round(done/total*100) : 0;
+    const pctColor = pct===100?'#00e8bb':pct>=60?'#ffd93d':'#ff608a';
+    const overdue = tasks.filter(t => t.status !== 'Complete' && t.dueDate && new Date(t.dueDate) < now0);
+    const dueThisWeek = tasks.filter(t => t.status !== 'Complete' && t.dueDate && new Date(t.dueDate) >= now0 && new Date(t.dueDate) <= nextWeek);
+    const dueSoon = tasks.filter(t => t.status !== 'Complete' && t.dueDate && new Date(t.dueDate) > nextWeek && new Date(t.dueDate) <= threeWeeks);
+    const completedThisWeek = tasks.filter(t => t.completedAt && (now0 - new Date(t.completedAt)) <= 7*24*60*60*1000);
+
+    // Collect assigned emails
+    tasks.forEach(t => { if (t.ownerEmail) assignedEmails.add(t.ownerEmail); });
+
+    const priorityColor = p.priority === 'High' ? '#ff608a' : p.priority === 'Low' ? '#6aa3ff' : '#ffd93d';
+
+    allProjectData.push({ p, tasks, done, total, pct, pctColor, priorityColor, overdue, dueThisWeek, dueSoon, completedThisWeek });
+  }
+
+  // Build project cards
+  let projectCards = '';
+  for (const { p, tasks, done, total, pct, pctColor, priorityColor, overdue, dueThisWeek, dueSoon, completedThisWeek } of allProjectData) {
+    const borderColor = overdue.length > 0 ? '#ff3860' : pct === 100 ? '#00e8bb' : '#2a2a4a';
+
+    projectCards += `
+    <tr><td style="padding-bottom:12px;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border:1px solid ${borderColor};border-left:4px solid ${priorityColor};border-radius:8px;">
+
+        <!-- Header -->
+        <tr><td style="padding:14px 16px;border-bottom:1px solid #2a2a4a;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td>
+              <div style="font-size:14px;font-weight:700;color:#ffffff;font-family:Arial,sans-serif;">${p.projectName}</div>
+              <div style="font-size:10px;margin-top:3px;font-family:Arial,sans-serif;">
+                <span style="color:${priorityColor};background:${priorityColor}22;padding:1px 7px;border-radius:8px;">${p.priority}</span>
+                ${p.deadline ? ` <span style="color:#8899bb;"> &middot; Due ${fmt(p.deadline)}</span>` : ''}
+              </div>
+            </td>
+            <td align="right" style="padding-left:12px;white-space:nowrap;">
+              <div style="font-size:20px;font-weight:700;color:${pctColor};font-family:Arial,sans-serif;">${pct}%</div>
+              <div style="font-size:10px;color:#8899bb;font-family:Arial,sans-serif;">${done}/${total} tasks</div>
+            </td>
+          </tr></table>
+          <!-- Progress bar -->
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:8px;background:#2a2a4a;border-radius:3px;height:6px;">
+          <tr><td style="height:6px;">
+            <div style="width:${pct}%;background:${pctColor};height:6px;border-radius:3px;min-width:${pct>0?'4px':'0'};"></div>
+          </td></tr></table>
+        </td></tr>
+
+        ${p.description ? `<tr><td style="padding:10px 16px;border-bottom:1px solid #2a2a4a;font-size:11px;color:#8899bb;font-family:Arial,sans-serif;">${p.description}</td></tr>` : ''}
+
+        ${overdue.length > 0 ? `
+        <tr><td style="padding:10px 16px;border-bottom:1px solid #2a2a4a;background:#ff386010;">
+          <div style="font-size:9px;font-weight:700;color:#ff608a;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;font-family:Arial,sans-serif;">&#9888; Overdue (${overdue.length})</div>
+          ${overdue.map(t => `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:4px;"><tr>
+            <td style="font-size:11px;color:#e0e0e0;font-family:Arial,sans-serif;">${t.task}</td>
+            <td nowrap style="padding-left:8px;font-size:10px;color:#ff608a;font-family:Arial,sans-serif;">${t.owner||''}</td>
+            <td nowrap style="padding-left:8px;font-size:10px;color:#ff608a;font-weight:700;font-family:Arial,sans-serif;">${fmt(t.dueDate)}</td>
+          </tr></table>`).join('')}
+        </td></tr>` : ''}
+
+        ${dueThisWeek.length > 0 ? `
+        <tr><td style="padding:10px 16px;border-bottom:1px solid #2a2a4a;background:#ffd93d08;">
+          <div style="font-size:9px;font-weight:700;color:#ffd93d;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;font-family:Arial,sans-serif;">&#128203; Due This Week (${dueThisWeek.length})</div>
+          ${dueThisWeek.map(t => `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:4px;"><tr>
+            <td style="font-size:11px;color:#e0e0e0;font-family:Arial,sans-serif;">${t.task}</td>
+            <td nowrap style="padding-left:8px;font-size:10px;color:#ffd93d;font-family:Arial,sans-serif;">${t.owner||''}</td>
+            <td nowrap style="padding-left:8px;font-size:10px;color:#ffd93d;font-weight:700;font-family:Arial,sans-serif;">${fmt(t.dueDate)}</td>
+          </tr></table>`).join('')}
+        </td></tr>` : ''}
+
+        ${dueSoon.length > 0 ? `
+        <tr><td style="padding:10px 16px;border-bottom:1px solid #2a2a4a;">
+          <div style="font-size:9px;font-weight:700;color:#6aa3ff;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;font-family:Arial,sans-serif;">&#128197; Coming Up — 3 Weeks (${dueSoon.length})</div>
+          ${dueSoon.map(t => `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:4px;"><tr>
+            <td style="font-size:11px;color:#e0e0e0;font-family:Arial,sans-serif;">${t.task}</td>
+            <td nowrap style="padding-left:8px;font-size:10px;color:#6aa3ff;font-family:Arial,sans-serif;">${t.owner||''}</td>
+            <td nowrap style="padding-left:8px;font-size:10px;color:#6aa3ff;font-weight:700;font-family:Arial,sans-serif;">${fmt(t.dueDate)}</td>
+          </tr></table>`).join('')}
+        </td></tr>` : ''}
+
+        ${completedThisWeek.length > 0 ? `
+        <tr><td style="padding:10px 16px;">
+          <div style="font-size:9px;font-weight:700;color:#00e8bb;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;font-family:Arial,sans-serif;">&#10003; Completed This Week (${completedThisWeek.length})</div>
+          ${completedThisWeek.map(t => `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:4px;"><tr>
+            <td width="16" style="color:#00e8bb;font-size:12px;font-family:Arial,sans-serif;">&#10003;</td>
+            <td style="font-size:11px;color:#888;font-family:Arial,sans-serif;text-decoration:line-through;">${t.task}</td>
+            <td nowrap style="padding-left:8px;font-size:10px;color:#888;font-family:Arial,sans-serif;">${t.owner||''}</td>
+          </tr></table>`).join('')}
+        </td></tr>` : ''}
+
+      </table>
+    </td></tr>`;
+  }
+
+  // Summary stats
+  const totalProjects = active.length;
+  const totalTasks = allProjectData.reduce((s,d) => s + d.total, 0);
+  const totalDone = allProjectData.reduce((s,d) => s + d.done, 0);
+  const totalOverdue = allProjectData.reduce((s,d) => s + d.overdue.length, 0);
+  const totalThisWeek = allProjectData.reduce((s,d) => s + d.dueThisWeek.length, 0);
+  const overallPct = totalTasks > 0 ? Math.round(totalDone/totalTasks*100) : 0;
+  const overallColor = overallPct===100?'#00e8bb':overallPct>=60?'#ffd93d':'#ff608a';
+
+  const html = `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office">
+<head><meta charset="utf-8"/><!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]--></head>
+<body style="margin:0;padding:0;background:#0f0f1a;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0f0f1a;">
+<tr><td align="center" style="padding:16px 8px;">
+<table width="680" cellpadding="0" cellspacing="0" border="0" style="max-width:680px;width:100%;">
+
+  <!-- Header -->
+  <tr><td style="padding-bottom:12px;">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a3e;border-radius:10px;border:1px solid #2a2a4a;">
+    <tr><td style="padding:24px 28px;">
+      <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;font-family:Arial,sans-serif;">${testMode?'&#x1F9EA; TEST &middot; ':''}R2S Internal Projects &middot; Weekly Update</div>
+      <div style="font-size:22px;font-weight:700;color:#ffffff;margin-bottom:4px;font-family:Arial,sans-serif;">General Internal Projects</div>
+      <div style="font-size:12px;color:#8899bb;font-family:Arial,sans-serif;">${dateStr}</div>
+    </td></tr>
+    </table>
+  </td></tr>
+
+  <!-- Summary tiles -->
+  <tr><td style="padding-bottom:12px;">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      ${[
+        { label:'Active projects', val:String(totalProjects), color:'#6aa3ff' },
+        { label:'Overall progress', val:`${overallPct}%`, color:overallColor },
+        { label:'Due this week', val:String(totalThisWeek), color:totalThisWeek>0?'#ffd93d':'#00e8bb' },
+        { label:'Overdue', val:String(totalOverdue), color:totalOverdue>0?'#ff608a':'#00e8bb' },
+      ].map((s,i) => `<td width="25%" style="padding:0 ${i<3?'6px':'0'} 0 0;vertical-align:top;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;">
+        <tr><td align="center" style="padding:14px 8px;">
+          <div style="font-size:20px;font-weight:700;color:${s.color};font-family:Arial,sans-serif;">${s.val}</div>
+          <div style="font-size:10px;color:#888;text-transform:uppercase;margin-top:4px;font-family:Arial,sans-serif;">${s.label}</div>
+        </td></tr></table>
+      </td>`).join('')}
+    </tr></table>
+  </td></tr>
+
+  <!-- Project cards -->
+  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+  ${projectCards}
+  </table>
+
+  <!-- Footer -->
+  <tr><td align="center" style="padding-top:8px;font-size:10px;color:#555577;font-family:Arial,sans-serif;line-height:1.6;">
+    Aurora &middot; R2S Project Management Intelligence &middot; Confidential<br/>
+    ${testMode ? '&#x1F9EA; TEST SEND &mdash; not sent to full recipient list' : 'Reply to this email to confirm task completion &mdash; Aurora will update automatically.'}
+  </td></tr>
+
+</table>
+</td></tr></table>
+</body></html>`;
+
+  const subject = `${testMode?'[TEST] ':''}[Aurora] Internal Projects — Weekly Update${totalOverdue>0?` ⚠️ ${totalOverdue} overdue`:''}`;
+  const recipients = testMode ? ['kandia@risk2solution.com'] : [...assignedEmails];
+
+  for (const r of recipients) {
+    await sendEmail(r, subject, html, false, [], true);
+  }
+  console.log(`[GenProjects] Weekly update sent to ${recipients.length} recipient(s) — ${totalProjects} projects, ${totalOverdue} overdue`);
+}
