@@ -477,6 +477,8 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
         <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
           <button class="btn btn-p" onclick="showNewGenericProjectModal()">+ New project</button>
           <button class="btn btn-g" onclick="showUploadExtractModal()">📎 Upload / paste to extract</button>
+          <button class="btn btn-g" onclick="api('/api/general-internal/report',{method:'POST'}).then(()=>showToast('Weekly update sent to project team'))">📊 Send weekly update</button>
+          <button onclick="testSend('general-internal',this)" style="background:none;border:1px solid var(--amber);color:var(--amber);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer">🧪 Test send to me</button>
         </div>
         <div id="generic-project-list"><div style="color:var(--text3);font-size:12px">Loading…</div></div>
       </div>
