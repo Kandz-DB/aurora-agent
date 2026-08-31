@@ -3201,6 +3201,7 @@ function renderInternalChecklist(project, checklist) {
             <div style="font-size:12px;color:${isDone ? 'var(--text3)' : 'var(--text)'};text-decoration:${isDone ? 'line-through' : 'none'};line-height:1.5">${item.task}</div>
             <div style="display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap">
               <span style="font-size:10px;padding:1px 7px;background:${ownerColor}22;color:${ownerColor};border-radius:10px;border:1px solid ${ownerColor}44">${item.owner}</span>
+              <button type="button" onclick="editChecklistOwner('${project.id}','${item.id}','${item.owner}')" title="Change owner" style="background:none;border:none;color:var(--text3);font-size:10px;cursor:pointer;padding:0 2px;opacity:0.6">✎</button>
               ${item.dueDate ? `<span style="font-size:10px;color:${isOverdue && !isDone ? 'var(--rose)' : 'var(--text3)'}">📅 ${item.dueDate}${isOverdue && !isDone ? ' — OVERDUE' : ''}</span>` : ''}
               ${isDone && item.completedAt ? `<span style="font-size:10px;color:var(--teal)">✓ ${new Date(item.completedAt).toLocaleDateString('en-AU',{day:'numeric',month:'short'})}</span>` : ''}
             </div>
@@ -3233,6 +3234,29 @@ async function toggleChecklistItem(projectId, itemId, btn) {
     const data = await api(`/api/internal/projects/${projectId}/checklist`);
     const project = internalProjects.find(p => p.id === projectId);
     if (project) renderInternalChecklist(project, data.checklist || []);
+  } catch(e) { showToast('Error: ' + e.message, 'var(--rose)'); }
+}
+
+async function editChecklistOwner(projectId, itemId, currentOwner) {
+  const staff = ['Dave Cohen','Diane Kruger','Cherry Abadeza','Janita Zhang','Dr Paul Johnston','Kandia Du Bruyn','Trainer'];
+  const newOwner = prompt(`Reassign task to:\n\n${staff.map((s,i)=>`${i+1}. ${s}`).join('\n')}\n\nCurrent: ${currentOwner}\nEnter name or number:`, currentOwner);
+  if (!newOwner || newOwner === currentOwner) return;
+  const resolved = isNaN(newOwner) ? newOwner.trim() : staff[parseInt(newOwner)-1];
+  if (!resolved || !staff.includes(resolved)) { showToast('Invalid staff member', 'var(--rose)'); return; }
+  const ownerEmails = {
+    'Dave Cohen':'dave.c@risk2solution.com','Diane Kruger':'diane.k@risk2solution.com',
+    'Cherry Abadeza': (typeof CHERRY_EMAIL !== 'undefined' ? CHERRY_EMAIL : 'cherry.a@risk2solution.com'),
+    'Janita Zhang':'janita.z@risk2solution.com','Dr Paul Johnston':'paul.j@risk2solution.com',
+    'Kandia Du Bruyn':'kandia@risk2solution.com','Trainer':'info@risk2solution.com',
+  };
+  try {
+    await api(`/api/internal/projects/${projectId}/checklist/${itemId}`, {
+      method: 'PUT', body: JSON.stringify({ owner: resolved, ownerEmail: ownerEmails[resolved] || 'info@risk2solution.com' })
+    });
+    showToast(`✓ Reassigned to ${resolved}`);
+    // Reload checklist
+    const data = await api(`/api/internal/projects/${projectId}/checklist`);
+    if (currentInternalProject) renderInternalChecklist(currentInternalProject, data.checklist || []);
   } catch(e) { showToast('Error: ' + e.message, 'var(--rose)'); }
 }
 
