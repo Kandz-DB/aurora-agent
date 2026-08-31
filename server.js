@@ -3949,7 +3949,7 @@ const IOP_CHECKLIST_TEMPLATE = [
   // PHASE 2 — Two weeks before program start
   { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Each Module', step: 8, group: 'Set up student access to systems',
     task: 'Create an Institute of Presilience (IoP) email address for each enrolled student (first module only — confirm access is active for subsequent modules).',
-    owner: 'Janita Zhang', trigger: 'module', daysOffset: -14 },
+    owner: 'Cherry Abadeza', trigger: 'module', daysOffset: -14 },
   { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Each Module', step: 8, group: 'Set up student access to systems',
     task: 'Confirm each student can access the cohort Teams Classroom using their IoP email. Test access (sign in, view channels, see this module files).',
     owner: 'Janita Zhang', trigger: 'module', daysOffset: -13 },
