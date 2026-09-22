@@ -4416,7 +4416,7 @@ async function sendInternalProjectStatusReport() {
             <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'};font-weight:600;flex-shrink:0">${i.owner.split(' ')[0]}</span>
             <span style="font-size:10px;color:#cc0033;font-weight:600;flex-shrink:0;min-width:50px;text-align:right">${fmt(i.dueDate)}</span>
           </div>`).join('')}
-        </div>` : `<div style="background:#00e8bb15;border:1px solid #00e8bb44;border-radius:8px;padding:10px 12px;margin-bottom:12px;text-align:center">
+        </div>` : `<div style="background:#f0fff8;border:1px solid #00c89966;border-radius:8px;padding:10px 12px;margin-bottom:12px;text-align:center">
           <span style="color:#00e8bb;font-size:12px;font-weight:600">✓ No overdue tasks</span>
         </div>`}
 
@@ -4705,15 +4705,15 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
 
     const fmt = d => new Date(d).toLocaleDateString('en-AU',{day:'numeric',month:'short'});
 
-    // Dark theme colour variables — must be before the html template
-    const BG    = '#0f0f1a';
-    const CARD  = '#1a1a2e';
-    const CARD2 = '#141428';
-    const BORDER= '#2a2a4a';
-    const TEXT  = '#e0e0e0';
-    const TEXT2 = '#aaaaaa';
-    const TEXT3 = '#666680';
-    const pctColor = pct>=80?'#00e8bb':pct>=50?'#ffd93d':'#ff608a';
+    // Light theme — works correctly in Outlook replies/forwards
+    const BG    = '#f4f6f9';
+    const CARD  = '#ffffff';
+    const CARD2 = '#f8f9fc';
+    const BORDER= '#e0e4ed';
+    const TEXT  = '#1a1a2e';
+    const TEXT2 = '#444466';
+    const TEXT3 = '#888899';
+    const pctColor = pct>=80?'#00a878':pct>=50?'#cc8800':'#cc2233';
 
     // Build Excel and get token before html (both referenced in template footer)
     let excelBuffer = null;
@@ -4743,7 +4743,7 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
 </style>
 </head>
 <body style="margin:0;padding:0;background:#0f0f1a;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0f0f1a;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f6f9;">
 <tr><td align="center" style="padding:16px 8px;">
 <table width="680" cellpadding="0" cellspacing="0" border="0" style="max-width:680px;width:100%;">
 
@@ -4857,7 +4857,7 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
   ${overdue.length > 0 ? `<tr><td style="padding-bottom:12px;">
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border:1px solid #ff386044;border-left:4px solid #ff3860;border-radius:8px;">
     <tr><td style="background:#ff386015;padding:10px 16px;border-radius:8px 8px 0 0;">
-      <span style="font-size:10px;font-weight:700;color:#ff608a;text-transform:uppercase;letter-spacing:1px;font-family:Arial,sans-serif;">&#9888; Overdue &mdash; Requires Immediate Attention (${overdue.length})</span>
+      <span style="font-size:10px;font-weight:700;color:#cc2233;text-transform:uppercase;letter-spacing:1px;font-family:Arial,sans-serif;">&#9888; Overdue &mdash; Requires Immediate Attention (${overdue.length})</span>
     </td></tr>
     ${overdue.map((item,ri) => `<tr><td style="padding:10px 16px;border-top:1px solid #2a2a4a;background:${ri%2===0?'#1a1a2e':'#141428'};">
       <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -4868,7 +4868,7 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
     </td></tr>`).join('')}
     </table>
   </td></tr>` : `<tr><td style="padding-bottom:12px;">
-    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#00e8bb15;border:1px solid #00e8bb44;border-radius:8px;">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0fff8;border:1px solid #00c89966;border-radius:8px;">
     <tr><td align="center" style="padding:14px;font-size:13px;font-weight:700;color:#00e8bb;font-family:Arial,sans-serif;">&#10003; No overdue tasks &mdash; great work!</td></tr>
     </table>
   </td></tr>`}
@@ -4877,7 +4877,7 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
   ${dueThisWeek.length > 0 ? `<tr><td style="padding-bottom:12px;">
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border:1px solid #ffd93d44;border-left:4px solid #ffd93d;border-radius:8px;">
     <tr><td style="background:#ffd93d15;padding:10px 16px;border-radius:8px 8px 0 0;">
-      <span style="font-size:10px;font-weight:700;color:#ffd93d;text-transform:uppercase;letter-spacing:1px;font-family:Arial,sans-serif;">&#128203; Due This Week (${dueThisWeek.length})</span>
+      <span style="font-size:10px;font-weight:700;color:#996600;text-transform:uppercase;letter-spacing:1px;font-family:Arial,sans-serif;">&#128203; Due This Week (${dueThisWeek.length})</span>
     </td></tr>
     ${dueThisWeek.map((item,ri) => `<tr><td style="padding:10px 16px;border-top:1px solid #2a2a4a;background:${ri%2===0?'#1a1a2e':'#141428'};">
       <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -4893,7 +4893,7 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
   ${dueSoon.length > 0 ? `<tr><td style="padding-bottom:12px;">
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border:1px solid #6aa3ff44;border-left:4px solid #6aa3ff;border-radius:8px;">
     <tr><td style="background:#6aa3ff15;padding:10px 16px;border-radius:8px 8px 0 0;">
-      <span style="font-size:10px;font-weight:700;color:#6aa3ff;text-transform:uppercase;letter-spacing:1px;font-family:Arial,sans-serif;">&#128197; Coming Up &mdash; Next 3 Weeks (${dueSoon.length})</span>
+      <span style="font-size:10px;font-weight:700;color:#3366cc;text-transform:uppercase;letter-spacing:1px;font-family:Arial,sans-serif;">&#128197; Coming Up &mdash; Next 3 Weeks (${dueSoon.length})</span>
     </td></tr>
     ${dueSoon.slice(0,8).map((item,ri) => `<tr><td style="padding:10px 16px;border-top:1px solid #2a2a4a;background:${ri%2===0?'#1a1a2e':'#141428'};">
       <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -4910,7 +4910,7 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
   ${completedThisWeek.length > 0 ? `<tr><td style="padding-bottom:12px;">
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border:1px solid #00e8bb44;border-left:4px solid #00e8bb;border-radius:8px;">
     <tr><td style="background:#00e8bb15;padding:10px 16px;border-radius:8px 8px 0 0;">
-      <span style="font-size:10px;font-weight:700;color:#00e8bb;text-transform:uppercase;letter-spacing:1px;font-family:Arial,sans-serif;">&#10003; Completed This Week (${completedThisWeek.length})</span>
+      <span style="font-size:10px;font-weight:700;color:#00a878;text-transform:uppercase;letter-spacing:1px;font-family:Arial,sans-serif;">&#10003; Completed This Week (${completedThisWeek.length})</span>
     </td></tr>
     ${completedThisWeek.map((item,ri) => `<tr><td style="padding:9px 16px;border-top:1px solid #2a2a4a;background:${ri%2===0?'#1a1a2e':'#141428'};">
       <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -5185,8 +5185,8 @@ app.post('/api/test/report/internal-leadership', async (req, res) => {
         <div style="font-size:11px;color:#6aa3ff;margin-bottom:12px">${programName} · <span style="color:${statusBadge.color}">${statusBadge.text}</span></div>
         <div style="margin-bottom:4px"><span style="font-size:11px;color:#aaaaaa">${totalDone}/${totalTasks} complete</span><span style="font-weight:700;color:${pctColor}">${pct}%</span></div>
         <div style="background:#2a2a4a;border-radius:4px;height:10px;margin-bottom:12px"><div style="width:${pct}%;background:${pctColor};height:10px;border-radius:4px"></div></div>
-        ${overdue.length>0?`<div style="background:#ff608a15;border:1px solid #ff608a44;border-radius:6px;padding:10px;margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:#ff608a;margin-bottom:6px">⚠ ${overdue.length} OVERDUE</div>${overdue.map(i=>`<div style="font-size:11px;color:#cccccc;margin-bottom:3px">• <b style="color:${ownerColors[i.owner]||'#aaa'}">${i.owner.split(' ')[0]}</b>: ${i.task.slice(0,70)} — <span style="color:#ff608a">${fmt(i.dueDate)}</span></div>`).join('')}</div>`:''}
-        ${dueThisWeek.length>0?`<div style="background:#ffd93d15;border:1px solid #ffd93d44;border-radius:6px;padding:10px"><div style="font-size:10px;font-weight:700;color:#ffd93d;margin-bottom:6px">📋 DUE THIS WEEK (${dueThisWeek.length})</div>${dueThisWeek.map(i=>`<div style="font-size:11px;color:#cccccc;margin-bottom:3px">• <b style="color:${ownerColors[i.owner]||'#aaa'}">${i.owner.split(' ')[0]}</b>: ${i.task.slice(0,70)}</div>`).join('')}</div>`:'<div style="font-size:11px;color:#00e8bb">✓ Nothing due this week</div>'}
+        ${overdue.length>0?`<div style="background:#ff608a15;border:1px solid #ff608a44;border-radius:6px;padding:10px;margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:#cc2233;margin-bottom:6px">⚠ ${overdue.length} OVERDUE</div>${overdue.map(i=>`<div style="font-size:11px;color:#cccccc;margin-bottom:3px">• <b style="color:${ownerColors[i.owner]||'#aaa'}">${i.owner.split(' ')[0]}</b>: ${i.task.slice(0,70)} — <span style="color:#ff608a">${fmt(i.dueDate)}</span></div>`).join('')}</div>`:''}
+        ${dueThisWeek.length>0?`<div style="background:#ffd93d15;border:1px solid #ffd93d44;border-radius:6px;padding:10px"><div style="font-size:10px;font-weight:700;color:#996600;margin-bottom:6px">📋 DUE THIS WEEK (${dueThisWeek.length})</div>${dueThisWeek.map(i=>`<div style="font-size:11px;color:#cccccc;margin-bottom:3px">• <b style="color:${ownerColors[i.owner]||'#aaa'}">${i.owner.split(' ')[0]}</b>: ${i.task.slice(0,70)}</div>`).join('')}</div>`:'<div style="font-size:11px;color:#00e8bb">✓ Nothing due this week</div>'}
       </div>`;
     }
     const html = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office"><body style="margin:0;padding:0;background:#0f0f1a;font-family:Arial,sans-serif"><table width="700" cellpadding="20" cellspacing="0" border="0" align="center" style="max-width:700px;"><tr><td>
@@ -5527,7 +5527,7 @@ async function sendPMChecklistFollowUp() {
 <html xmlns:o="urn:schemas-microsoft-com:office:office">
 <head><meta charset="utf-8"/><!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]--></head>
 <body style="margin:0;padding:0;background:#0f0f1a;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0f0f1a;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f6f9;">
 <tr><td align="center" style="padding:16px 8px;">
 <table width="680" cellpadding="0" cellspacing="0" border="0" style="max-width:680px;width:100%;">
 
@@ -6035,7 +6035,7 @@ async function sendGeneralInternalProjectsUpdate(testMode = false) {
 <html xmlns:o="urn:schemas-microsoft-com:office:office">
 <head><meta charset="utf-8"/><!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]--></head>
 <body style="margin:0;padding:0;background:#0f0f1a;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0f0f1a;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f6f9;">
 <tr><td align="center" style="padding:16px 8px;">
 <table width="680" cellpadding="0" cellspacing="0" border="0" style="max-width:680px;width:100%;">
 
