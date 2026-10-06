@@ -903,17 +903,19 @@ async function readConsultantReplies() {
                          fromEmail.toLowerCase().endsWith('@presilience.com');
       const isFromDiane = fromEmail.toLowerCase() === 'diane.k@risk2solution.com';
 
-      // ── Special case: Diane forwarding a new agreement/contract ─────────────
-      // Catches: attachment + agreement keywords, OR body mentions a new client/org
+      // ── Special case: any R2S staff forwarding a project acceptance/contract ──
       const hasAttachment = msg.hasAttachments || false;
-      const mentionsNewProject = /agreement|contract|proposal|signed|new client|new project|new engagement/i.test(subject + ' ' + bodyText.slice(0, 500));
+      const mentionsNewProject = /agreement|contract|proposal|signed|new client|new project|new engagement|accepted|acceptance|confirmed|please proceed|would like to proceed|purchase order|po number|invoice details/i.test(subject + ' ' + bodyText.slice(0, 1000));
+      const isForwarded = /^(fw:|fwd:|fw :|fwd :)/i.test(subject) || /-----original message-----|from:.*sent:/i.test(bodyText.slice(0, 500));
 
-      // Catch agreement emails from Diane — with OR without attachment flag
-      // (Graph API hasAttachments can be unreliable for forwarded emails)
-      const isDianeAgreement = isFromDiane && mentionsNewProject;
+      // Catch project emails forwarded by any R2S staff member
+      const isStaffForward = isInternal && (mentionsNewProject || isForwarded);
+
+      // Keep backward compat — Diane check still works, now extended to all staff
+      const isDianeAgreement = isStaffForward;
 
       if (isDianeAgreement) {
-        console.log(`[Poll] Agreement email from Diane — attempting to auto-create project from attachment`);
+        console.log(`[Poll] Project email forwarded by ${fromEmail} — attempting to auto-create project`);
         let projectCreated = false;
 
         // Try to download and process the PDF attachment automatically
