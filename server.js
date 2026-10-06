@@ -345,6 +345,107 @@ ${combinedText}`,
   }
 }
 
+// ── Reconcile proposal with client acceptance email ───────────────────────────
+// Used when we have a proposal PDF AND an email body with client's selections
+async function reconcileProposalWithAcceptance(proposalText, acceptanceEmailText, filename, inlineImageBase64 = null) {
+  const TASK_MODELS_local = { contract_extract: 'claude-sonnet-4-6' };
+
+  // Build content array for the API call
+  const userContent = [];
+
+  // Add inline image if we have one (client's acceptance screenshot)
+  if (inlineImageBase64) {
+    userContent.push({
+      type: 'text',
+      text: 'The following image is from the client\'s acceptance email and shows what they have selected/confirmed:'
+    });
+    userContent.push({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: inlineImageBase64 }
+    });
+  }
+
+  userContent.push({
+    type: 'text',
+    text: `You are reviewing a proposal and a client acceptance email for Risk 2 Solution (R2S).
+
+TASK: The proposal below contains multiple options, dates, or services. The client acceptance email confirms which specific items they have selected. You must extract ONLY what the client confirmed — not all options from the proposal.
+
+IMPORTANT RULES:
+- If the client says "please proceed with X" or lists specific dates/services, use ONLY those
+- If the client accepts in full with no changes, use the full proposal
+- Never include options or dates the client did NOT select
+- The contract value should reflect ONLY the selected services total
+- If there is an image showing the client's selections, prioritise that above the text
+
+CLIENT ACCEPTANCE EMAIL:
+---
+${acceptanceEmailText.slice(0, 6000)}
+---
+
+ORIGINAL PROPOSAL (${filename}):
+---
+${proposalText.slice(0, 10000)}
+---
+
+Return a valid JSON object with exactly these keys (no markdown, no explanation):
+{
+  "organisationName": "client organisation full name",
+  "clientName": "client organisation name for display",
+  "projectName": "project title",
+  "clientContact": "primary client contact name",
+  "clientEmail": "primary client contact email",
+  "clientPhone": "client phone number",
+  "value": "TOTAL value of ONLY the selected services — sum of what client confirmed",
+  "contractStart": "start date of selected services",
+  "dueDate": "end date of selected services",
+  "summary": "description of ONLY the services the client selected",
+  "deliverables": "ONLY the specific deliverables/services the client accepted",
+  "milestones": "key dates from the client's confirmed selections only",
+  "timeline": "timeline based on client-selected dates only",
+  "invoicingNotes": "payment terms from the proposal",
+  "consultant": "R2S consultant or staff member assigned",
+  "consultantEmail": "consultant email if mentioned",
+  "flightsRequired": "yes or no",
+  "accommodationRequired": "yes or no",
+  "notes": "any special conditions, the client selected specific options only — note which options were NOT selected",
+  "clientSelectionConfident": "yes if client clearly stated what they want, no if unclear",
+  "selectionSummary": "one sentence describing what the client specifically selected vs what was in the full proposal"
+}`
+  });
+
+  try {
+    const spend = await db.getSpend();
+    if (spend.total >= parseFloat(process.env.MONTHLY_SPEND_CAP_USD || '20')) throw new Error('MONTHLY_CAP_REACHED');
+
+    const response = await require('@anthropic-ai/sdk').default
+      ? null // handled below
+      : null;
+
+    // Use the client directly for vision support
+    const result = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2000,
+      messages: [{ role: 'user', content: userContent }]
+    });
+
+    const text = result.content[0]?.text || '';
+    // Track spend
+    const inputTokens = result.usage?.input_tokens || 0;
+    const outputTokens = result.usage?.output_tokens || 0;
+    const cost = (inputTokens / 1000000 * 3.00) + (outputTokens / 1000000 * 15.00);
+    await db.addSpend(cost, 'reconcile_contract');
+
+    const clean = text.replace(/```json|```/g, '').trim();
+    const jsonMatch = clean.match(/\{[\s\S]*\}/);
+    return jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(clean);
+  } catch(e) {
+    console.error('[Reconcile] Error:', e.message);
+    // Fall back to basic extraction from email body
+    return analyseContract(acceptanceEmailText + '\n\n' + proposalText, filename);
+  }
+}
+
 // ── Consultant / trainer briefing email ──────────────────────────────────────
 async function sendConsultantBriefing(project, extracted, prebuiltContext) {
   const DIANE = 'diane.k@risk2solution.com';
@@ -919,7 +1020,8 @@ async function readConsultantReplies() {
         let projectCreated = false;
 
         // Try to download and process the PDF attachment automatically
-        if (hasAttachment) {
+        // Always attempt even if hasAttachments=false — Graph API flag is unreliable for forwarded emails
+        if (true) {
           try {
             // Get attachments list
             const attRes = await axios.get(
@@ -936,10 +1038,9 @@ async function readConsultantReplies() {
 
             if (pdfAtt && pdfAtt.contentBytes) {
               console.log(`[Poll] Found attachment: ${pdfAtt.name} (${pdfAtt.size} bytes)`);
-              // Decode base64 attachment
               const pdfBuffer = Buffer.from(pdfAtt.contentBytes, 'base64');
 
-              // Extract text from PDF using pdf-parse
+              // Extract text from PDF
               let rawText = '';
               try {
                 const pdfParse = require('pdf-parse');
@@ -948,17 +1049,46 @@ async function readConsultantReplies() {
                 console.log(`[Poll] Extracted ${rawText.length} chars from ${pdfAtt.name}`);
               } catch(pdfErr) {
                 console.error('[Poll] PDF parse error:', pdfErr.message);
-                // Try treating as text if not a real PDF
                 rawText = pdfBuffer.toString('utf8').slice(0, 20000);
               }
 
               if (rawText.length > 100) {
-                console.log(`[Poll] Running contract analysis on ${pdfAtt.name}...`);
-                // Run contract analysis with timeout protection
-                const extracted = await Promise.race([
-                  analyseContract(rawText, pdfAtt.name),
-                  new Promise((_, reject) => setTimeout(() => reject(new Error('Analysis timeout')), 90000))
-                ]);
+                // Check if email body has client acceptance/selection content
+                const hasClientAcceptance = /pleased to confirm|would like to proceed|please proceed|accepted|selected|confirmed|approval|approve/i.test(bodyText.slice(0, 3000));
+
+                // Try to find inline images (client's selection screenshot)
+                let inlineImageBase64 = null;
+                try {
+                  const inlineAtt = attachments.find(a =>
+                    a['@odata.type'] === '#microsoft.graph.fileAttachment' &&
+                    (a.contentType?.startsWith('image/') || a.isInline) &&
+                    a.contentBytes
+                  );
+                  if (inlineAtt) {
+                    inlineImageBase64 = inlineAtt.contentBytes;
+                    console.log(`[Poll] Found inline image: ${inlineAtt.name} — will use for reconciliation`);
+                  }
+                } catch(imgErr) { console.error('[Poll] Inline image error:', imgErr.message); }
+
+                let extracted;
+                if (hasClientAcceptance || inlineImageBase64) {
+                  // Use reconciliation — proposal vs client acceptance
+                  console.log(`[Poll] Client acceptance detected — reconciling proposal with acceptance email...`);
+                  extracted = await Promise.race([
+                    reconcileProposalWithAcceptance(rawText, bodyText, pdfAtt.name, inlineImageBase64),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Reconcile timeout')), 90000))
+                  ]);
+                  if (extracted?.selectionSummary) {
+                    console.log(`[Poll] Reconciled: ${extracted.selectionSummary}`);
+                  }
+                } else {
+                  // Standard full proposal extraction
+                  console.log(`[Poll] Running standard contract analysis on ${pdfAtt.name}...`);
+                  extracted = await Promise.race([
+                    analyseContract(rawText, pdfAtt.name),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Analysis timeout')), 90000))
+                  ]);
+                }
                 if (extracted && extracted.clientName) {
                   // Check for duplicate — must match BOTH client name AND project name
                   // Same client can have multiple different projects
@@ -1013,13 +1143,74 @@ async function readConsultantReplies() {
           }
         }
 
-        // Fallback — if no attachment processed, prompt Diane to upload manually
+        // Fallback — try extracting from email body text if no PDF was processed
+        if (!projectCreated && bodyText.length > 200) {
+          console.log('[Poll] No PDF found — attempting to extract project from email body...');
+          try {
+            const extracted = await Promise.race([
+              analyseContract(bodyText.slice(0, 12000), subject),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 60000))
+            ]);
+            if (extracted && extracted.clientName) {
+              const existing = projects.find(p => {
+                const sameClient = p.clientName?.toLowerCase().includes(extracted.clientName.toLowerCase().slice(0,8)) ||
+                  extracted.clientName.toLowerCase().includes((p.clientName||'').toLowerCase().slice(0,8));
+                if (!sameClient) return false;
+                const extractedProject = (extracted.projectName || '').toLowerCase();
+                const existingProject = (p.projectName || '').toLowerCase();
+                if (!extractedProject || !existingProject) return false;
+                return extractedProject.slice(0,15) === existingProject.slice(0,15) ||
+                  existingProject.includes(extractedProject.slice(0,12)) ||
+                  extractedProject.includes(existingProject.slice(0,12));
+              });
+              if (!existing) {
+                const projectId = `p_${Date.now()}`;
+                const newProject = {
+                  id: projectId,
+                  type: 'standard',
+                  clientName: extracted.clientName,
+                  clientEmail: extracted.clientEmail || fromEmail,
+                  projectName: extracted.projectName || subject,
+                  contractValue: extracted.contractValue || null,
+                  serviceProvision: extracted.serviceProvision || '',
+                  invoicingTerms: extracted.invoicingTerms || '',
+                  deliverables: extracted.deliverables || [],
+                  milestones: extracted.milestones || [],
+                  timeline: extracted.timeline || '',
+                  consultant: extracted.consultant || '',
+                  status: 'Active',
+                  phase: 0,
+                  notes: `Auto-created from forwarded email: ${subject}\nForwarded by: ${fromEmail}`,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                };
+                projects.push(newProject);
+                await db.saveProjects(projects);
+                await db.logActivity(projectId, { type: 'created', summary: `Project auto-created from forwarded email body: ${subject}` });
+                await sendEmail('diane.k@risk2solution.com',
+                  `[Aurora] New project created from email: ${extracted.clientName}`,
+                  `Aurora has automatically created a new project from a forwarded email.\n\nClient: ${extracted.clientName}\nProject: ${extracted.projectName || subject}\nValue: ${extracted.contractValue || 'TBC'}\nForwarded by: ${fromEmail}\n\nPlease review and update in Aurora:\n${process.env.FRONTEND_URL || ''}\n\nAurora\nR2S Project Management Intelligence`,
+                  true
+                );
+                console.log(`[Poll] Project auto-created from email body: ${extracted.clientName}`);
+                projectCreated = true;
+              } else {
+                console.log(`[Poll] Duplicate detected — project already exists for ${extracted.clientName}`);
+                projectCreated = true;
+              }
+            }
+          } catch(bodyErr) {
+            console.error('[Poll] Email body extraction error:', bodyErr.message);
+          }
+        }
+
+        // Final fallback — prompt Diane to create manually
         if (!projectCreated) {
           const clientHint = subject.replace(/new (project|agreement|proposal) (for )?/i,'').trim();
-          const valueHint = bodyText.match(/\$([\d,]+)/)?.[0] || '';
+          const valueHint = bodyText.match(/AUD[\s$]*([\d,]+)|USD[\s$]*([\d,]+)|\$([\d,]+)/)?.[0] || '';
           await sendEmail('diane.k@risk2solution.com',
-            `[Aurora] New project detected — please upload contract: ${clientHint}`,
-            `Hi Diane,\n\nAurora detected a new client agreement but could not automatically process the attachment.\n\nSubject: ${subject}${valueHint ? '\nValue mentioned: ' + valueHint : ''}\n\nPlease upload the contract manually:\n${process.env.FRONTEND_URL || ''}\n→ Projects → New Project → Upload Contract\n\nAurora\nR2S Project Management Intelligence`,
+            `[Aurora] New project detected — please review: ${clientHint}`,
+            `Hi Diane,\n\nAurora detected a forwarded project email from ${fromEmail} but could not automatically extract enough details to create a project.\n\nSubject: ${subject}${valueHint ? '\nValue mentioned: ' + valueHint : ''}\n\nPlease create the project manually in Aurora:\n${process.env.FRONTEND_URL || ''}\n→ Projects → New Project\n\nEmail summary:\n${bodyText.slice(0, 500)}\n\nAurora\nR2S Project Management Intelligence`,
             true
           );
         }
