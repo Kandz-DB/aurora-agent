@@ -2,6 +2,7 @@
 require('dotenv').config();
 
 const express   = require('express');
+const PDFDocument = require('pdfkit');
 const cors      = require('cors');
 const fs        = require('fs');
 const path      = require('path');
@@ -227,16 +228,38 @@ async function saveDraftEmail(draft) {
         ccList.push({ emailAddress: { address: draft.ccEmail } });
       }
 
-      await axios.post(
-        `https://graph.microsoft.com/v1.0/users/${fromMailbox}/messages`,
-        {
-          subject: draft.subject,
-          body: { contentType: 'Text', content: draft.body },
-          toRecipients: [{ emailAddress: { address: draft.toEmail || fromMailbox } }],
-          ...(ccList.length > 0 ? { ccRecipients: ccList } : {}),
+      const messagePayload = {
+        subject: draft.subject,
+        body: {
+          contentType: draft.isHtml ? 'HTML' : 'Text',
+          content: draft.body
         },
+        toRecipients: [{ emailAddress: { address: draft.toEmail || fromMailbox } }],
+        ...(ccList.length > 0 ? { ccRecipients: ccList } : {}),
+      };
+
+      // Create the draft message first
+      const msgRes = await axios.post(
+        `https://graph.microsoft.com/v1.0/users/${fromMailbox}/messages`,
+        messagePayload,
         { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 15000 }
       );
+
+      // Add attachment if provided
+      if (draft.attachment && msgRes.data?.id) {
+        const msgId = msgRes.data.id;
+        await axios.post(
+          `https://graph.microsoft.com/v1.0/users/${fromMailbox}/messages/${msgId}/attachments`,
+          {
+            '@odata.type': '#microsoft.graph.fileAttachment',
+            name: draft.attachment.name,
+            contentType: draft.attachment.contentType || 'application/octet-stream',
+            contentBytes: Buffer.from(draft.attachment.content).toString('base64'),
+          },
+          { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+        );
+        console.log(`[Email] Attachment added: ${draft.attachment.name}`);
+      }
       console.log(`[Email] Draft saved to Outlook: ${draft.subject}`);
     } catch (err) {
       console.error('[Email] Draft save failed:', err.message);
@@ -2824,91 +2847,518 @@ R2S Project Management Intelligence`,
 }
 
 // ── Client onboarding email ───────────────────────────────────────────────────
+// ── R2S Branded Fillable PDF Onboarding Form ──────────────────────────────────
+function buildOnboardingPDF(opts = {}) {
+  return new Promise((resolve, reject) => {
+    const {
+      clientName = 'Client',
+      projectName = 'Your Engagement',
+      consultant = '',
+      today = new Date().toLocaleDateString('en-AU', { day:'numeric', month:'long', year:'numeric' })
+    } = opts;
+
+    const R2S_RED   = '#D12329';
+    const R2S_DARK  = '#333333';
+    const R2S_MID   = '#666666';
+    const R2S_LIGHT = '#E0DEDE';
+    const R2S_WHITE = '#FFFFFF';
+    const FIELD_BG  = '#FAFAFA';
+    const FIELD_BDR = '#CCCCCC';
+    const W = 595.28, H = 841.89;
+    const MARGIN = 51; // ~18mm
+    const CONTENT_W = W - 2 * MARGIN;
+
+    const doc = new PDFDocument({ size: 'A4', margin: 0, info: {
+      Title: `R2S Client Onboarding Form — ${clientName}`,
+      Author: 'Risk 2 Solution Group',
+      Subject: `Client Onboarding Form — ${projectName}`,
+    }});
+
+    const chunks = [];
+    doc.on('data', c => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    let y = 0;
+
+    // Header
+    doc.rect(0, 0, W, 11).fill(R2S_RED);
+    doc.rect(0, 11, W, 107).fill(R2S_WHITE);
+
+    // Logo
+    const logoPath = path.join(__dirname, 'public', 'logo.png');
+    const fallbackLogo = '/mnt/user-data/uploads/Risk_2_Solution_highres.png';
+    const logoFile = require('fs').existsSync(logoPath) ? logoPath :
+                     require('fs').existsSync(fallbackLogo) ? fallbackLogo : null;
+    if (logoFile) {
+      try { doc.image(logoFile, MARGIN, 20, { height: 40 }); } catch(e) {}
+    } else {
+      doc.font('Helvetica-Bold').fontSize(20).fillColor(R2S_RED)
+         .text('R2S', MARGIN, 25, { lineBreak: false });
+      doc.font('Helvetica').fontSize(8).fillColor(R2S_MID)
+         .text('RISK 2 SOLUTION GROUP', MARGIN, 50, { lineBreak: false });
+    }
+
+    doc.font('Helvetica-Bold').fontSize(15).fillColor(R2S_DARK)
+       .text('Client Onboarding Form', 0, 28, { align:'right', width: W - MARGIN, lineBreak:false });
+    doc.font('Helvetica').fontSize(9).fillColor(R2S_MID)
+       .text(projectName, 0, 50, { align:'right', width: W - MARGIN, lineBreak:false })
+       .text(clientName,  0, 63, { align:'right', width: W - MARGIN, lineBreak:false });
+    if (today) doc.text(today, 0, 76, { align:'right', width: W - MARGIN, lineBreak:false });
+    doc.moveTo(MARGIN, 111).lineTo(W - MARGIN, 111).lineWidth(1.5).stroke(R2S_RED);
+    y = 120;
+
+    // Intro box
+    doc.rect(MARGIN, y, CONTENT_W, 36).fill(R2S_LIGHT);
+    doc.rect(MARGIN, y, 8, 36).fill(R2S_RED);
+    doc.font('Helvetica').fontSize(8.5).fillColor(R2S_DARK)
+       .text('Please complete all sections and return this form to diane.k@risk2solution.com', MARGIN + 14, y + 9, { lineBreak:false })
+       .text('For assistance: Diane Kruger  |  P: 1300 459 970  |  M: +61 415 748 747', MARGIN + 14, y + 22, { lineBreak:false });
+    y += 46;
+
+    const half = CONTENT_W / 2 - 4;
+    const third = CONTENT_W / 3 - 4;
+
+    function secHeader(num, title) {
+      doc.rect(MARGIN, y, CONTENT_W, 20).fill(R2S_DARK);
+      doc.rect(MARGIN, y, 10, 20).fill(R2S_RED);
+      doc.font('Helvetica-Bold').fontSize(9).fillColor(R2S_WHITE)
+         .text(`${num}.  ${title.toUpperCase()}`, MARGIN + 16, y + 6, { lineBreak:false });
+      y += 28;
+    }
+    function lbl(text, x, yy) {
+      doc.font('Helvetica-Bold').fontSize(7).fillColor(R2S_MID).text(text.toUpperCase(), x, yy, { lineBreak:false });
+    }
+    function tf(x, yy, w, h = 20) {
+      doc.rect(x, yy, w, h).fill(FIELD_BG).rect(x, yy, w, h).lineWidth(0.5).stroke(FIELD_BDR);
+    }
+    function ta(x, yy, w, h) {
+      doc.rect(x, yy, w, h).fill(FIELD_BG).rect(x, yy, w, h).lineWidth(0.5).stroke(FIELD_BDR);
+    }
+    function cb(x, yy, label) {
+      const sz = 11;
+      doc.rect(x, yy, sz, sz).fill(R2S_WHITE).rect(x, yy, sz, sz).lineWidth(0.75).stroke(R2S_RED);
+      doc.font('Helvetica').fontSize(9).fillColor(R2S_DARK).text(label, x + sz + 5, yy + 1, { lineBreak:false });
+      return x + sz + 6 + doc.widthOfString(label) + 14;
+    }
+    function prefill(text, x, yy, w) {
+      if (!text) return;
+      doc.font('Helvetica').fontSize(9).fillColor(R2S_DARK).text(text, x + 4, yy + 5, { lineBreak:false, width: w - 8, ellipsis:true });
+    }
+
+    // Section 1 — Project Details
+    secHeader('1', 'Project Details');
+    lbl('Project Name', MARGIN, y); lbl('Client Organisation', MARGIN + half + 8, y); y += 9;
+    tf(MARGIN, y, half); tf(MARGIN + half + 8, y, half);
+    prefill(projectName, MARGIN, y, half); prefill(clientName, MARGIN + half + 8, y, half);
+    y += 30;
+    if (consultant) {
+      lbl('Assigned R2S Consultant / Trainer', MARGIN, y); y += 9;
+      tf(MARGIN, y, CONTENT_W); prefill(consultant, MARGIN, y, CONTENT_W); y += 30;
+    }
+
+    // Section 2 — Primary Contact
+    secHeader('2', 'Primary Contact Details');
+    lbl('Full Name *', MARGIN, y); lbl('Position / Title', MARGIN + half + 8, y); y += 9;
+    tf(MARGIN, y, half); tf(MARGIN + half + 8, y, half); y += 30;
+    lbl('Email Address *', MARGIN, y); lbl('Phone Number *', MARGIN + half + 8, y); y += 9;
+    tf(MARGIN, y, half); tf(MARGIN + half + 8, y, half); y += 32;
+
+    // Section 3 — Reporting Frequency
+    secHeader('3', 'Update Report Frequency');
+    doc.font('Helvetica').fontSize(8.5).fillColor(R2S_DARK)
+       .text('How often would you like to receive project status updates?', MARGIN, y, { lineBreak:false }); y += 13;
+    let cx = MARGIN;
+    for (const l of ['Weekly', 'Fortnightly', 'Monthly', 'Ad hoc / as required']) cx = cb(cx, y, l);
+    y += 24;
+
+    // Section 4 — PO
+    secHeader('4', 'Purchase Order (PO) Requirements');
+    doc.font('Helvetica').fontSize(8.5).fillColor(R2S_DARK)
+       .text('Is a Purchase Order required for invoicing?', MARGIN, y, { lineBreak:false }); y += 13;
+    cb(MARGIN, y, 'No — PO not required'); cb(MARGIN + 110, y, 'Yes — PO required');
+    y += 18; lbl('PO Number (complete if PO required)', MARGIN + 110, y); y += 9;
+    tf(MARGIN + 110, y, CONTENT_W - 110); y += 32;
+
+    // Section 5 — Accounts Payable
+    secHeader('5', 'Accounts Payable Contact');
+    lbl('Contact Name', MARGIN, y); lbl('Email Address', MARGIN + half + 8, y); y += 9;
+    tf(MARGIN, y, half); tf(MARGIN + half + 8, y, half); y += 30;
+    lbl('Phone Number', MARGIN, y); lbl('Invoice / Postal Address', MARGIN + half + 8, y); y += 9;
+    tf(MARGIN, y, half); tf(MARGIN + half + 8, y, half); y += 32;
+
+    // Section 6 — Kick-off Meeting
+    secHeader('6', 'Preferred Kick-off Meeting Dates');
+    doc.font('Helvetica').fontSize(8.5).fillColor(R2S_DARK)
+       .text('Please provide three preferred date options — we will confirm the most suitable time.', MARGIN, y, { lineBreak:false }); y += 13;
+    lbl('Option 1', MARGIN, y); lbl('Option 2', MARGIN + third + 8, y); lbl('Option 3', MARGIN + 2*(third+8), y); y += 9;
+    tf(MARGIN, y, third); tf(MARGIN + third + 8, y, third); tf(MARGIN + 2*(third+8), y, third); y += 28;
+    doc.font('Helvetica').fontSize(8.5).fillColor(R2S_DARK)
+       .text('Preferred meeting format:', MARGIN, y, { lineBreak:false }); y += 13;
+    cx = MARGIN;
+    for (const l of ['Video call (Teams / Zoom)', 'Phone call', 'On-site']) cx = cb(cx, y, l);
+    y += 24;
+
+    // Section 7 — Additional Info
+    secHeader('7', 'Additional Information & Special Requirements');
+    doc.font('Helvetica').fontSize(8.5).fillColor(R2S_DARK)
+       .text('Any special requirements, WHS/site access considerations, or other information:', MARGIN, y, { lineBreak:false }); y += 11;
+    ta(MARGIN, y, CONTENT_W, 50); y += 62;
+
+    // Declaration
+    doc.rect(MARGIN, y, CONTENT_W, 58).fill(R2S_LIGHT);
+    doc.rect(MARGIN, y, 8, 58).fill(R2S_RED);
+    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(R2S_DARK).text('DECLARATION', MARGIN + 14, y + 8, { lineBreak:false });
+    doc.font('Helvetica').fontSize(8).fillColor(R2S_DARK)
+       .text('By completing and returning this form, I confirm the details provided are accurate and', MARGIN + 14, y + 20, { lineBreak:false })
+       .text('authorise Risk 2 Solution Group to proceed with project set-up on this basis.', MARGIN + 14, y + 31, { lineBreak:false });
+    lbl('Authorised by (Name)', MARGIN + 14, y + 43); lbl('Date', MARGIN + half + 8, y + 43);
+    tf(MARGIN + 14, y + 51, half - 14); tf(MARGIN + half + 8, y + 51, half);
+    y += 70;
+
+    // Footer
+    const fY = H - 45;
+    doc.rect(0, fY, W, 45).fill(R2S_DARK);
+    doc.rect(0, H - 8, W, 8).fill(R2S_RED);
+    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(R2S_WHITE)
+       .text('Diane Kruger  |  Corporate Operations Lead  |  Risk 2 Solution Group', MARGIN, fY + 10, { lineBreak:false });
+    doc.font('Helvetica').fontSize(7.5).fillColor(R2S_LIGHT)
+       .text('P: 1300 459 970  |  M: +61 415 748 747  |  E: diane.k@risk2solution.com  |  W: www.risk2solution.com', MARGIN, fY + 22, { lineBreak:false });
+    doc.font('Helvetica').fontSize(7).fillColor('#CC6666')
+       .text('PROTECTING WHAT COUNTS', W - MARGIN - 105, fY + 10, { lineBreak:false });
+
+    doc.end();
+  });
+}
+
+function buildOnboardingFormHtml(project) {
+  const clientName = project.clientName || 'Client';
+  const projectName = project.projectName || 'Your Engagement';
+  const today = new Date().toLocaleDateString('en-AU', { day:'numeric', month:'long', year:'numeric' });
+
+  return `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office">
+<head><meta charset="utf-8"/><title>R2S Client Onboarding Form</title>
+<style>
+  body { margin:0; padding:0; background:#f5f6fa; font-family:Arial,sans-serif; }
+  .page { max-width:740px; margin:30px auto; background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 2px 16px rgba(0,0,0,.10); }
+  .header { background:#1a1a2e; padding:32px 40px 24px; }
+  .logo-text { font-size:28px; font-weight:700; color:#fff; letter-spacing:2px; }
+  .logo-sub { font-size:11px; color:#6aa3ff; text-transform:uppercase; letter-spacing:3px; margin-top:4px; }
+  .header-title { font-size:18px; color:#fff; margin-top:20px; font-weight:400; }
+  .header-sub { font-size:13px; color:#8899bb; margin-top:6px; }
+  .body { padding:36px 40px; }
+  .intro { font-size:13px; color:#444; line-height:1.7; margin-bottom:28px; padding:16px 20px; background:#f0f4ff; border-left:4px solid #3366cc; border-radius:4px; }
+  .section { margin-bottom:28px; }
+  .section-title { font-size:11px; font-weight:700; color:#3366cc; text-transform:uppercase; letter-spacing:1.5px; margin-bottom:14px; padding-bottom:6px; border-bottom:2px solid #e8edf8; }
+  .field-row { display:flex; gap:16px; margin-bottom:12px; }
+  .field { flex:1; }
+  .field label { display:block; font-size:11px; color:#666; font-weight:600; margin-bottom:5px; text-transform:uppercase; letter-spacing:.5px; }
+  .field-input { width:100%; border:1px solid #d0d8e8; border-radius:5px; padding:9px 12px; font-size:13px; color:#333; background:#fafbfd; box-sizing:border-box; }
+  .option-group { margin-bottom:10px; }
+  .option { display:flex; align-items:center; gap:10px; margin-bottom:8px; padding:10px 14px; border:1px solid #e0e6f0; border-radius:6px; cursor:pointer; }
+  .option:hover { background:#f0f4ff; border-color:#3366cc; }
+  .checkbox { width:18px; height:18px; border:2px solid #3366cc; border-radius:4px; display:inline-block; flex-shrink:0; }
+  .option-label { font-size:13px; color:#333; }
+  .option-input { flex:1; border:none; border-bottom:1px solid #ccc; background:transparent; font-size:13px; padding:2px 6px; color:#333; outline:none; }
+  textarea.field-input { height:80px; resize:vertical; }
+  .footer { background:#f0f4ff; padding:24px 40px; border-top:1px solid #e0e6f0; }
+  .return-note { font-size:12px; color:#555; line-height:1.6; }
+  .return-note strong { color:#1a1a2e; }
+  .sig { margin-top:16px; padding-top:16px; border-top:1px solid #dde4f0; }
+  .sig-name { font-size:14px; font-weight:700; color:#1a1a2e; }
+  .sig-title { font-size:12px; color:#666; margin-top:2px; }
+  .sig-contact { font-size:12px; color:#3366cc; margin-top:6px; }
+  .badge { display:inline-block; background:#e8f0ff; color:#3366cc; font-size:10px; font-weight:700; padding:3px 10px; border-radius:10px; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <div class="logo-text">R2S</div>
+    <div class="logo-sub">Risk 2 Solution Group</div>
+    <div class="header-title">Client Onboarding Form</div>
+    <div class="header-sub">${projectName} &nbsp;|&nbsp; ${clientName} &nbsp;|&nbsp; ${today}</div>
+  </div>
+
+  <div class="body">
+    <div class="intro">
+      Please complete this form and return it to <strong>diane.k@risk2solution.com</strong> at your earliest convenience so we can set up your project and get started. All fields marked with a selection are clickable.
+    </div>
+
+    <!-- PRIMARY CONTACT -->
+    <div class="section">
+      <div class="section-title">1. Primary Contact Details</div>
+      <div class="field-row">
+        <div class="field">
+          <label>Full Name</label>
+          <input class="field-input" type="text" placeholder=""/>
+        </div>
+        <div class="field">
+          <label>Position / Title</label>
+          <input class="field-input" type="text" placeholder=""/>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Email Address</label>
+          <input class="field-input" type="email" placeholder=""/>
+        </div>
+        <div class="field">
+          <label>Phone Number</label>
+          <input class="field-input" type="tel" placeholder=""/>
+        </div>
+      </div>
+    </div>
+
+    <!-- REPORTING FREQUENCY -->
+    <div class="section">
+      <div class="section-title">2. Update Report Frequency</div>
+      <div class="option-group">
+        <div class="option"><span class="checkbox"></span><span class="option-label">Weekly</span></div>
+        <div class="option"><span class="checkbox"></span><span class="option-label">Fortnightly</span></div>
+        <div class="option"><span class="checkbox"></span><span class="option-label">Monthly</span></div>
+      </div>
+    </div>
+
+    <!-- PURCHASE ORDER -->
+    <div class="section">
+      <div class="section-title">3. Purchase Order (PO) Requirements</div>
+      <div class="option-group">
+        <div class="option">
+          <span class="checkbox"></span>
+          <span class="option-label">No PO required</span>
+        </div>
+        <div class="option">
+          <span class="checkbox"></span>
+          <span class="option-label">Yes — PO required &nbsp; PO Number: </span>
+          <input class="option-input" type="text" placeholder="Enter PO number"/>
+        </div>
+      </div>
+    </div>
+
+    <!-- ACCOUNTS PAYABLE -->
+    <div class="section">
+      <div class="section-title">4. Accounts Payable Contact</div>
+      <div class="field-row">
+        <div class="field">
+          <label>Contact Name</label>
+          <input class="field-input" type="text" placeholder=""/>
+        </div>
+        <div class="field">
+          <label>Email Address</label>
+          <input class="field-input" type="email" placeholder=""/>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Phone Number</label>
+          <input class="field-input" type="tel" placeholder=""/>
+        </div>
+        <div class="field"></div>
+      </div>
+    </div>
+
+    <!-- KICK-OFF MEETING -->
+    <div class="section">
+      <div class="section-title">5. Preferred Kick-off Meeting Dates</div>
+      <div style="font-size:12px;color:#888;margin-bottom:12px;">Please provide three preferred options — we will confirm the most suitable date.</div>
+      <div class="field-row">
+        <div class="field">
+          <label>Option 1</label>
+          <input class="field-input" type="text" placeholder="e.g. Mon 14 Oct, anytime"/>
+        </div>
+        <div class="field">
+          <label>Option 2</label>
+          <input class="field-input" type="text" placeholder="e.g. Wed 16 Oct, morning"/>
+        </div>
+        <div class="field">
+          <label>Option 3</label>
+          <input class="field-input" type="text" placeholder="e.g. Fri 18 Oct, afternoon"/>
+        </div>
+      </div>
+    </div>
+
+    <!-- OTHER REQUIREMENTS -->
+    <div class="section">
+      <div class="section-title">6. Additional Information</div>
+      <div class="field">
+        <label>Any other requirements, special considerations or information we should be aware of</label>
+        <textarea class="field-input" placeholder="Enter any relevant notes here…"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="return-note">
+      Please complete and return this form by replying to <strong>diane.k@risk2solution.com</strong>.<br/>
+      If you have any questions, contact Diane Kruger directly on <strong>1300 459 970</strong>.
+    </div>
+    <div class="sig">
+      <div class="sig-name">Diane Kruger</div>
+      <div class="sig-title">Corporate Operations Lead &nbsp;|&nbsp; Risk 2 Solution Group</div>
+      <div class="sig-contact">P: 1300 459 970 &nbsp;|&nbsp; M: +61 415 748 747 &nbsp;|&nbsp; E: diane.k@risk2solution.com &nbsp;|&nbsp; W: www.risk2solution.com</div>
+    </div>
+  </div>
+</div>
+</body></html>`;
+}
+
+function buildWelcomeEmailHtml(project, welcomeText) {
+  const firstName = (project.clientContact || 'there').split(' ')[0];
+  const today = new Date().toLocaleDateString('en-AU', { day:'numeric', month:'long', year:'numeric' });
+
+  // Split welcome text into paragraphs for clean display
+  const paragraphs = welcomeText
+    .split(/\n\n+/)
+    .map(p => p.trim())
+    .filter(p => p.length > 10 && !p.toLowerCase().startsWith('kind regards') && !p.toLowerCase().startsWith('diane'));
+
+  return `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office">
+<head><meta charset="utf-8"/><!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]--></head>
+<body style="margin:0;padding:0;background:#f5f6fa;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f6fa;">
+<tr><td align="center" style="padding:24px 8px;">
+<table width="620" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;width:100%;">
+
+  <!-- Header -->
+  <tr><td style="padding-bottom:12px;">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border-radius:10px;">
+    <tr><td style="padding:28px 36px;">
+      <div style="font-size:26px;font-weight:700;color:#ffffff;letter-spacing:2px;font-family:Arial,sans-serif;">R2S</div>
+      <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:3px;margin-top:4px;font-family:Arial,sans-serif;">Risk 2 Solution Group</div>
+      <div style="margin-top:20px;font-size:18px;color:#ffffff;font-family:Arial,sans-serif;">Welcome to R2S</div>
+      <div style="font-size:12px;color:#8899bb;margin-top:4px;font-family:Arial,sans-serif;">${project.projectName || project.clientName} &nbsp;&bull;&nbsp; ${today}</div>
+    </td></tr>
+    </table>
+  </td></tr>
+
+  <!-- Body -->
+  <tr><td style="padding-bottom:12px;">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;border-radius:10px;border:1px solid #e0e6f0;">
+    <tr><td style="padding:32px 36px;">
+
+      <p style="font-size:15px;color:#1a1a2e;margin:0 0 20px;font-family:Arial,sans-serif;">Hi ${firstName},</p>
+
+      ${paragraphs.map(p => {
+        if (p.startsWith('•') || p.startsWith('-') || p.match(/^\d\./)) {
+          // It's a list — render as table rows
+          const items = p.split(/\n/).filter(l => l.trim());
+          return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px;">
+            ${items.map(item => `<tr>
+              <td width="18" style="vertical-align:top;padding-top:2px;"><div style="width:6px;height:6px;background:#3366cc;border-radius:50%;margin-top:6px;"></div></td>
+              <td style="font-size:13px;color:#444;line-height:1.7;font-family:Arial,sans-serif;padding-left:8px;">${item.replace(/^[•\-\d\.]\s*/,'')}</td>
+            </tr>`).join('')}
+          </table>`;
+        }
+        return `<p style="font-size:13px;color:#444;line-height:1.7;margin:0 0 16px;font-family:Arial,sans-serif;">${p}</p>`;
+      }).join('')}
+
+      <!-- Contacts box -->
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0f4ff;border-radius:8px;border:1px solid #d0dcf0;margin:20px 0;">
+      <tr><td style="padding:18px 20px;">
+        <div style="font-size:10px;font-weight:700;color:#3366cc;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-family:Arial,sans-serif;">Your R2S Contacts</div>
+        <table cellpadding="0" cellspacing="0" border="0">
+          <tr><td style="font-size:12px;color:#555;padding-bottom:6px;font-family:Arial,sans-serif;"><strong style="color:#1a1a2e;">Project Manager:</strong> &nbsp; Diane Kruger, Corporate Operations Lead</td></tr>
+          <tr><td style="font-size:12px;color:#555;padding-bottom:6px;font-family:Arial,sans-serif;"><strong style="color:#1a1a2e;">Phone:</strong> &nbsp; 1300 459 970 &nbsp;|&nbsp; <strong style="color:#1a1a2e;">Email:</strong> &nbsp; diane.k@risk2solution.com</td></tr>
+          ${project.consultant ? `<tr><td style="font-size:12px;color:#555;font-family:Arial,sans-serif;"><strong style="color:#1a1a2e;">Assigned Consultant:</strong> &nbsp; ${project.consultant}</td></tr>` : ''}
+        </table>
+      </td></tr></table>
+
+      <!-- Form note -->
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fff8e8;border-radius:8px;border:1px solid #ffd93d66;margin:20px 0;">
+      <tr><td style="padding:16px 20px;">
+        <div style="font-size:12px;color:#665500;font-family:Arial,sans-serif;line-height:1.6;">
+          <strong>&#128206; Onboarding Form Attached</strong><br/>
+          To get your project set up, please complete and return the attached <strong>R2S Client Onboarding Form</strong>. It only takes a few minutes — simply fill in your details, tick your preferences, and reply to this email.
+        </div>
+      </td></tr></table>
+
+      <!-- Sign off -->
+      <p style="font-size:13px;color:#444;margin:24px 0 8px;font-family:Arial,sans-serif;">We look forward to working with you.</p>
+      <p style="font-size:13px;color:#444;margin:0 0 24px;font-family:Arial,sans-serif;">Kind regards,</p>
+
+      <div style="border-top:1px solid #e0e6f0;padding-top:16px;">
+        <div style="font-size:14px;font-weight:700;color:#1a1a2e;font-family:Arial,sans-serif;">Diane Kruger</div>
+        <div style="font-size:12px;color:#666;margin-top:2px;font-family:Arial,sans-serif;">Corporate Operations Lead &nbsp;|&nbsp; Risk 2 Solution Group</div>
+        <div style="font-size:12px;color:#3366cc;margin-top:6px;font-family:Arial,sans-serif;">P: 1300 459 970 &nbsp;|&nbsp; M: +61 415 748 747 &nbsp;|&nbsp; E: diane.k@risk2solution.com &nbsp;|&nbsp; W: www.risk2solution.com</div>
+        <div style="font-size:11px;color:#999;margin-top:4px;font-family:Arial,sans-serif;">Queensland, Australia</div>
+      </div>
+
+    </td></tr>
+    </table>
+  </td></tr>
+
+  <!-- Footer -->
+  <tr><td align="center" style="padding:12px 0;">
+    <div style="font-size:10px;color:#aaa;font-family:Arial,sans-serif;">Risk 2 Solution Group &nbsp;|&nbsp; www.risk2solution.com &nbsp;|&nbsp; 1300 459 970</div>
+  </td></tr>
+
+</table>
+</td></tr></table>
+</body></html>`;
+}
+
 async function draftClientOnboarding(project) {
   try {
     const context = buildContext(project);
-    const onboardingBody = await aurora('consultant_briefing',
-      `Write a professional client welcome and onboarding email from R2S to ${project.clientContact || 'the client'} at ${project.clientName}.
+
+    // Generate warm welcome text (no form in body — that goes as attachment)
+    const welcomeText = await aurora('consultant_briefing',
+      `Write a professional, warm client welcome email from R2S to ${project.clientContact || 'the client'} at ${project.clientName}.
 
 FORMAT RULES:
-- Plain text only. No asterisks, no bold markdown, no long dashes.
-- Professional, warm, and human-centred tone.
-- Concise — this is a welcome email, not a report.
+- Plain text paragraphs only. No markdown. No asterisks. No headers.
+- Professional and human-centred tone.
+- Keep it concise — 3-4 short paragraphs maximum.
+- Do NOT include any onboarding form — that will be sent as a separate attachment.
+- Do NOT include a sign-off — that will be added automatically.
 
-Write the email starting with "Hi ${(project.clientContact || 'there').split(' ')[0]}," and covering:
-
+Cover:
 1. A warm welcome to the R2S engagement (1-2 sentences)
-
-2. Brief confirmation of what R2S will be delivering (1-2 sentences referencing the project scope)
-
-3. Your key R2S contacts:
-   Project managed by: Diane Kruger, Corporate Operations Lead
-   Email: diane.k@risk2solution.com | Phone: 1300 459 970
-   ${project.consultant ? 'Assigned consultant/trainer: ' + project.consultant : ''}
-
-4. What happens next (3 bullet points covering: kick-off meeting to be scheduled, scope and timeline to be confirmed, regular updates throughout)
-
-5. A note that Diane is available for any questions
-
-6. Then add this exact section as the final part of the email before the sign-off:
-
-To help us set up your project correctly, please complete and return the following onboarding form:
-
-ONBOARDING FORM — ${project.clientName}
-
-Primary contact person:
-Phone number:
-Email address:
-Position / Title:
-
-Update report frequency (please select one):
-[ ] Weekly
-[ ] Fortnightly
-[ ] Monthly
-
-Is a Purchase Order (PO) required for invoicing?
-[ ] Yes — PO number: ________________________________
-[ ] No
-
-Accounts payable contact name:
-Accounts payable email:
-Accounts payable phone:
-
-Preferred dates for kick-off meeting (please provide 3 options):
-Option 1:
-Option 2:
-Option 3:
-
-Any other information or requirements we should be aware of:
-
-
-Please return this form by reply email to diane.k@risk2solution.com at your earliest convenience so we can get your project started.
-
-Sign off as:
-Kind regards,
-
-Diane Kruger
-Corporate Operations Lead
-Risk 2 Solution Group
-P: 1300 459 970 | M: +61 415 748 747
-E: diane.k@risk2solution.com
-W: www.risk2solution.com
-Queensland, Australia`,
+2. Brief confirmation of what R2S will be delivering (1-2 sentences referencing: ${project.serviceProvision || project.projectName || 'the project scope'})
+3. What happens next — 3 bullet points: kick-off meeting to be scheduled, scope and timeline to be confirmed, regular updates throughout
+4. A brief note that an onboarding form is attached — ask them to complete and return it to Diane at their earliest convenience`,
       context
     );
 
+    // Build HTML email body
+    const emailHtml = buildWelcomeEmailHtml(project, welcomeText);
+
+    // Build branded fillable PDF onboarding form
+    const today = new Date().toLocaleDateString('en-AU', { day:'numeric', month:'long', year:'numeric' });
+    const pdfBuffer = await buildOnboardingPDF({
+      clientName: project.clientName || 'Client',
+      projectName: project.projectName || 'Your Engagement',
+      consultant: project.consultant || '',
+      today,
+    });
+    const formFilename = `R2S Onboarding Form - ${(project.clientName || 'Client').replace(/[^a-zA-Z0-9 ]/g,'').trim()}.pdf`;
+
     const draft = {
       id: `d_${Date.now()}_onboard`,
-      projectId: project.id, clientName: project.clientName,
-      projectName: project.projectName, type: 'client_onboarding',
-      urgency: 'routine', toName: project.clientContact,
+      projectId: project.id,
+      clientName: project.clientName,
+      projectName: project.projectName,
+      type: 'client_onboarding',
+      urgency: 'routine',
+      toName: project.clientContact,
       toEmail: project.clientEmail,
-      subject: `Welcome to R2S — ${project.projectName || project.clientName}`,
-      body: onboardingBody, source: 'auto',
+      subject: `Welcome to R2S - ${project.projectName || project.clientName}`,
+      body: emailHtml,
+      isHtml: true,
+      source: 'auto',
+      attachment: {
+        name: formFilename,
+        contentType: 'application/pdf',
+        content: pdfBuffer,
+      },
     };
+
     await db.saveDraft(draft);
     await saveDraftEmail(draft);
-    console.log(`[Onboarding] Client welcome email drafted for ${project.clientName}`);
+    console.log(`[Onboarding] Branded welcome email + onboarding form drafted for ${project.clientName}`);
   } catch (err) {
     if (err.message === 'MONTHLY_CAP_REACHED') throw err;
     console.error('[Onboarding] Draft failed:', err.message);
