@@ -215,11 +215,16 @@ async function saveDraftEmail(draft) {
         ccList.push({ emailAddress: { address: draft.ccEmail } });
       }
 
+      // Use HTML body type when bodyHtml is provided (e.g. Outlook-compatible table emails)
+      const bodyPayload = draft.bodyHtml
+        ? { contentType: 'HTML', content: draft.bodyHtml }
+        : { contentType: 'Text', content: draft.body };
+
       await axios.post(
         `https://graph.microsoft.com/v1.0/users/${fromMailbox}/messages`,
         {
           subject: draft.subject,
-          body: { contentType: 'Text', content: draft.body },
+          body: bodyPayload,
           toRecipients: [{ emailAddress: { address: draft.toEmail || fromMailbox } }],
           ...(ccList.length > 0 ? { ccRecipients: ccList } : {}),
         },
@@ -805,6 +810,39 @@ async function readConsultantReplies() {
         continue;
       }
 
+      // ── Check for consultant check-in replies [AURORA-CHECKIN-{id}] ────────────
+      // Consultants reply with yes/no/confirmed/in progress — log to project file
+      const checkinMatch = (subject || '').match(/\[AURORA-CHECKIN-([^\]]+)\]/i)
+                        || (bodyText).match(/\[AURORA-CHECKIN-([^\]]+)\]/i);
+      if (checkinMatch) {
+        const checkinProjectId = checkinMatch[1].trim();
+        const checkinProject   = projects.find(p => p.id === checkinProjectId);
+        console.log(`[Poll] Check-in reply detected — project ID: ${checkinProjectId}, match: ${checkinProject?.clientName || 'NOT FOUND'}`);
+        if (checkinProject) {
+          // Detect what the consultant said about documentation
+          const reply = bodyText.slice(0, 600).toLowerCase();
+          let folderStatus = 'noted';
+          if (/\byes\b|confirmed|done|saved|uploaded|complete|all good|sorted/.test(reply)) {
+            folderStatus = 'yes - documentation saved';
+          } else if (/\bno\b|not yet|haven.t|have not|will do|not done/.test(reply)) {
+            folderStatus = 'no - documentation not yet saved';
+          } else if (/in progress|working on|partially|some|partly/.test(reply)) {
+            folderStatus = 'in progress';
+          }
+          const logSummary = `Weekly check-in reply from ${fromEmail}: folder documentation status - ${folderStatus}. Reply: "${bodyText.slice(0, 200).trim()}"`;
+          await db.logActivity(checkinProject.id, { type: 'checkin_reply', source: fromEmail, subject, summary: logSummary });
+          console.log(`[Poll] Check-in reply logged for ${checkinProject.clientName}: ${folderStatus}`);
+        }
+        // Tag and skip normal project matching for check-in replies
+        try {
+          await axios.patch(`https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
+            { isRead: true, categories: ['Aurora Processed'] },
+            { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+          );
+        } catch(e) {}
+        continue;
+      }
+
       // Skip Aurora's own emails — prevents infinite feedback loops
       const isXeroInvoice = fromEmail.toLowerCase().includes('xero.com') ||
                             fromEmail.toLowerCase().includes('post.xero.com');
@@ -891,22 +929,14 @@ async function readConsultantReplies() {
                          fromEmail.toLowerCase().endsWith('@presilience.com');
       const isFromDiane = fromEmail.toLowerCase() === 'diane.k@risk2solution.com';
 
-      // ── Special case: Diane (or any R2S staff) forwarding a new agreement/contract ─────────────
+      // ── Special case: Diane forwarding a new agreement/contract ─────────────
+      // Catches: attachment + agreement keywords, OR body mentions a new client/org
       const hasAttachment = msg.hasAttachments || false;
-      const searchText = subject + ' ' + bodyText.slice(0, 800);
+      const mentionsNewProject = /agreement|contract|proposal|signed|new client|new project|new engagement/i.test(subject + ' ' + bodyText.slice(0, 500));
 
-      // STRONG positive signals — language that only appears in new engagements, not routine work
-      const hasStrongEngagementSignal = /\b(signed agreement|new agreement|new contract|new engagement|new client|letter of engagement|purchase order received|accepted proposal|confirm(?:ed|ing) engagement|scope of work agreed|engage r2s|engage risk 2 solution)\b/i.test(searchText);
-
-      // NEGATIVE signals — minor internal work, document revisions, routine communication
-      // These block project creation even if positive keywords appear
-      const isMinorWorkEmail = /\b(updated?|revision|revised|P0\d|drawing|diagram|heading|warden card|resend|re-?send|amend|amendment|minor change|version \d|v\d+\.\d|draft \d|attached.*updated|updated.*attached|please find attached|updated file|updated document|please action|can you action|are you able to action)\b/i.test(searchText);
-
-      // Only trigger project creation if: strong engagement signal AND no minor-work indicators
-      const mentionsNewProject = hasStrongEngagementSignal && !isMinorWorkEmail;
-
-      // Catch agreement emails from ANY R2S staff — requires strong signal only
-      const isDianeAgreement = isInternal && mentionsNewProject;
+      // Catch agreement emails from Diane — with OR without attachment flag
+      // (Graph API hasAttachments can be unreliable for forwarded emails)
+      const isDianeAgreement = isFromDiane && mentionsNewProject;
 
       if (isDianeAgreement) {
         console.log(`[Poll] Agreement email from Diane — attempting to auto-create project from attachment`);
@@ -1065,10 +1095,8 @@ async function readConsultantReplies() {
           /remittance|payment received|contact us form|enquiry form|abandoned call|missed call|work order/i.test(bodyText.slice(0, 200));
 
         // Only alert Diane if: internal R2S sender + not noise + looks like genuine project content
-        // Exclude minor internal work — diagram updates, file revisions, routine actions
-        const isMinorInternalWork = /\b(updated?|revision|revised|P0\d|drawing|diagram|heading|warden card|resend|re-?send|amend|amendment|minor change|version \d|v\d+\.\d|draft \d|please action|can you action|are you able to action|please find attached|updated file|updated document)\b/i.test(subject + ' ' + bodyText.slice(0, 400));
-        const looksLikeProject = bodyText.length > 200 && !isMinorInternalWork && (
-          /\b(new project|new engagement|new client|new agreement|new contract|proposal|scope of work|deliverable|phase|consultant assigned|kick.off|onboard)\b/i.test(bodyText)
+        const looksLikeProject = bodyText.length > 150 && (
+          /project|client|proposal|contract|deliverable|training|workshop|report|phase|scope|invoice milestone|consultant/i.test(bodyText)
         );
 
         if (isInternal && !isNoise && looksLikeProject) {
@@ -1353,55 +1381,247 @@ Return this exact JSON (no other text):
   }
 }
 
+// ── Build phase-aware Outlook Classic HTML check-in email ─────────────────────
+function buildCheckinEmailHtml({ firstName, clientName, projectName, phaseName, phaseIndex, dueDate, deliverables, projectId }) {
+  // Phase-specific context: what should have been done by now, what is upcoming
+  const PHASE_CONTEXT = {
+    0: {
+      done: 'The project kick-off should now be confirmed and scheduled (or completed).',
+      next: 'The next step is to complete the kick-off session and begin deployment planning.',
+      ask:  'Have you confirmed the kick-off session date and communicated it to the client?',
+    },
+    1: {
+      done: 'Delivery of training or consulting sessions should be underway or nearing completion.',
+      next: 'The focus now is completing all scheduled sessions and preparing your session documentation.',
+      ask:  'Are all sessions on track? Are there any issues with attendance, scheduling, or client engagement?',
+    },
+    2: {
+      done: 'Sessions should be complete. Monitoring and review activities should be in progress.',
+      next: 'Feedback collection, observations, and any follow-up actions should be finalised before reporting.',
+      ask:  'Have all post-delivery activities been completed and are you ready to move into reporting?',
+    },
+    3: {
+      done: 'All delivery and review activities should be complete. The report should be in draft or submitted.',
+      next: 'The final report needs to be reviewed by Diane before being sent to the client.',
+      ask:  'Is the report drafted and ready for Diane to review? Is there anything you need from the team?',
+    },
+    4: {
+      done: 'The project is in close-out. All deliverables and documentation should be finalised.',
+      next: 'Final sign-off, archiving project materials, and client feedback are the remaining steps.',
+      ask:  'Are all final deliverables complete and has the client signed off?',
+    },
+  };
+
+  const ctx = PHASE_CONTEXT[phaseIndex] || PHASE_CONTEXT[1];
+  const dueDateFormatted = dueDate
+    ? new Date(dueDate).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })
+    : null;
+
+  const deliverableRows = (deliverables || '')
+    .split(/[\n,;]+/)
+    .map(d => d.trim())
+    .filter(d => d.length > 3)
+    .slice(0, 6)
+    .map(d => `<tr><td style="padding:3px 0 3px 12px;font-family:Arial,sans-serif;font-size:14px;color:#444444;">- ${d}</td></tr>`)
+    .join('');
+
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background-color:#ffffff;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;">
+  <tr>
+    <td align="center" style="padding:20px 10px;">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#ffffff;border:1px solid #e0e0e0;">
+        <tr>
+          <td style="background-color:#1a5f7a;padding:24px 32px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td>
+                  <span style="font-family:Arial,sans-serif;font-size:20px;font-weight:bold;color:#ffffff;">Risk 2 Solution</span><br>
+                  <span style="font-family:Arial,sans-serif;font-size:13px;color:#b0d8e8;">Weekly Project Check-in</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:32px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="font-family:Arial,sans-serif;font-size:15px;color:#333333;padding-bottom:16px;">
+                  Hi ${firstName},
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family:Arial,sans-serif;font-size:14px;color:#444444;line-height:1.6;padding-bottom:20px;">
+                  I hope you are having a great week. I wanted to check in on the <strong>${projectName || clientName}</strong> project for <strong>${clientName}</strong>.
+                </td>
+              </tr>
+              <tr>
+                <td style="padding-bottom:20px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f5f9fb;border-left:4px solid #1a5f7a;">
+                    <tr>
+                      <td style="padding:16px 20px;">
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                          <tr>
+                            <td style="font-family:Arial,sans-serif;font-size:12px;font-weight:bold;color:#1a5f7a;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:10px;">
+                              Project Summary
+                            </td>
+                          </tr>
+                          <tr><td style="font-family:Arial,sans-serif;font-size:14px;color:#333333;padding-bottom:4px;"><strong>Client:</strong> ${clientName}</td></tr>
+                          <tr><td style="font-family:Arial,sans-serif;font-size:14px;color:#333333;padding-bottom:4px;"><strong>Project:</strong> ${projectName || clientName}</td></tr>
+                          <tr><td style="font-family:Arial,sans-serif;font-size:14px;color:#333333;padding-bottom:4px;"><strong>Current Phase:</strong> ${phaseName}</td></tr>
+                          ${dueDateFormatted ? `<tr><td style="font-family:Arial,sans-serif;font-size:14px;color:#333333;padding-bottom:4px;"><strong>Due Date:</strong> ${dueDateFormatted}</td></tr>` : ''}
+                          ${deliverableRows ? `<tr><td style="font-family:Arial,sans-serif;font-size:14px;color:#333333;padding-top:8px;padding-bottom:2px;"><strong>Key Deliverables:</strong></td></tr><table width="100%" cellpadding="0" cellspacing="0" border="0">${deliverableRows}</table>` : ''}
+                        </table>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family:Arial,sans-serif;font-size:14px;color:#444444;line-height:1.6;padding-bottom:16px;">
+                  ${ctx.done} ${ctx.next}
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family:Arial,sans-serif;font-size:14px;color:#444444;line-height:1.6;padding-bottom:20px;">
+                  ${ctx.ask}
+                </td>
+              </tr>
+              <tr>
+                <td style="padding-bottom:24px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#fff8e1;border-left:4px solid #f5a623;">
+                    <tr>
+                      <td style="padding:14px 20px;font-family:Arial,sans-serif;font-size:14px;color:#333333;line-height:1.6;">
+                        <strong>Documentation reminder:</strong> Have you saved all relevant materials, session notes, attendance records, and documentation into the <strong>${clientName} client folder</strong> in SharePoint? Please reply to this email with a quick <em>yes</em>, <em>no</em>, or <em>in progress</em> and I will make a note.
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family:Arial,sans-serif;font-size:14px;color:#444444;line-height:1.6;padding-bottom:24px;">
+                  Please do not hesitate to reach out if there is anything you need from me or the team. I am always happy to help.
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family:Arial,sans-serif;font-size:14px;color:#333333;border-top:1px solid #e0e0e0;padding-top:20px;">
+                  Kind regards,<br>
+                  <strong>Diane Kruger</strong><br>
+                  <span style="color:#666666;">Corporate Operations Lead | Risk 2 Solution Group</span><br>
+                  <span style="color:#666666;">E: diane.k@risk2solution.com</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="background-color:#f0f0f0;padding:14px 32px;">
+            <span style="font-family:Arial,sans-serif;font-size:11px;color:#888888;">
+              This is a weekly project check-in from Aurora, R2S Project Management Intelligence. Reply directly to this email - your response will be noted in the project file.
+            </span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>`;
+}
+
 // ── Weekly consultant check-in draft ─────────────────────────────────────────
 async function generateWeeklyConsultantCheckins(projects) {
+  // Include all active standard projects with a consultant assigned (all phases)
   const active = projects.filter(p =>
     p.type === 'standard' &&
     p.consultant &&
-    !['Completed','Terminated','Closed'].includes(p.status) &&
-    [1, 2, 3].includes(p.phase) // Deployment, Monitoring, Reporting phases only
+    !['Completed','Terminated','Closed'].includes(p.status)
   );
 
+  let count = 0;
   for (const p of active) {
     try {
-      const context = buildContext(p);
-      const firstName = (p.consultant || '').split(' ')[0];
-      const text = await aurora('checkin_email',
-        `Draft a short weekly check-in email from Diane (R2S Project Manager) to ${p.consultant}, the assigned consultant/trainer on the ${p.projectName || p.clientName} project.
+      const firstName  = (p.consultant || '').split(' ')[0] || p.consultant;
+      const phaseName  = PHASES[p.phase || 0] || 'Kick-off';
+      const phaseIndex = p.phase || 0;
+      const projectId  = p.id;
 
-The email should:
-- Be brief and friendly — 3-4 sentences max
-- Ask for a quick update on progress against deliverables and timeline
-- Ask if there are any issues, blockers, or anything they need from the PM
-- Reference the specific project and any relevant deliverables or milestones if known
-- Not repeat information they already know
+      // Build Outlook Classic HTML email (table-based, no em dashes, light theme)
+      const bodyHtml = buildCheckinEmailHtml({
+        firstName,
+        clientName   : p.clientName,
+        projectName  : p.projectName,
+        phaseName,
+        phaseIndex,
+        dueDate      : p.dueDate,
+        deliverables : p.deliverables,
+        projectId,
+      });
 
-Start with: Hi ${firstName},
+      // Plain-text fallback for the Aurora portal preview card
+      const dueFmt = p.dueDate
+        ? new Date(p.dueDate).toLocaleDateString('en-AU', { day:'numeric', month:'long', year:'numeric' })
+        : null;
+      const bodyText = [
+        `Hi ${firstName},`,
+        '',
+        `I hope you are having a great week. I wanted to check in on the ${p.projectName || p.clientName} project for ${p.clientName}.`,
+        '',
+        `Current Phase: ${phaseName}`,
+        dueFmt ? `Due Date: ${dueFmt}` : '',
+        '',
+        'Could you please let me know:',
+        '- How is progress tracking against deliverables and timeline?',
+        '- Are there any issues or blockers I should know about?',
+        '- Have you saved all relevant materials and documentation into the client folder in SharePoint?',
+        '  (Please reply with yes, no, or in progress - Aurora will note it in the project file.)',
+        '',
+        'Please reach out if there is anything you need from me or the team.',
+        '',
+        'Kind regards,',
+        'Diane Kruger',
+        'Corporate Operations Lead | Risk 2 Solution Group',
+        'E: diane.k@risk2solution.com',
+      ].filter(l => l !== null).join('\n');
 
-Sign off as:
-Kind regards,
-Diane Kruger
-Corporate Operations Lead | Risk 2 Solution Group`,
-        context
-      );
+      // Subject includes unique [AURORA-CHECKIN-{projectId}] tag
+      // so readConsultantReplies() can detect and log replies automatically
+      const subject = `${p.projectName || p.clientName} - Weekly check-in [AURORA-CHECKIN-${projectId}]`;
 
+      // Draft is saved in info@ Drafts addressed to Diane for review.
+      // Diane reviews the email in Outlook, updates the To field to the consultant, and sends.
+      // consultantEmail is stored separately so the Aurora portal can show who it is intended for.
       const draft = {
-        id: `d_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
-        projectId: p.id, clientName: p.clientName, projectName: p.projectName,
-        type: 'consultant_checkin', urgency: 'routine',
-        toName: p.consultant, toEmail: p.consultantEmail || 'info@risk2solution.com',
-        subject: `${p.projectName || p.clientName} — Weekly check-in`,
-        body: text, source: 'batch',
+        id              : `d_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+        projectId       : p.id,
+        clientName      : p.clientName,
+        projectName     : p.projectName,
+        type            : 'consultant_checkin',
+        urgency         : 'routine',
+        toName          : 'Diane Kruger',
+        toEmail         : 'diane.k@risk2solution.com',
+        consultantName  : p.consultant,
+        consultantEmail : p.consultantEmail || null,
+        subject,
+        body            : bodyText,  // plain text for portal display
+        bodyHtml,                    // HTML for Outlook draft (saveDraftEmail checks this)
+        source          : 'batch',
       };
       await db.saveDraft(draft);
       await saveDraftEmail(draft);
+      count++;
+      console.log(`[Checkins] Draft created for ${p.clientName} (${p.consultant}) - phase ${phaseName}`);
     } catch (err) {
       if (err.message === 'MONTHLY_CAP_REACHED') break;
       console.error(`[Checkins] Error on ${p.clientName}:`, err.message);
     }
   }
-  return active.length;
+  return count;
 }
+
 
 // ── Phase stuck too long detection ────────────────────────────────────────────
 async function checkStuckPhases(projects) {
