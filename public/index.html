@@ -237,6 +237,25 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
 </head>
 <body>
 
+<!-- LOGIN SCREEN -->
+<div id="login-screen" class="login-screen" style="display:flex">
+  <div style="text-align:center;margin-bottom:32px">
+    <div style="font-family:var(--fs);font-size:28px;font-weight:700;color:var(--text);margin-bottom:4px">Aurora</div>
+    <div style="font-size:13px;color:var(--text3)">R2S Project Management Intelligence</div>
+  </div>
+  <div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;padding:32px 36px;width:320px;max-width:90vw">
+    <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:16px">Sign in</div>
+    <input id="login-pwd" type="password" placeholder="Password" autocomplete="current-password"
+      style="width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;background:var(--card2);border:1px solid var(--border);color:var(--text);font-size:14px;margin-bottom:10px"
+      onkeydown="if(event.key==='Enter')doLogin()">
+    <div id="login-error" style="color:var(--rose);font-size:12px;margin-bottom:8px;min-height:16px"></div>
+    <button onclick="doLogin()"
+      style="width:100%;padding:10px;border-radius:8px;background:var(--teal);border:none;color:#fff;font-size:14px;font-weight:600;cursor:pointer">
+      Sign in
+    </button>
+  </div>
+</div>
+
 <div class="topbar">
   <div class="brand">
     <div class="mark">A</div>
@@ -3727,6 +3746,23 @@ async function runExtract(btn) {
   }
   btn.textContent = orig; btn.disabled = false;
 }
+
+// ── Startup ───────────────────────────────────────────────────────────────────
+(function() {
+  const token = sessionStorage.getItem('aurora_token');
+  const ls = document.getElementById('login-screen');
+  if (token) {
+    if (ls) ls.style.display = 'none';
+    loadProjects()
+      .then(() => { renderProjects(); loadSuggestions && loadSuggestions(); })
+      .catch(() => {
+        sessionStorage.removeItem('aurora_token');
+        if (ls) ls.style.display = 'flex';
+      });
+  } else {
+    if (ls) ls.style.display = 'flex';
+  }
+})();
 
 </script>
 </body>
