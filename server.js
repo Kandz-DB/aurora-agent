@@ -2,7 +2,6 @@
 require('dotenv').config();
 
 const express   = require('express');
-const PDFDocument = require('pdfkit');
 const cors      = require('cors');
 const fs        = require('fs');
 const path      = require('path');
@@ -75,20 +74,8 @@ app.use('/api', (req, res, next) => {
   }
 });
 
-app.use(express.static(path.join(__dirname, 'public'), {
-  etag: false,
-  setHeaders: (res, filePath) => {
-    if (filePath.endsWith('index.html')) {
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
-    }
-  }
-}));
-app.get(/^(?!\/api).*/, (req, res) => {
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+app.use(express.static(path.join(__dirname, 'public')));
+app.get(/^(?!\/api).*/, (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 const upload = multer({
   dest: path.join(db.DATA, 'uploads'),
@@ -228,38 +215,16 @@ async function saveDraftEmail(draft) {
         ccList.push({ emailAddress: { address: draft.ccEmail } });
       }
 
-      const messagePayload = {
-        subject: draft.subject,
-        body: {
-          contentType: draft.isHtml ? 'HTML' : 'Text',
-          content: draft.body
-        },
-        toRecipients: [{ emailAddress: { address: draft.toEmail || fromMailbox } }],
-        ...(ccList.length > 0 ? { ccRecipients: ccList } : {}),
-      };
-
-      // Create the draft message first
-      const msgRes = await axios.post(
+      await axios.post(
         `https://graph.microsoft.com/v1.0/users/${fromMailbox}/messages`,
-        messagePayload,
+        {
+          subject: draft.subject,
+          body: { contentType: 'Text', content: draft.body },
+          toRecipients: [{ emailAddress: { address: draft.toEmail || fromMailbox } }],
+          ...(ccList.length > 0 ? { ccRecipients: ccList } : {}),
+        },
         { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 15000 }
       );
-
-      // Add attachment if provided
-      if (draft.attachment && msgRes.data?.id) {
-        const msgId = msgRes.data.id;
-        await axios.post(
-          `https://graph.microsoft.com/v1.0/users/${fromMailbox}/messages/${msgId}/attachments`,
-          {
-            '@odata.type': '#microsoft.graph.fileAttachment',
-            name: draft.attachment.name,
-            contentType: draft.attachment.contentType || 'application/octet-stream',
-            contentBytes: Buffer.from(draft.attachment.content).toString('base64'),
-          },
-          { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 15000 }
-        );
-        console.log(`[Email] Attachment added: ${draft.attachment.name}`);
-      }
       console.log(`[Email] Draft saved to Outlook: ${draft.subject}`);
     } catch (err) {
       console.error('[Email] Draft save failed:', err.message);
@@ -365,107 +330,6 @@ ${combinedText}`,
   } catch (err) {
     console.error('[Contract] JSON parse failed:', err.message);
     return { summary: text, deliverables: '', clientName: '', projectName: filename };
-  }
-}
-
-// ── Reconcile proposal with client acceptance email ───────────────────────────
-// Used when we have a proposal PDF AND an email body with client's selections
-async function reconcileProposalWithAcceptance(proposalText, acceptanceEmailText, filename, inlineImageBase64 = null) {
-  const TASK_MODELS_local = { contract_extract: 'claude-sonnet-4-6' };
-
-  // Build content array for the API call
-  const userContent = [];
-
-  // Add inline image if we have one (client's acceptance screenshot)
-  if (inlineImageBase64) {
-    userContent.push({
-      type: 'text',
-      text: 'The following image is from the client\'s acceptance email and shows what they have selected/confirmed:'
-    });
-    userContent.push({
-      type: 'image',
-      source: { type: 'base64', media_type: 'image/png', data: inlineImageBase64 }
-    });
-  }
-
-  userContent.push({
-    type: 'text',
-    text: `You are reviewing a proposal and a client acceptance email for Risk 2 Solution (R2S).
-
-TASK: The proposal below contains multiple options, dates, or services. The client acceptance email confirms which specific items they have selected. You must extract ONLY what the client confirmed — not all options from the proposal.
-
-IMPORTANT RULES:
-- If the client says "please proceed with X" or lists specific dates/services, use ONLY those
-- If the client accepts in full with no changes, use the full proposal
-- Never include options or dates the client did NOT select
-- The contract value should reflect ONLY the selected services total
-- If there is an image showing the client's selections, prioritise that above the text
-
-CLIENT ACCEPTANCE EMAIL:
----
-${acceptanceEmailText.slice(0, 6000)}
----
-
-ORIGINAL PROPOSAL (${filename}):
----
-${proposalText.slice(0, 10000)}
----
-
-Return a valid JSON object with exactly these keys (no markdown, no explanation):
-{
-  "organisationName": "client organisation full name",
-  "clientName": "client organisation name for display",
-  "projectName": "project title",
-  "clientContact": "primary client contact name",
-  "clientEmail": "primary client contact email",
-  "clientPhone": "client phone number",
-  "value": "TOTAL value of ONLY the selected services — sum of what client confirmed",
-  "contractStart": "start date of selected services",
-  "dueDate": "end date of selected services",
-  "summary": "description of ONLY the services the client selected",
-  "deliverables": "ONLY the specific deliverables/services the client accepted",
-  "milestones": "key dates from the client's confirmed selections only",
-  "timeline": "timeline based on client-selected dates only",
-  "invoicingNotes": "payment terms from the proposal",
-  "consultant": "R2S consultant or staff member assigned",
-  "consultantEmail": "consultant email if mentioned",
-  "flightsRequired": "yes or no",
-  "accommodationRequired": "yes or no",
-  "notes": "any special conditions, the client selected specific options only — note which options were NOT selected",
-  "clientSelectionConfident": "yes if client clearly stated what they want, no if unclear",
-  "selectionSummary": "one sentence describing what the client specifically selected vs what was in the full proposal"
-}`
-  });
-
-  try {
-    const spend = await db.getSpend();
-    if (spend.total >= parseFloat(process.env.MONTHLY_SPEND_CAP_USD || '20')) throw new Error('MONTHLY_CAP_REACHED');
-
-    const response = await require('@anthropic-ai/sdk').default
-      ? null // handled below
-      : null;
-
-    // Use the client directly for vision support
-    const result = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
-      messages: [{ role: 'user', content: userContent }]
-    });
-
-    const text = result.content[0]?.text || '';
-    // Track spend
-    const inputTokens = result.usage?.input_tokens || 0;
-    const outputTokens = result.usage?.output_tokens || 0;
-    const cost = (inputTokens / 1000000 * 3.00) + (outputTokens / 1000000 * 15.00);
-    await db.addSpend(cost, 'reconcile_contract');
-
-    const clean = text.replace(/```json|```/g, '').trim();
-    const jsonMatch = clean.match(/\{[\s\S]*\}/);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(clean);
-  } catch(e) {
-    console.error('[Reconcile] Error:', e.message);
-    // Fall back to basic extraction from email body
-    return analyseContract(acceptanceEmailText + '\n\n' + proposalText, filename);
   }
 }
 
@@ -1027,24 +891,29 @@ async function readConsultantReplies() {
                          fromEmail.toLowerCase().endsWith('@presilience.com');
       const isFromDiane = fromEmail.toLowerCase() === 'diane.k@risk2solution.com';
 
-      // ── Special case: any R2S staff forwarding a project acceptance/contract ──
+      // ── Special case: Diane (or any R2S staff) forwarding a new agreement/contract ─────────────
       const hasAttachment = msg.hasAttachments || false;
-      const mentionsNewProject = /agreement|contract|proposal|signed|new client|new project|new engagement|accepted|acceptance|confirmed|please proceed|would like to proceed|purchase order|po number|invoice details/i.test(subject + ' ' + bodyText.slice(0, 1000));
-      const isForwarded = /^(fw:|fwd:|fw :|fwd :)/i.test(subject) || /-----original message-----|from:.*sent:/i.test(bodyText.slice(0, 500));
+      const searchText = subject + ' ' + bodyText.slice(0, 800);
 
-      // Catch project emails forwarded by any R2S staff member
-      const isStaffForward = isInternal && (mentionsNewProject || isForwarded);
+      // STRONG positive signals — language that only appears in new engagements, not routine work
+      const hasStrongEngagementSignal = /\b(signed agreement|new agreement|new contract|new engagement|new client|letter of engagement|purchase order received|accepted proposal|confirm(?:ed|ing) engagement|scope of work agreed|engage r2s|engage risk 2 solution)\b/i.test(searchText);
 
-      // Keep backward compat — Diane check still works, now extended to all staff
-      const isDianeAgreement = isStaffForward;
+      // NEGATIVE signals — minor internal work, document revisions, routine communication
+      // These block project creation even if positive keywords appear
+      const isMinorWorkEmail = /\b(updated?|revision|revised|P0\d|drawing|diagram|heading|warden card|resend|re-?send|amend|amendment|minor change|version \d|v\d+\.\d|draft \d|attached.*updated|updated.*attached|please find attached|updated file|updated document|please action|can you action|are you able to action)\b/i.test(searchText);
+
+      // Only trigger project creation if: strong engagement signal AND no minor-work indicators
+      const mentionsNewProject = hasStrongEngagementSignal && !isMinorWorkEmail;
+
+      // Catch agreement emails from ANY R2S staff — requires strong signal only
+      const isDianeAgreement = isInternal && mentionsNewProject;
 
       if (isDianeAgreement) {
-        console.log(`[Poll] Project email forwarded by ${fromEmail} — attempting to auto-create project`);
+        console.log(`[Poll] Agreement email from Diane — attempting to auto-create project from attachment`);
         let projectCreated = false;
 
         // Try to download and process the PDF attachment automatically
-        // Always attempt even if hasAttachments=false — Graph API flag is unreliable for forwarded emails
-        if (true) {
+        if (hasAttachment) {
           try {
             // Get attachments list
             const attRes = await axios.get(
@@ -1061,9 +930,10 @@ async function readConsultantReplies() {
 
             if (pdfAtt && pdfAtt.contentBytes) {
               console.log(`[Poll] Found attachment: ${pdfAtt.name} (${pdfAtt.size} bytes)`);
+              // Decode base64 attachment
               const pdfBuffer = Buffer.from(pdfAtt.contentBytes, 'base64');
 
-              // Extract text from PDF
+              // Extract text from PDF using pdf-parse
               let rawText = '';
               try {
                 const pdfParse = require('pdf-parse');
@@ -1072,46 +942,17 @@ async function readConsultantReplies() {
                 console.log(`[Poll] Extracted ${rawText.length} chars from ${pdfAtt.name}`);
               } catch(pdfErr) {
                 console.error('[Poll] PDF parse error:', pdfErr.message);
+                // Try treating as text if not a real PDF
                 rawText = pdfBuffer.toString('utf8').slice(0, 20000);
               }
 
               if (rawText.length > 100) {
-                // Check if email body has client acceptance/selection content
-                const hasClientAcceptance = /pleased to confirm|would like to proceed|please proceed|accepted|selected|confirmed|approval|approve/i.test(bodyText.slice(0, 3000));
-
-                // Try to find inline images (client's selection screenshot)
-                let inlineImageBase64 = null;
-                try {
-                  const inlineAtt = attachments.find(a =>
-                    a['@odata.type'] === '#microsoft.graph.fileAttachment' &&
-                    (a.contentType?.startsWith('image/') || a.isInline) &&
-                    a.contentBytes
-                  );
-                  if (inlineAtt) {
-                    inlineImageBase64 = inlineAtt.contentBytes;
-                    console.log(`[Poll] Found inline image: ${inlineAtt.name} — will use for reconciliation`);
-                  }
-                } catch(imgErr) { console.error('[Poll] Inline image error:', imgErr.message); }
-
-                let extracted;
-                if (hasClientAcceptance || inlineImageBase64) {
-                  // Use reconciliation — proposal vs client acceptance
-                  console.log(`[Poll] Client acceptance detected — reconciling proposal with acceptance email...`);
-                  extracted = await Promise.race([
-                    reconcileProposalWithAcceptance(rawText, bodyText, pdfAtt.name, inlineImageBase64),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('Reconcile timeout')), 90000))
-                  ]);
-                  if (extracted?.selectionSummary) {
-                    console.log(`[Poll] Reconciled: ${extracted.selectionSummary}`);
-                  }
-                } else {
-                  // Standard full proposal extraction
-                  console.log(`[Poll] Running standard contract analysis on ${pdfAtt.name}...`);
-                  extracted = await Promise.race([
-                    analyseContract(rawText, pdfAtt.name),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('Analysis timeout')), 90000))
-                  ]);
-                }
+                console.log(`[Poll] Running contract analysis on ${pdfAtt.name}...`);
+                // Run contract analysis with timeout protection
+                const extracted = await Promise.race([
+                  analyseContract(rawText, pdfAtt.name),
+                  new Promise((_, reject) => setTimeout(() => reject(new Error('Analysis timeout')), 90000))
+                ]);
                 if (extracted && extracted.clientName) {
                   // Check for duplicate — must match BOTH client name AND project name
                   // Same client can have multiple different projects
@@ -1166,74 +1007,13 @@ async function readConsultantReplies() {
           }
         }
 
-        // Fallback — try extracting from email body text if no PDF was processed
-        if (!projectCreated && bodyText.length > 200) {
-          console.log('[Poll] No PDF found — attempting to extract project from email body...');
-          try {
-            const extracted = await Promise.race([
-              analyseContract(bodyText.slice(0, 12000), subject),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 60000))
-            ]);
-            if (extracted && extracted.clientName) {
-              const existing = projects.find(p => {
-                const sameClient = p.clientName?.toLowerCase().includes(extracted.clientName.toLowerCase().slice(0,8)) ||
-                  extracted.clientName.toLowerCase().includes((p.clientName||'').toLowerCase().slice(0,8));
-                if (!sameClient) return false;
-                const extractedProject = (extracted.projectName || '').toLowerCase();
-                const existingProject = (p.projectName || '').toLowerCase();
-                if (!extractedProject || !existingProject) return false;
-                return extractedProject.slice(0,15) === existingProject.slice(0,15) ||
-                  existingProject.includes(extractedProject.slice(0,12)) ||
-                  extractedProject.includes(existingProject.slice(0,12));
-              });
-              if (!existing) {
-                const projectId = `p_${Date.now()}`;
-                const newProject = {
-                  id: projectId,
-                  type: 'standard',
-                  clientName: extracted.clientName,
-                  clientEmail: extracted.clientEmail || fromEmail,
-                  projectName: extracted.projectName || subject,
-                  contractValue: extracted.contractValue || null,
-                  serviceProvision: extracted.serviceProvision || '',
-                  invoicingTerms: extracted.invoicingTerms || '',
-                  deliverables: extracted.deliverables || [],
-                  milestones: extracted.milestones || [],
-                  timeline: extracted.timeline || '',
-                  consultant: extracted.consultant || '',
-                  status: 'Active',
-                  phase: 0,
-                  notes: `Auto-created from forwarded email: ${subject}\nForwarded by: ${fromEmail}`,
-                  createdAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                };
-                projects.push(newProject);
-                await db.saveProjects(projects);
-                await db.logActivity(projectId, { type: 'created', summary: `Project auto-created from forwarded email body: ${subject}` });
-                await sendEmail('diane.k@risk2solution.com',
-                  `[Aurora] New project created from email: ${extracted.clientName}`,
-                  `Aurora has automatically created a new project from a forwarded email.\n\nClient: ${extracted.clientName}\nProject: ${extracted.projectName || subject}\nValue: ${extracted.contractValue || 'TBC'}\nForwarded by: ${fromEmail}\n\nPlease review and update in Aurora:\n${process.env.FRONTEND_URL || ''}\n\nAurora\nR2S Project Management Intelligence`,
-                  true
-                );
-                console.log(`[Poll] Project auto-created from email body: ${extracted.clientName}`);
-                projectCreated = true;
-              } else {
-                console.log(`[Poll] Duplicate detected — project already exists for ${extracted.clientName}`);
-                projectCreated = true;
-              }
-            }
-          } catch(bodyErr) {
-            console.error('[Poll] Email body extraction error:', bodyErr.message);
-          }
-        }
-
-        // Final fallback — prompt Diane to create manually
+        // Fallback — if no attachment processed, prompt Diane to upload manually
         if (!projectCreated) {
           const clientHint = subject.replace(/new (project|agreement|proposal) (for )?/i,'').trim();
-          const valueHint = bodyText.match(/AUD[\s$]*([\d,]+)|USD[\s$]*([\d,]+)|\$([\d,]+)/)?.[0] || '';
+          const valueHint = bodyText.match(/\$([\d,]+)/)?.[0] || '';
           await sendEmail('diane.k@risk2solution.com',
-            `[Aurora] New project detected — please review: ${clientHint}`,
-            `Hi Diane,\n\nAurora detected a forwarded project email from ${fromEmail} but could not automatically extract enough details to create a project.\n\nSubject: ${subject}${valueHint ? '\nValue mentioned: ' + valueHint : ''}\n\nPlease create the project manually in Aurora:\n${process.env.FRONTEND_URL || ''}\n→ Projects → New Project\n\nEmail summary:\n${bodyText.slice(0, 500)}\n\nAurora\nR2S Project Management Intelligence`,
+            `[Aurora] New project detected — please upload contract: ${clientHint}`,
+            `Hi Diane,\n\nAurora detected a new client agreement but could not automatically process the attachment.\n\nSubject: ${subject}${valueHint ? '\nValue mentioned: ' + valueHint : ''}\n\nPlease upload the contract manually:\n${process.env.FRONTEND_URL || ''}\n→ Projects → New Project → Upload Contract\n\nAurora\nR2S Project Management Intelligence`,
             true
           );
         }
@@ -1285,8 +1065,10 @@ async function readConsultantReplies() {
           /remittance|payment received|contact us form|enquiry form|abandoned call|missed call|work order/i.test(bodyText.slice(0, 200));
 
         // Only alert Diane if: internal R2S sender + not noise + looks like genuine project content
-        const looksLikeProject = bodyText.length > 150 && (
-          /project|client|proposal|contract|deliverable|training|workshop|report|phase|scope|invoice milestone|consultant/i.test(bodyText)
+        // Exclude minor internal work — diagram updates, file revisions, routine actions
+        const isMinorInternalWork = /\b(updated?|revision|revised|P0\d|drawing|diagram|heading|warden card|resend|re-?send|amend|amendment|minor change|version \d|v\d+\.\d|draft \d|please action|can you action|are you able to action|please find attached|updated file|updated document)\b/i.test(subject + ' ' + bodyText.slice(0, 400));
+        const looksLikeProject = bodyText.length > 200 && !isMinorInternalWork && (
+          /\b(new project|new engagement|new client|new agreement|new contract|proposal|scope of work|deliverable|phase|consultant assigned|kick.off|onboard)\b/i.test(bodyText)
         );
 
         if (isInternal && !isNoise && looksLikeProject) {
@@ -2602,8 +2384,6 @@ R2S Project Management Intelligence`,
     try { await sendInternalProjectStatusReport(); } catch(e) { console.error('[InternalReport]', e.message); }
     // Operational weekly update to delivery team (Cherry, Janita, Diane, CC Dave)
     try { await sendInternalWeeklyOpsUpdate(); } catch(e) { console.error('[InternalOps]', e.message); }
-    // General internal projects weekly update
-    try { await sendGeneralInternalProjectsUpdate(); } catch(e) { console.error('[GenProjects]', e.message); }
   }
 
   // ── 9. Wednesday PM checklist (Wednesday = dayOfWeek 3 in AEST) ───────────
@@ -2847,518 +2627,91 @@ R2S Project Management Intelligence`,
 }
 
 // ── Client onboarding email ───────────────────────────────────────────────────
-// ── R2S Branded Fillable PDF Onboarding Form ──────────────────────────────────
-function buildOnboardingPDF(opts = {}) {
-  return new Promise((resolve, reject) => {
-    const {
-      clientName = 'Client',
-      projectName = 'Your Engagement',
-      consultant = '',
-      today = new Date().toLocaleDateString('en-AU', { day:'numeric', month:'long', year:'numeric' })
-    } = opts;
-
-    const R2S_RED   = '#D12329';
-    const R2S_DARK  = '#333333';
-    const R2S_MID   = '#666666';
-    const R2S_LIGHT = '#E0DEDE';
-    const R2S_WHITE = '#FFFFFF';
-    const FIELD_BG  = '#FAFAFA';
-    const FIELD_BDR = '#CCCCCC';
-    const W = 595.28, H = 841.89;
-    const MARGIN = 51; // ~18mm
-    const CONTENT_W = W - 2 * MARGIN;
-
-    const doc = new PDFDocument({ size: 'A4', margin: 0, info: {
-      Title: `R2S Client Onboarding Form — ${clientName}`,
-      Author: 'Risk 2 Solution Group',
-      Subject: `Client Onboarding Form — ${projectName}`,
-    }});
-
-    const chunks = [];
-    doc.on('data', c => chunks.push(c));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
-
-    let y = 0;
-
-    // Header
-    doc.rect(0, 0, W, 11).fill(R2S_RED);
-    doc.rect(0, 11, W, 107).fill(R2S_WHITE);
-
-    // Logo
-    const logoPath = path.join(__dirname, 'public', 'logo.png');
-    const fallbackLogo = '/mnt/user-data/uploads/Risk_2_Solution_highres.png';
-    const logoFile = require('fs').existsSync(logoPath) ? logoPath :
-                     require('fs').existsSync(fallbackLogo) ? fallbackLogo : null;
-    if (logoFile) {
-      try { doc.image(logoFile, MARGIN, 20, { height: 40 }); } catch(e) {}
-    } else {
-      doc.font('Helvetica-Bold').fontSize(20).fillColor(R2S_RED)
-         .text('R2S', MARGIN, 25, { lineBreak: false });
-      doc.font('Helvetica').fontSize(8).fillColor(R2S_MID)
-         .text('RISK 2 SOLUTION GROUP', MARGIN, 50, { lineBreak: false });
-    }
-
-    doc.font('Helvetica-Bold').fontSize(15).fillColor(R2S_DARK)
-       .text('Client Onboarding Form', 0, 28, { align:'right', width: W - MARGIN, lineBreak:false });
-    doc.font('Helvetica').fontSize(9).fillColor(R2S_MID)
-       .text(projectName, 0, 50, { align:'right', width: W - MARGIN, lineBreak:false })
-       .text(clientName,  0, 63, { align:'right', width: W - MARGIN, lineBreak:false });
-    if (today) doc.text(today, 0, 76, { align:'right', width: W - MARGIN, lineBreak:false });
-    doc.moveTo(MARGIN, 111).lineTo(W - MARGIN, 111).lineWidth(1.5).stroke(R2S_RED);
-    y = 120;
-
-    // Intro box
-    doc.rect(MARGIN, y, CONTENT_W, 36).fill(R2S_LIGHT);
-    doc.rect(MARGIN, y, 8, 36).fill(R2S_RED);
-    doc.font('Helvetica').fontSize(8.5).fillColor(R2S_DARK)
-       .text('Please complete all sections and return this form to diane.k@risk2solution.com', MARGIN + 14, y + 9, { lineBreak:false })
-       .text('For assistance: Diane Kruger  |  P: 1300 459 970  |  M: +61 415 748 747', MARGIN + 14, y + 22, { lineBreak:false });
-    y += 46;
-
-    const half = CONTENT_W / 2 - 4;
-    const third = CONTENT_W / 3 - 4;
-
-    function secHeader(num, title) {
-      doc.rect(MARGIN, y, CONTENT_W, 20).fill(R2S_DARK);
-      doc.rect(MARGIN, y, 10, 20).fill(R2S_RED);
-      doc.font('Helvetica-Bold').fontSize(9).fillColor(R2S_WHITE)
-         .text(`${num}.  ${title.toUpperCase()}`, MARGIN + 16, y + 6, { lineBreak:false });
-      y += 28;
-    }
-    function lbl(text, x, yy) {
-      doc.font('Helvetica-Bold').fontSize(7).fillColor(R2S_MID).text(text.toUpperCase(), x, yy, { lineBreak:false });
-    }
-    function tf(x, yy, w, h = 20) {
-      doc.rect(x, yy, w, h).fill(FIELD_BG).rect(x, yy, w, h).lineWidth(0.5).stroke(FIELD_BDR);
-    }
-    function ta(x, yy, w, h) {
-      doc.rect(x, yy, w, h).fill(FIELD_BG).rect(x, yy, w, h).lineWidth(0.5).stroke(FIELD_BDR);
-    }
-    function cb(x, yy, label) {
-      const sz = 11;
-      doc.rect(x, yy, sz, sz).fill(R2S_WHITE).rect(x, yy, sz, sz).lineWidth(0.75).stroke(R2S_RED);
-      doc.font('Helvetica').fontSize(9).fillColor(R2S_DARK).text(label, x + sz + 5, yy + 1, { lineBreak:false });
-      return x + sz + 6 + doc.widthOfString(label) + 14;
-    }
-    function prefill(text, x, yy, w) {
-      if (!text) return;
-      doc.font('Helvetica').fontSize(9).fillColor(R2S_DARK).text(text, x + 4, yy + 5, { lineBreak:false, width: w - 8, ellipsis:true });
-    }
-
-    // Section 1 — Project Details
-    secHeader('1', 'Project Details');
-    lbl('Project Name', MARGIN, y); lbl('Client Organisation', MARGIN + half + 8, y); y += 9;
-    tf(MARGIN, y, half); tf(MARGIN + half + 8, y, half);
-    prefill(projectName, MARGIN, y, half); prefill(clientName, MARGIN + half + 8, y, half);
-    y += 30;
-    if (consultant) {
-      lbl('Assigned R2S Consultant / Trainer', MARGIN, y); y += 9;
-      tf(MARGIN, y, CONTENT_W); prefill(consultant, MARGIN, y, CONTENT_W); y += 30;
-    }
-
-    // Section 2 — Primary Contact
-    secHeader('2', 'Primary Contact Details');
-    lbl('Full Name *', MARGIN, y); lbl('Position / Title', MARGIN + half + 8, y); y += 9;
-    tf(MARGIN, y, half); tf(MARGIN + half + 8, y, half); y += 30;
-    lbl('Email Address *', MARGIN, y); lbl('Phone Number *', MARGIN + half + 8, y); y += 9;
-    tf(MARGIN, y, half); tf(MARGIN + half + 8, y, half); y += 32;
-
-    // Section 3 — Reporting Frequency
-    secHeader('3', 'Update Report Frequency');
-    doc.font('Helvetica').fontSize(8.5).fillColor(R2S_DARK)
-       .text('How often would you like to receive project status updates?', MARGIN, y, { lineBreak:false }); y += 13;
-    let cx = MARGIN;
-    for (const l of ['Weekly', 'Fortnightly', 'Monthly', 'Ad hoc / as required']) cx = cb(cx, y, l);
-    y += 24;
-
-    // Section 4 — PO
-    secHeader('4', 'Purchase Order (PO) Requirements');
-    doc.font('Helvetica').fontSize(8.5).fillColor(R2S_DARK)
-       .text('Is a Purchase Order required for invoicing?', MARGIN, y, { lineBreak:false }); y += 13;
-    cb(MARGIN, y, 'No — PO not required'); cb(MARGIN + 110, y, 'Yes — PO required');
-    y += 18; lbl('PO Number (complete if PO required)', MARGIN + 110, y); y += 9;
-    tf(MARGIN + 110, y, CONTENT_W - 110); y += 32;
-
-    // Section 5 — Accounts Payable
-    secHeader('5', 'Accounts Payable Contact');
-    lbl('Contact Name', MARGIN, y); lbl('Email Address', MARGIN + half + 8, y); y += 9;
-    tf(MARGIN, y, half); tf(MARGIN + half + 8, y, half); y += 30;
-    lbl('Phone Number', MARGIN, y); lbl('Invoice / Postal Address', MARGIN + half + 8, y); y += 9;
-    tf(MARGIN, y, half); tf(MARGIN + half + 8, y, half); y += 32;
-
-    // Section 6 — Kick-off Meeting
-    secHeader('6', 'Preferred Kick-off Meeting Dates');
-    doc.font('Helvetica').fontSize(8.5).fillColor(R2S_DARK)
-       .text('Please provide three preferred date options — we will confirm the most suitable time.', MARGIN, y, { lineBreak:false }); y += 13;
-    lbl('Option 1', MARGIN, y); lbl('Option 2', MARGIN + third + 8, y); lbl('Option 3', MARGIN + 2*(third+8), y); y += 9;
-    tf(MARGIN, y, third); tf(MARGIN + third + 8, y, third); tf(MARGIN + 2*(third+8), y, third); y += 28;
-    doc.font('Helvetica').fontSize(8.5).fillColor(R2S_DARK)
-       .text('Preferred meeting format:', MARGIN, y, { lineBreak:false }); y += 13;
-    cx = MARGIN;
-    for (const l of ['Video call (Teams / Zoom)', 'Phone call', 'On-site']) cx = cb(cx, y, l);
-    y += 24;
-
-    // Section 7 — Additional Info
-    secHeader('7', 'Additional Information & Special Requirements');
-    doc.font('Helvetica').fontSize(8.5).fillColor(R2S_DARK)
-       .text('Any special requirements, WHS/site access considerations, or other information:', MARGIN, y, { lineBreak:false }); y += 11;
-    ta(MARGIN, y, CONTENT_W, 50); y += 62;
-
-    // Declaration
-    doc.rect(MARGIN, y, CONTENT_W, 58).fill(R2S_LIGHT);
-    doc.rect(MARGIN, y, 8, 58).fill(R2S_RED);
-    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(R2S_DARK).text('DECLARATION', MARGIN + 14, y + 8, { lineBreak:false });
-    doc.font('Helvetica').fontSize(8).fillColor(R2S_DARK)
-       .text('By completing and returning this form, I confirm the details provided are accurate and', MARGIN + 14, y + 20, { lineBreak:false })
-       .text('authorise Risk 2 Solution Group to proceed with project set-up on this basis.', MARGIN + 14, y + 31, { lineBreak:false });
-    lbl('Authorised by (Name)', MARGIN + 14, y + 43); lbl('Date', MARGIN + half + 8, y + 43);
-    tf(MARGIN + 14, y + 51, half - 14); tf(MARGIN + half + 8, y + 51, half);
-    y += 70;
-
-    // Footer
-    const fY = H - 45;
-    doc.rect(0, fY, W, 45).fill(R2S_DARK);
-    doc.rect(0, H - 8, W, 8).fill(R2S_RED);
-    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(R2S_WHITE)
-       .text('Diane Kruger  |  Corporate Operations Lead  |  Risk 2 Solution Group', MARGIN, fY + 10, { lineBreak:false });
-    doc.font('Helvetica').fontSize(7.5).fillColor(R2S_LIGHT)
-       .text('P: 1300 459 970  |  M: +61 415 748 747  |  E: diane.k@risk2solution.com  |  W: www.risk2solution.com', MARGIN, fY + 22, { lineBreak:false });
-    doc.font('Helvetica').fontSize(7).fillColor('#CC6666')
-       .text('PROTECTING WHAT COUNTS', W - MARGIN - 105, fY + 10, { lineBreak:false });
-
-    doc.end();
-  });
-}
-
-function buildOnboardingFormHtml(project) {
-  const clientName = project.clientName || 'Client';
-  const projectName = project.projectName || 'Your Engagement';
-  const today = new Date().toLocaleDateString('en-AU', { day:'numeric', month:'long', year:'numeric' });
-
-  return `<!DOCTYPE html>
-<html xmlns:o="urn:schemas-microsoft-com:office:office">
-<head><meta charset="utf-8"/><title>R2S Client Onboarding Form</title>
-<style>
-  body { margin:0; padding:0; background:#f5f6fa; font-family:Arial,sans-serif; }
-  .page { max-width:740px; margin:30px auto; background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 2px 16px rgba(0,0,0,.10); }
-  .header { background:#1a1a2e; padding:32px 40px 24px; }
-  .logo-text { font-size:28px; font-weight:700; color:#fff; letter-spacing:2px; }
-  .logo-sub { font-size:11px; color:#6aa3ff; text-transform:uppercase; letter-spacing:3px; margin-top:4px; }
-  .header-title { font-size:18px; color:#fff; margin-top:20px; font-weight:400; }
-  .header-sub { font-size:13px; color:#8899bb; margin-top:6px; }
-  .body { padding:36px 40px; }
-  .intro { font-size:13px; color:#444; line-height:1.7; margin-bottom:28px; padding:16px 20px; background:#f0f4ff; border-left:4px solid #3366cc; border-radius:4px; }
-  .section { margin-bottom:28px; }
-  .section-title { font-size:11px; font-weight:700; color:#3366cc; text-transform:uppercase; letter-spacing:1.5px; margin-bottom:14px; padding-bottom:6px; border-bottom:2px solid #e8edf8; }
-  .field-row { display:flex; gap:16px; margin-bottom:12px; }
-  .field { flex:1; }
-  .field label { display:block; font-size:11px; color:#666; font-weight:600; margin-bottom:5px; text-transform:uppercase; letter-spacing:.5px; }
-  .field-input { width:100%; border:1px solid #d0d8e8; border-radius:5px; padding:9px 12px; font-size:13px; color:#333; background:#fafbfd; box-sizing:border-box; }
-  .option-group { margin-bottom:10px; }
-  .option { display:flex; align-items:center; gap:10px; margin-bottom:8px; padding:10px 14px; border:1px solid #e0e6f0; border-radius:6px; cursor:pointer; }
-  .option:hover { background:#f0f4ff; border-color:#3366cc; }
-  .checkbox { width:18px; height:18px; border:2px solid #3366cc; border-radius:4px; display:inline-block; flex-shrink:0; }
-  .option-label { font-size:13px; color:#333; }
-  .option-input { flex:1; border:none; border-bottom:1px solid #ccc; background:transparent; font-size:13px; padding:2px 6px; color:#333; outline:none; }
-  textarea.field-input { height:80px; resize:vertical; }
-  .footer { background:#f0f4ff; padding:24px 40px; border-top:1px solid #e0e6f0; }
-  .return-note { font-size:12px; color:#555; line-height:1.6; }
-  .return-note strong { color:#1a1a2e; }
-  .sig { margin-top:16px; padding-top:16px; border-top:1px solid #dde4f0; }
-  .sig-name { font-size:14px; font-weight:700; color:#1a1a2e; }
-  .sig-title { font-size:12px; color:#666; margin-top:2px; }
-  .sig-contact { font-size:12px; color:#3366cc; margin-top:6px; }
-  .badge { display:inline-block; background:#e8f0ff; color:#3366cc; font-size:10px; font-weight:700; padding:3px 10px; border-radius:10px; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px; }
-</style>
-</head>
-<body>
-<div class="page">
-  <div class="header">
-    <div class="logo-text">R2S</div>
-    <div class="logo-sub">Risk 2 Solution Group</div>
-    <div class="header-title">Client Onboarding Form</div>
-    <div class="header-sub">${projectName} &nbsp;|&nbsp; ${clientName} &nbsp;|&nbsp; ${today}</div>
-  </div>
-
-  <div class="body">
-    <div class="intro">
-      Please complete this form and return it to <strong>diane.k@risk2solution.com</strong> at your earliest convenience so we can set up your project and get started. All fields marked with a selection are clickable.
-    </div>
-
-    <!-- PRIMARY CONTACT -->
-    <div class="section">
-      <div class="section-title">1. Primary Contact Details</div>
-      <div class="field-row">
-        <div class="field">
-          <label>Full Name</label>
-          <input class="field-input" type="text" placeholder=""/>
-        </div>
-        <div class="field">
-          <label>Position / Title</label>
-          <input class="field-input" type="text" placeholder=""/>
-        </div>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label>Email Address</label>
-          <input class="field-input" type="email" placeholder=""/>
-        </div>
-        <div class="field">
-          <label>Phone Number</label>
-          <input class="field-input" type="tel" placeholder=""/>
-        </div>
-      </div>
-    </div>
-
-    <!-- REPORTING FREQUENCY -->
-    <div class="section">
-      <div class="section-title">2. Update Report Frequency</div>
-      <div class="option-group">
-        <div class="option"><span class="checkbox"></span><span class="option-label">Weekly</span></div>
-        <div class="option"><span class="checkbox"></span><span class="option-label">Fortnightly</span></div>
-        <div class="option"><span class="checkbox"></span><span class="option-label">Monthly</span></div>
-      </div>
-    </div>
-
-    <!-- PURCHASE ORDER -->
-    <div class="section">
-      <div class="section-title">3. Purchase Order (PO) Requirements</div>
-      <div class="option-group">
-        <div class="option">
-          <span class="checkbox"></span>
-          <span class="option-label">No PO required</span>
-        </div>
-        <div class="option">
-          <span class="checkbox"></span>
-          <span class="option-label">Yes — PO required &nbsp; PO Number: </span>
-          <input class="option-input" type="text" placeholder="Enter PO number"/>
-        </div>
-      </div>
-    </div>
-
-    <!-- ACCOUNTS PAYABLE -->
-    <div class="section">
-      <div class="section-title">4. Accounts Payable Contact</div>
-      <div class="field-row">
-        <div class="field">
-          <label>Contact Name</label>
-          <input class="field-input" type="text" placeholder=""/>
-        </div>
-        <div class="field">
-          <label>Email Address</label>
-          <input class="field-input" type="email" placeholder=""/>
-        </div>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label>Phone Number</label>
-          <input class="field-input" type="tel" placeholder=""/>
-        </div>
-        <div class="field"></div>
-      </div>
-    </div>
-
-    <!-- KICK-OFF MEETING -->
-    <div class="section">
-      <div class="section-title">5. Preferred Kick-off Meeting Dates</div>
-      <div style="font-size:12px;color:#888;margin-bottom:12px;">Please provide three preferred options — we will confirm the most suitable date.</div>
-      <div class="field-row">
-        <div class="field">
-          <label>Option 1</label>
-          <input class="field-input" type="text" placeholder="e.g. Mon 14 Oct, anytime"/>
-        </div>
-        <div class="field">
-          <label>Option 2</label>
-          <input class="field-input" type="text" placeholder="e.g. Wed 16 Oct, morning"/>
-        </div>
-        <div class="field">
-          <label>Option 3</label>
-          <input class="field-input" type="text" placeholder="e.g. Fri 18 Oct, afternoon"/>
-        </div>
-      </div>
-    </div>
-
-    <!-- OTHER REQUIREMENTS -->
-    <div class="section">
-      <div class="section-title">6. Additional Information</div>
-      <div class="field">
-        <label>Any other requirements, special considerations or information we should be aware of</label>
-        <textarea class="field-input" placeholder="Enter any relevant notes here…"></textarea>
-      </div>
-    </div>
-  </div>
-
-  <div class="footer">
-    <div class="return-note">
-      Please complete and return this form by replying to <strong>diane.k@risk2solution.com</strong>.<br/>
-      If you have any questions, contact Diane Kruger directly on <strong>1300 459 970</strong>.
-    </div>
-    <div class="sig">
-      <div class="sig-name">Diane Kruger</div>
-      <div class="sig-title">Corporate Operations Lead &nbsp;|&nbsp; Risk 2 Solution Group</div>
-      <div class="sig-contact">P: 1300 459 970 &nbsp;|&nbsp; M: +61 415 748 747 &nbsp;|&nbsp; E: diane.k@risk2solution.com &nbsp;|&nbsp; W: www.risk2solution.com</div>
-    </div>
-  </div>
-</div>
-</body></html>`;
-}
-
-function buildWelcomeEmailHtml(project, welcomeText) {
-  const firstName = (project.clientContact || 'there').split(' ')[0];
-  const today = new Date().toLocaleDateString('en-AU', { day:'numeric', month:'long', year:'numeric' });
-
-  // Split welcome text into paragraphs for clean display
-  const paragraphs = welcomeText
-    .split(/\n\n+/)
-    .map(p => p.trim())
-    .filter(p => p.length > 10 && !p.toLowerCase().startsWith('kind regards') && !p.toLowerCase().startsWith('diane'));
-
-  return `<!DOCTYPE html>
-<html xmlns:o="urn:schemas-microsoft-com:office:office">
-<head><meta charset="utf-8"/><!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]--></head>
-<body style="margin:0;padding:0;background:#f5f6fa;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f6fa;">
-<tr><td align="center" style="padding:24px 8px;">
-<table width="620" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;width:100%;">
-
-  <!-- Header -->
-  <tr><td style="padding-bottom:12px;">
-    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border-radius:10px;">
-    <tr><td style="padding:28px 36px;">
-      <div style="font-size:26px;font-weight:700;color:#ffffff;letter-spacing:2px;font-family:Arial,sans-serif;">R2S</div>
-      <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:3px;margin-top:4px;font-family:Arial,sans-serif;">Risk 2 Solution Group</div>
-      <div style="margin-top:20px;font-size:18px;color:#ffffff;font-family:Arial,sans-serif;">Welcome to R2S</div>
-      <div style="font-size:12px;color:#8899bb;margin-top:4px;font-family:Arial,sans-serif;">${project.projectName || project.clientName} &nbsp;&bull;&nbsp; ${today}</div>
-    </td></tr>
-    </table>
-  </td></tr>
-
-  <!-- Body -->
-  <tr><td style="padding-bottom:12px;">
-    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;border-radius:10px;border:1px solid #e0e6f0;">
-    <tr><td style="padding:32px 36px;">
-
-      <p style="font-size:15px;color:#1a1a2e;margin:0 0 20px;font-family:Arial,sans-serif;">Hi ${firstName},</p>
-
-      ${paragraphs.map(p => {
-        if (p.startsWith('•') || p.startsWith('-') || p.match(/^\d\./)) {
-          // It's a list — render as table rows
-          const items = p.split(/\n/).filter(l => l.trim());
-          return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px;">
-            ${items.map(item => `<tr>
-              <td width="18" style="vertical-align:top;padding-top:2px;"><div style="width:6px;height:6px;background:#3366cc;border-radius:50%;margin-top:6px;"></div></td>
-              <td style="font-size:13px;color:#444;line-height:1.7;font-family:Arial,sans-serif;padding-left:8px;">${item.replace(/^[•\-\d\.]\s*/,'')}</td>
-            </tr>`).join('')}
-          </table>`;
-        }
-        return `<p style="font-size:13px;color:#444;line-height:1.7;margin:0 0 16px;font-family:Arial,sans-serif;">${p}</p>`;
-      }).join('')}
-
-      <!-- Contacts box -->
-      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0f4ff;border-radius:8px;border:1px solid #d0dcf0;margin:20px 0;">
-      <tr><td style="padding:18px 20px;">
-        <div style="font-size:10px;font-weight:700;color:#3366cc;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-family:Arial,sans-serif;">Your R2S Contacts</div>
-        <table cellpadding="0" cellspacing="0" border="0">
-          <tr><td style="font-size:12px;color:#555;padding-bottom:6px;font-family:Arial,sans-serif;"><strong style="color:#1a1a2e;">Project Manager:</strong> &nbsp; Diane Kruger, Corporate Operations Lead</td></tr>
-          <tr><td style="font-size:12px;color:#555;padding-bottom:6px;font-family:Arial,sans-serif;"><strong style="color:#1a1a2e;">Phone:</strong> &nbsp; 1300 459 970 &nbsp;|&nbsp; <strong style="color:#1a1a2e;">Email:</strong> &nbsp; diane.k@risk2solution.com</td></tr>
-          ${project.consultant ? `<tr><td style="font-size:12px;color:#555;font-family:Arial,sans-serif;"><strong style="color:#1a1a2e;">Assigned Consultant:</strong> &nbsp; ${project.consultant}</td></tr>` : ''}
-        </table>
-      </td></tr></table>
-
-      <!-- Form note -->
-      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fff8e8;border-radius:8px;border:1px solid #ffd93d66;margin:20px 0;">
-      <tr><td style="padding:16px 20px;">
-        <div style="font-size:12px;color:#665500;font-family:Arial,sans-serif;line-height:1.6;">
-          <strong>&#128206; Onboarding Form Attached</strong><br/>
-          To get your project set up, please complete and return the attached <strong>R2S Client Onboarding Form</strong>. It only takes a few minutes — simply fill in your details, tick your preferences, and reply to this email.
-        </div>
-      </td></tr></table>
-
-      <!-- Sign off -->
-      <p style="font-size:13px;color:#444;margin:24px 0 8px;font-family:Arial,sans-serif;">We look forward to working with you.</p>
-      <p style="font-size:13px;color:#444;margin:0 0 24px;font-family:Arial,sans-serif;">Kind regards,</p>
-
-      <div style="border-top:1px solid #e0e6f0;padding-top:16px;">
-        <div style="font-size:14px;font-weight:700;color:#1a1a2e;font-family:Arial,sans-serif;">Diane Kruger</div>
-        <div style="font-size:12px;color:#666;margin-top:2px;font-family:Arial,sans-serif;">Corporate Operations Lead &nbsp;|&nbsp; Risk 2 Solution Group</div>
-        <div style="font-size:12px;color:#3366cc;margin-top:6px;font-family:Arial,sans-serif;">P: 1300 459 970 &nbsp;|&nbsp; M: +61 415 748 747 &nbsp;|&nbsp; E: diane.k@risk2solution.com &nbsp;|&nbsp; W: www.risk2solution.com</div>
-        <div style="font-size:11px;color:#999;margin-top:4px;font-family:Arial,sans-serif;">Queensland, Australia</div>
-      </div>
-
-    </td></tr>
-    </table>
-  </td></tr>
-
-  <!-- Footer -->
-  <tr><td align="center" style="padding:12px 0;">
-    <div style="font-size:10px;color:#aaa;font-family:Arial,sans-serif;">Risk 2 Solution Group &nbsp;|&nbsp; www.risk2solution.com &nbsp;|&nbsp; 1300 459 970</div>
-  </td></tr>
-
-</table>
-</td></tr></table>
-</body></html>`;
-}
-
 async function draftClientOnboarding(project) {
   try {
     const context = buildContext(project);
-
-    // Generate warm welcome text (no form in body — that goes as attachment)
-    const welcomeText = await aurora('consultant_briefing',
-      `Write a professional, warm client welcome email from R2S to ${project.clientContact || 'the client'} at ${project.clientName}.
+    const onboardingBody = await aurora('consultant_briefing',
+      `Write a professional client welcome and onboarding email from R2S to ${project.clientContact || 'the client'} at ${project.clientName}.
 
 FORMAT RULES:
-- Plain text paragraphs only. No markdown. No asterisks. No headers.
-- Professional and human-centred tone.
-- Keep it concise — 3-4 short paragraphs maximum.
-- Do NOT include any onboarding form — that will be sent as a separate attachment.
-- Do NOT include a sign-off — that will be added automatically.
+- Plain text only. No asterisks, no bold markdown, no long dashes.
+- Professional, warm, and human-centred tone.
+- Concise — this is a welcome email, not a report.
 
-Cover:
+Write the email starting with "Hi ${(project.clientContact || 'there').split(' ')[0]}," and covering:
+
 1. A warm welcome to the R2S engagement (1-2 sentences)
-2. Brief confirmation of what R2S will be delivering (1-2 sentences referencing: ${project.serviceProvision || project.projectName || 'the project scope'})
-3. What happens next — 3 bullet points: kick-off meeting to be scheduled, scope and timeline to be confirmed, regular updates throughout
-4. A brief note that an onboarding form is attached — ask them to complete and return it to Diane at their earliest convenience`,
+
+2. Brief confirmation of what R2S will be delivering (1-2 sentences referencing the project scope)
+
+3. Your key R2S contacts:
+   Project managed by: Diane Kruger, Corporate Operations Lead
+   Email: diane.k@risk2solution.com | Phone: 1300 459 970
+   ${project.consultant ? 'Assigned consultant/trainer: ' + project.consultant : ''}
+
+4. What happens next (3 bullet points covering: kick-off meeting to be scheduled, scope and timeline to be confirmed, regular updates throughout)
+
+5. A note that Diane is available for any questions
+
+6. Then add this exact section as the final part of the email before the sign-off:
+
+To help us set up your project correctly, please complete and return the following onboarding form:
+
+ONBOARDING FORM — ${project.clientName}
+
+Primary contact person:
+Phone number:
+Email address:
+Position / Title:
+
+Update report frequency (please select one):
+[ ] Weekly
+[ ] Fortnightly
+[ ] Monthly
+
+Is a Purchase Order (PO) required for invoicing?
+[ ] Yes — PO number: ________________________________
+[ ] No
+
+Accounts payable contact name:
+Accounts payable email:
+Accounts payable phone:
+
+Preferred dates for kick-off meeting (please provide 3 options):
+Option 1:
+Option 2:
+Option 3:
+
+Any other information or requirements we should be aware of:
+
+
+Please return this form by reply email to diane.k@risk2solution.com at your earliest convenience so we can get your project started.
+
+Sign off as:
+Kind regards,
+
+Diane Kruger
+Corporate Operations Lead
+Risk 2 Solution Group
+P: 1300 459 970 | M: +61 415 748 747
+E: diane.k@risk2solution.com
+W: www.risk2solution.com
+Queensland, Australia`,
       context
     );
 
-    // Build HTML email body
-    const emailHtml = buildWelcomeEmailHtml(project, welcomeText);
-
-    // Build branded fillable PDF onboarding form
-    const today = new Date().toLocaleDateString('en-AU', { day:'numeric', month:'long', year:'numeric' });
-    const pdfBuffer = await buildOnboardingPDF({
-      clientName: project.clientName || 'Client',
-      projectName: project.projectName || 'Your Engagement',
-      consultant: project.consultant || '',
-      today,
-    });
-    const formFilename = `R2S Onboarding Form - ${(project.clientName || 'Client').replace(/[^a-zA-Z0-9 ]/g,'').trim()}.pdf`;
-
     const draft = {
       id: `d_${Date.now()}_onboard`,
-      projectId: project.id,
-      clientName: project.clientName,
-      projectName: project.projectName,
-      type: 'client_onboarding',
-      urgency: 'routine',
-      toName: project.clientContact,
+      projectId: project.id, clientName: project.clientName,
+      projectName: project.projectName, type: 'client_onboarding',
+      urgency: 'routine', toName: project.clientContact,
       toEmail: project.clientEmail,
-      subject: `Welcome to R2S - ${project.projectName || project.clientName}`,
-      body: emailHtml,
-      isHtml: true,
-      source: 'auto',
-      attachment: {
-        name: formFilename,
-        contentType: 'application/pdf',
-        content: pdfBuffer,
-      },
+      subject: `Welcome to R2S — ${project.projectName || project.clientName}`,
+      body: onboardingBody, source: 'auto',
     };
-
     await db.saveDraft(draft);
     await saveDraftEmail(draft);
-    console.log(`[Onboarding] Branded welcome email + onboarding form drafted for ${project.clientName}`);
+    console.log(`[Onboarding] Client welcome email drafted for ${project.clientName}`);
   } catch (err) {
     if (err.message === 'MONTHLY_CAP_REACHED') throw err;
     console.error('[Onboarding] Draft failed:', err.message);
@@ -4604,7 +3957,7 @@ const IOP_CHECKLIST_TEMPLATE = [
   // PHASE 2 — Two weeks before program start
   { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Each Module', step: 8, group: 'Set up student access to systems',
     task: 'Create an Institute of Presilience (IoP) email address for each enrolled student (first module only — confirm access is active for subsequent modules).',
-    owner: 'Cherry Abadeza', trigger: 'module', daysOffset: -14 },
+    owner: 'Janita Zhang', trigger: 'module', daysOffset: -14 },
   { phase: 2, phaseName: 'Phase 2 — Two Weeks Before Each Module', step: 8, group: 'Set up student access to systems',
     task: 'Confirm each student can access the cohort Teams Classroom using their IoP email. Test access (sign in, view channels, see this module files).',
     owner: 'Janita Zhang', trigger: 'module', daysOffset: -13 },
@@ -5059,7 +4412,7 @@ async function sendInternalProjectStatusReport() {
             <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${ownerColors[i.owner]||'#888'}22;color:${ownerColors[i.owner]||'#888'};font-weight:600;flex-shrink:0">${i.owner.split(' ')[0]}</span>
             <span style="font-size:10px;color:#cc0033;font-weight:600;flex-shrink:0;min-width:50px;text-align:right">${fmt(i.dueDate)}</span>
           </div>`).join('')}
-        </div>` : `<div style="background:#f0fff8;border:1px solid #00c89966;border-radius:8px;padding:10px 12px;margin-bottom:12px;text-align:center">
+        </div>` : `<div style="background:#00e8bb15;border:1px solid #00e8bb44;border-radius:8px;padding:10px 12px;margin-bottom:12px;text-align:center">
           <span style="color:#00e8bb;font-size:12px;font-weight:600">✓ No overdue tasks</span>
         </div>`}
 
@@ -5348,15 +4701,15 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
 
     const fmt = d => new Date(d).toLocaleDateString('en-AU',{day:'numeric',month:'short'});
 
-    // Light theme — works correctly in Outlook replies/forwards
-    const BG    = '#f4f6f9';
-    const CARD  = '#ffffff';
-    const CARD2 = '#f8f9fc';
-    const BORDER= '#e0e4ed';
-    const TEXT  = '#1a1a2e';
-    const TEXT2 = '#444466';
-    const TEXT3 = '#888899';
-    const pctColor = pct>=80?'#00a878':pct>=50?'#cc8800':'#cc2233';
+    // Dark theme colour variables — must be before the html template
+    const BG    = '#0f0f1a';
+    const CARD  = '#1a1a2e';
+    const CARD2 = '#141428';
+    const BORDER= '#2a2a4a';
+    const TEXT  = '#e0e0e0';
+    const TEXT2 = '#aaaaaa';
+    const TEXT3 = '#666680';
+    const pctColor = pct>=80?'#00e8bb':pct>=50?'#ffd93d':'#ff608a';
 
     // Build Excel and get token before html (both referenced in template footer)
     let excelBuffer = null;
@@ -5386,7 +4739,7 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
 </style>
 </head>
 <body style="margin:0;padding:0;background:#0f0f1a;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f6f9;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0f0f1a;">
 <tr><td align="center" style="padding:16px 8px;">
 <table width="680" cellpadding="0" cellspacing="0" border="0" style="max-width:680px;width:100%;">
 
@@ -5500,7 +4853,7 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
   ${overdue.length > 0 ? `<tr><td style="padding-bottom:12px;">
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border:1px solid #ff386044;border-left:4px solid #ff3860;border-radius:8px;">
     <tr><td style="background:#ff386015;padding:10px 16px;border-radius:8px 8px 0 0;">
-      <span style="font-size:10px;font-weight:700;color:#cc2233;text-transform:uppercase;letter-spacing:1px;font-family:Arial,sans-serif;">&#9888; Overdue &mdash; Requires Immediate Attention (${overdue.length})</span>
+      <span style="font-size:10px;font-weight:700;color:#ff608a;text-transform:uppercase;letter-spacing:1px;font-family:Arial,sans-serif;">&#9888; Overdue &mdash; Requires Immediate Attention (${overdue.length})</span>
     </td></tr>
     ${overdue.map((item,ri) => `<tr><td style="padding:10px 16px;border-top:1px solid #2a2a4a;background:${ri%2===0?'#1a1a2e':'#141428'};">
       <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -5511,7 +4864,7 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
     </td></tr>`).join('')}
     </table>
   </td></tr>` : `<tr><td style="padding-bottom:12px;">
-    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0fff8;border:1px solid #00c89966;border-radius:8px;">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#00e8bb15;border:1px solid #00e8bb44;border-radius:8px;">
     <tr><td align="center" style="padding:14px;font-size:13px;font-weight:700;color:#00e8bb;font-family:Arial,sans-serif;">&#10003; No overdue tasks &mdash; great work!</td></tr>
     </table>
   </td></tr>`}
@@ -5520,7 +4873,7 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
   ${dueThisWeek.length > 0 ? `<tr><td style="padding-bottom:12px;">
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border:1px solid #ffd93d44;border-left:4px solid #ffd93d;border-radius:8px;">
     <tr><td style="background:#ffd93d15;padding:10px 16px;border-radius:8px 8px 0 0;">
-      <span style="font-size:10px;font-weight:700;color:#996600;text-transform:uppercase;letter-spacing:1px;font-family:Arial,sans-serif;">&#128203; Due This Week (${dueThisWeek.length})</span>
+      <span style="font-size:10px;font-weight:700;color:#ffd93d;text-transform:uppercase;letter-spacing:1px;font-family:Arial,sans-serif;">&#128203; Due This Week (${dueThisWeek.length})</span>
     </td></tr>
     ${dueThisWeek.map((item,ri) => `<tr><td style="padding:10px 16px;border-top:1px solid #2a2a4a;background:${ri%2===0?'#1a1a2e':'#141428'};">
       <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -5536,7 +4889,7 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
   ${dueSoon.length > 0 ? `<tr><td style="padding-bottom:12px;">
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border:1px solid #6aa3ff44;border-left:4px solid #6aa3ff;border-radius:8px;">
     <tr><td style="background:#6aa3ff15;padding:10px 16px;border-radius:8px 8px 0 0;">
-      <span style="font-size:10px;font-weight:700;color:#3366cc;text-transform:uppercase;letter-spacing:1px;font-family:Arial,sans-serif;">&#128197; Coming Up &mdash; Next 3 Weeks (${dueSoon.length})</span>
+      <span style="font-size:10px;font-weight:700;color:#6aa3ff;text-transform:uppercase;letter-spacing:1px;font-family:Arial,sans-serif;">&#128197; Coming Up &mdash; Next 3 Weeks (${dueSoon.length})</span>
     </td></tr>
     ${dueSoon.slice(0,8).map((item,ri) => `<tr><td style="padding:10px 16px;border-top:1px solid #2a2a4a;background:${ri%2===0?'#1a1a2e':'#141428'};">
       <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -5553,7 +4906,7 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
   ${completedThisWeek.length > 0 ? `<tr><td style="padding-bottom:12px;">
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border:1px solid #00e8bb44;border-left:4px solid #00e8bb;border-radius:8px;">
     <tr><td style="background:#00e8bb15;padding:10px 16px;border-radius:8px 8px 0 0;">
-      <span style="font-size:10px;font-weight:700;color:#00a878;text-transform:uppercase;letter-spacing:1px;font-family:Arial,sans-serif;">&#10003; Completed This Week (${completedThisWeek.length})</span>
+      <span style="font-size:10px;font-weight:700;color:#00e8bb;text-transform:uppercase;letter-spacing:1px;font-family:Arial,sans-serif;">&#10003; Completed This Week (${completedThisWeek.length})</span>
     </td></tr>
     ${completedThisWeek.map((item,ri) => `<tr><td style="padding:9px 16px;border-top:1px solid #2a2a4a;background:${ri%2===0?'#1a1a2e':'#141428'};">
       <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -5828,8 +5181,8 @@ app.post('/api/test/report/internal-leadership', async (req, res) => {
         <div style="font-size:11px;color:#6aa3ff;margin-bottom:12px">${programName} · <span style="color:${statusBadge.color}">${statusBadge.text}</span></div>
         <div style="margin-bottom:4px"><span style="font-size:11px;color:#aaaaaa">${totalDone}/${totalTasks} complete</span><span style="font-weight:700;color:${pctColor}">${pct}%</span></div>
         <div style="background:#2a2a4a;border-radius:4px;height:10px;margin-bottom:12px"><div style="width:${pct}%;background:${pctColor};height:10px;border-radius:4px"></div></div>
-        ${overdue.length>0?`<div style="background:#ff608a15;border:1px solid #ff608a44;border-radius:6px;padding:10px;margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:#cc2233;margin-bottom:6px">⚠ ${overdue.length} OVERDUE</div>${overdue.map(i=>`<div style="font-size:11px;color:#cccccc;margin-bottom:3px">• <b style="color:${ownerColors[i.owner]||'#aaa'}">${i.owner.split(' ')[0]}</b>: ${i.task.slice(0,70)} — <span style="color:#ff608a">${fmt(i.dueDate)}</span></div>`).join('')}</div>`:''}
-        ${dueThisWeek.length>0?`<div style="background:#ffd93d15;border:1px solid #ffd93d44;border-radius:6px;padding:10px"><div style="font-size:10px;font-weight:700;color:#996600;margin-bottom:6px">📋 DUE THIS WEEK (${dueThisWeek.length})</div>${dueThisWeek.map(i=>`<div style="font-size:11px;color:#cccccc;margin-bottom:3px">• <b style="color:${ownerColors[i.owner]||'#aaa'}">${i.owner.split(' ')[0]}</b>: ${i.task.slice(0,70)}</div>`).join('')}</div>`:'<div style="font-size:11px;color:#00e8bb">✓ Nothing due this week</div>'}
+        ${overdue.length>0?`<div style="background:#ff608a15;border:1px solid #ff608a44;border-radius:6px;padding:10px;margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:#ff608a;margin-bottom:6px">⚠ ${overdue.length} OVERDUE</div>${overdue.map(i=>`<div style="font-size:11px;color:#cccccc;margin-bottom:3px">• <b style="color:${ownerColors[i.owner]||'#aaa'}">${i.owner.split(' ')[0]}</b>: ${i.task.slice(0,70)} — <span style="color:#ff608a">${fmt(i.dueDate)}</span></div>`).join('')}</div>`:''}
+        ${dueThisWeek.length>0?`<div style="background:#ffd93d15;border:1px solid #ffd93d44;border-radius:6px;padding:10px"><div style="font-size:10px;font-weight:700;color:#ffd93d;margin-bottom:6px">📋 DUE THIS WEEK (${dueThisWeek.length})</div>${dueThisWeek.map(i=>`<div style="font-size:11px;color:#cccccc;margin-bottom:3px">• <b style="color:${ownerColors[i.owner]||'#aaa'}">${i.owner.split(' ')[0]}</b>: ${i.task.slice(0,70)}</div>`).join('')}</div>`:'<div style="font-size:11px;color:#00e8bb">✓ Nothing due this week</div>'}
       </div>`;
     }
     const html = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office"><body style="margin:0;padding:0;background:#0f0f1a;font-family:Arial,sans-serif"><table width="700" cellpadding="20" cellspacing="0" border="0" align="center" style="max-width:700px;"><tr><td>
@@ -5854,22 +5207,6 @@ app.post('/api/test/report/weekly-pm', async (req, res) => {
     res.json({ success: true, sentTo: 'kandia@risk2solution.com' });
   } catch(e) {
     console.error('[Test] PM follow-up error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.post('/api/general-internal/report', async (req, res) => {
-  try { await sendGeneralInternalProjectsUpdate(); res.json({ success: true }); }
-  catch(e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post('/api/test/report/general-internal', async (req, res) => {
-  try {
-    console.log('[Test] Sending general internal projects update to Kandia...');
-    await sendGeneralInternalProjectsUpdate(true);
-    res.json({ success: true, sentTo: 'kandia@risk2solution.com' });
-  } catch(e) {
-    console.error('[Test] General internal error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -6170,7 +5507,7 @@ async function sendPMChecklistFollowUp() {
 <html xmlns:o="urn:schemas-microsoft-com:office:office">
 <head><meta charset="utf-8"/><!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]--></head>
 <body style="margin:0;padding:0;background:#0f0f1a;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f6f9;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0f0f1a;">
 <tr><td align="center" style="padding:16px 8px;">
 <table width="680" cellpadding="0" cellspacing="0" border="0" style="max-width:680px;width:100%;">
 
@@ -6545,192 +5882,3 @@ app.delete('/api/generic-internal/projects/:id/tasks/:taskId', async (req, res) 
     res.json({ success: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
-
-// ══════════════════════════════════════════════════════════════════════════════
-// GENERAL INTERNAL PROJECTS — Weekly Monday update
-// ══════════════════════════════════════════════════════════════════════════════
-
-async function sendGeneralInternalProjectsUpdate(testMode = false) {
-  const projects = await readGenericInternalProjects();
-  const active = projects.filter(p => p.status === 'Active' || p.status === 'In Progress');
-  if (!active.length) {
-    console.log('[GenProjects] No active general internal projects — skipping weekly update');
-    return;
-  }
-
-  const now = new Date();
-  const now0 = new Date(now); now0.setHours(0,0,0,0);
-  const nextWeek = new Date(now0.getTime() + 7*24*60*60*1000);
-  const threeWeeks = new Date(now0.getTime() + 21*24*60*60*1000);
-  const dateStr = now.toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
-  const fmt = d => new Date(d).toLocaleDateString('en-AU', { day:'numeric', month:'short' });
-
-  // Collect all assigned staff across all active projects
-  const assignedEmails = new Set(['diane.k@risk2solution.com', 'kandia@risk2solution.com']);
-  const allProjectData = [];
-
-  for (const p of active) {
-    const tasks = await readGenericProjectTasks(p.id);
-    const done = tasks.filter(t => t.status === 'Complete').length;
-    const total = tasks.length;
-    const pct = total > 0 ? Math.round(done/total*100) : 0;
-    const pctColor = pct===100?'#00e8bb':pct>=60?'#ffd93d':'#ff608a';
-    const overdue = tasks.filter(t => t.status !== 'Complete' && t.dueDate && new Date(t.dueDate) < now0);
-    const dueThisWeek = tasks.filter(t => t.status !== 'Complete' && t.dueDate && new Date(t.dueDate) >= now0 && new Date(t.dueDate) <= nextWeek);
-    const dueSoon = tasks.filter(t => t.status !== 'Complete' && t.dueDate && new Date(t.dueDate) > nextWeek && new Date(t.dueDate) <= threeWeeks);
-    const completedThisWeek = tasks.filter(t => t.completedAt && (now0 - new Date(t.completedAt)) <= 7*24*60*60*1000);
-
-    // Collect assigned emails
-    tasks.forEach(t => { if (t.ownerEmail) assignedEmails.add(t.ownerEmail); });
-
-    const priorityColor = p.priority === 'High' ? '#ff608a' : p.priority === 'Low' ? '#6aa3ff' : '#ffd93d';
-
-    allProjectData.push({ p, tasks, done, total, pct, pctColor, priorityColor, overdue, dueThisWeek, dueSoon, completedThisWeek });
-  }
-
-  // Build project cards
-  let projectCards = '';
-  for (const { p, tasks, done, total, pct, pctColor, priorityColor, overdue, dueThisWeek, dueSoon, completedThisWeek } of allProjectData) {
-    const borderColor = overdue.length > 0 ? '#ff3860' : pct === 100 ? '#00e8bb' : '#2a2a4a';
-
-    projectCards += `
-    <tr><td style="padding-bottom:12px;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border:1px solid ${borderColor};border-left:4px solid ${priorityColor};border-radius:8px;">
-
-        <!-- Header -->
-        <tr><td style="padding:14px 16px;border-bottom:1px solid #2a2a4a;">
-          <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-            <td>
-              <div style="font-size:14px;font-weight:700;color:#ffffff;font-family:Arial,sans-serif;">${p.projectName}</div>
-              <div style="font-size:10px;margin-top:3px;font-family:Arial,sans-serif;">
-                <span style="color:${priorityColor};background:${priorityColor}22;padding:1px 7px;border-radius:8px;">${p.priority}</span>
-                ${p.deadline ? ` <span style="color:#8899bb;"> &middot; Due ${fmt(p.deadline)}</span>` : ''}
-              </div>
-            </td>
-            <td align="right" style="padding-left:12px;white-space:nowrap;">
-              <div style="font-size:20px;font-weight:700;color:${pctColor};font-family:Arial,sans-serif;">${pct}%</div>
-              <div style="font-size:10px;color:#8899bb;font-family:Arial,sans-serif;">${done}/${total} tasks</div>
-            </td>
-          </tr></table>
-          <!-- Progress bar -->
-          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:8px;background:#2a2a4a;border-radius:3px;height:6px;">
-          <tr><td style="height:6px;">
-            <div style="width:${pct}%;background:${pctColor};height:6px;border-radius:3px;min-width:${pct>0?'4px':'0'};"></div>
-          </td></tr></table>
-        </td></tr>
-
-        ${p.description ? `<tr><td style="padding:10px 16px;border-bottom:1px solid #2a2a4a;font-size:11px;color:#8899bb;font-family:Arial,sans-serif;">${p.description}</td></tr>` : ''}
-
-        ${overdue.length > 0 ? `
-        <tr><td style="padding:10px 16px;border-bottom:1px solid #2a2a4a;background:#ff386010;">
-          <div style="font-size:9px;font-weight:700;color:#ff608a;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;font-family:Arial,sans-serif;">&#9888; Overdue (${overdue.length})</div>
-          ${overdue.map(t => `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:4px;"><tr>
-            <td style="font-size:11px;color:#e0e0e0;font-family:Arial,sans-serif;">${t.task}</td>
-            <td nowrap style="padding-left:8px;font-size:10px;color:#ff608a;font-family:Arial,sans-serif;">${t.owner||''}</td>
-            <td nowrap style="padding-left:8px;font-size:10px;color:#ff608a;font-weight:700;font-family:Arial,sans-serif;">${fmt(t.dueDate)}</td>
-          </tr></table>`).join('')}
-        </td></tr>` : ''}
-
-        ${dueThisWeek.length > 0 ? `
-        <tr><td style="padding:10px 16px;border-bottom:1px solid #2a2a4a;background:#ffd93d08;">
-          <div style="font-size:9px;font-weight:700;color:#ffd93d;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;font-family:Arial,sans-serif;">&#128203; Due This Week (${dueThisWeek.length})</div>
-          ${dueThisWeek.map(t => `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:4px;"><tr>
-            <td style="font-size:11px;color:#e0e0e0;font-family:Arial,sans-serif;">${t.task}</td>
-            <td nowrap style="padding-left:8px;font-size:10px;color:#ffd93d;font-family:Arial,sans-serif;">${t.owner||''}</td>
-            <td nowrap style="padding-left:8px;font-size:10px;color:#ffd93d;font-weight:700;font-family:Arial,sans-serif;">${fmt(t.dueDate)}</td>
-          </tr></table>`).join('')}
-        </td></tr>` : ''}
-
-        ${dueSoon.length > 0 ? `
-        <tr><td style="padding:10px 16px;border-bottom:1px solid #2a2a4a;">
-          <div style="font-size:9px;font-weight:700;color:#6aa3ff;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;font-family:Arial,sans-serif;">&#128197; Coming Up — 3 Weeks (${dueSoon.length})</div>
-          ${dueSoon.map(t => `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:4px;"><tr>
-            <td style="font-size:11px;color:#e0e0e0;font-family:Arial,sans-serif;">${t.task}</td>
-            <td nowrap style="padding-left:8px;font-size:10px;color:#6aa3ff;font-family:Arial,sans-serif;">${t.owner||''}</td>
-            <td nowrap style="padding-left:8px;font-size:10px;color:#6aa3ff;font-weight:700;font-family:Arial,sans-serif;">${fmt(t.dueDate)}</td>
-          </tr></table>`).join('')}
-        </td></tr>` : ''}
-
-        ${completedThisWeek.length > 0 ? `
-        <tr><td style="padding:10px 16px;">
-          <div style="font-size:9px;font-weight:700;color:#00e8bb;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;font-family:Arial,sans-serif;">&#10003; Completed This Week (${completedThisWeek.length})</div>
-          ${completedThisWeek.map(t => `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:4px;"><tr>
-            <td width="16" style="color:#00e8bb;font-size:12px;font-family:Arial,sans-serif;">&#10003;</td>
-            <td style="font-size:11px;color:#888;font-family:Arial,sans-serif;text-decoration:line-through;">${t.task}</td>
-            <td nowrap style="padding-left:8px;font-size:10px;color:#888;font-family:Arial,sans-serif;">${t.owner||''}</td>
-          </tr></table>`).join('')}
-        </td></tr>` : ''}
-
-      </table>
-    </td></tr>`;
-  }
-
-  // Summary stats
-  const totalProjects = active.length;
-  const totalTasks = allProjectData.reduce((s,d) => s + d.total, 0);
-  const totalDone = allProjectData.reduce((s,d) => s + d.done, 0);
-  const totalOverdue = allProjectData.reduce((s,d) => s + d.overdue.length, 0);
-  const totalThisWeek = allProjectData.reduce((s,d) => s + d.dueThisWeek.length, 0);
-  const overallPct = totalTasks > 0 ? Math.round(totalDone/totalTasks*100) : 0;
-  const overallColor = overallPct===100?'#00e8bb':overallPct>=60?'#ffd93d':'#ff608a';
-
-  const html = `<!DOCTYPE html>
-<html xmlns:o="urn:schemas-microsoft-com:office:office">
-<head><meta charset="utf-8"/><!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]--></head>
-<body style="margin:0;padding:0;background:#0f0f1a;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f6f9;">
-<tr><td align="center" style="padding:16px 8px;">
-<table width="680" cellpadding="0" cellspacing="0" border="0" style="max-width:680px;width:100%;">
-
-  <!-- Header -->
-  <tr><td style="padding-bottom:12px;">
-    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a3e;border-radius:10px;border:1px solid #2a2a4a;">
-    <tr><td style="padding:24px 28px;">
-      <div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;font-family:Arial,sans-serif;">${testMode?'&#x1F9EA; TEST &middot; ':''}R2S Internal Projects &middot; Weekly Update</div>
-      <div style="font-size:22px;font-weight:700;color:#ffffff;margin-bottom:4px;font-family:Arial,sans-serif;">General Internal Projects</div>
-      <div style="font-size:12px;color:#8899bb;font-family:Arial,sans-serif;">${dateStr}</div>
-    </td></tr>
-    </table>
-  </td></tr>
-
-  <!-- Summary tiles -->
-  <tr><td style="padding-bottom:12px;">
-    <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-      ${[
-        { label:'Active projects', val:String(totalProjects), color:'#6aa3ff' },
-        { label:'Overall progress', val:`${overallPct}%`, color:overallColor },
-        { label:'Due this week', val:String(totalThisWeek), color:totalThisWeek>0?'#ffd93d':'#00e8bb' },
-        { label:'Overdue', val:String(totalOverdue), color:totalOverdue>0?'#ff608a':'#00e8bb' },
-      ].map((s,i) => `<td width="25%" style="padding:0 ${i<3?'6px':'0'} 0 0;vertical-align:top;">
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;">
-        <tr><td align="center" style="padding:14px 8px;">
-          <div style="font-size:20px;font-weight:700;color:${s.color};font-family:Arial,sans-serif;">${s.val}</div>
-          <div style="font-size:10px;color:#888;text-transform:uppercase;margin-top:4px;font-family:Arial,sans-serif;">${s.label}</div>
-        </td></tr></table>
-      </td>`).join('')}
-    </tr></table>
-  </td></tr>
-
-  <!-- Project cards -->
-  <table width="100%" cellpadding="0" cellspacing="0" border="0">
-  ${projectCards}
-  </table>
-
-  <!-- Footer -->
-  <tr><td align="center" style="padding-top:8px;font-size:10px;color:#555577;font-family:Arial,sans-serif;line-height:1.6;">
-    Aurora &middot; R2S Project Management Intelligence &middot; Confidential<br/>
-    ${testMode ? '&#x1F9EA; TEST SEND &mdash; not sent to full recipient list' : 'Reply to this email to confirm task completion &mdash; Aurora will update automatically.'}
-  </td></tr>
-
-</table>
-</td></tr></table>
-</body></html>`;
-
-  const subject = `${testMode?'[TEST] ':''}[Aurora] Internal Projects — Weekly Update${totalOverdue>0?` ⚠️ ${totalOverdue} overdue`:''}`;
-  const recipients = testMode ? ['kandia@risk2solution.com'] : [...assignedEmails];
-
-  for (const r of recipients) {
-    await sendEmail(r, subject, html, false, [], true);
-  }
-  console.log(`[GenProjects] Weekly update sent to ${recipients.length} recipient(s) — ${totalProjects} projects, ${totalOverdue} overdue`);
-}
