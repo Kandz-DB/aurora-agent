@@ -477,8 +477,6 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
         <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
           <button class="btn btn-p" onclick="showNewGenericProjectModal()">+ New project</button>
           <button class="btn btn-g" onclick="showUploadExtractModal()">📎 Upload / paste to extract</button>
-          <button class="btn btn-g" onclick="api('/api/general-internal/report',{method:'POST'}).then(()=>showToast('Weekly update sent to project team'))">📊 Send weekly update</button>
-          <button onclick="testSend('general-internal',this)" style="background:none;border:1px solid var(--amber);color:var(--amber);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer">🧪 Test send to me</button>
         </div>
         <div id="generic-project-list"><div style="color:var(--text3);font-size:12px">Loading…</div></div>
       </div>
@@ -630,7 +628,13 @@ label{font-size:11px;color:var(--text2);margin-bottom:4px;display:block}
 <div class="modal-bg" id="modal-bg" onclick="if(event.target===this)closeModal()">
   <div class="modal">
     <div class="modal-hdr" id="modal-hdr">
-      <div><div class="modal-title" id="modal-title"></div><div class="modal-sub" id="modal-sub"></div></div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:6px">
+          <div class="modal-title" id="modal-title"></div>
+          <span id="modal-edit-btn" style="color:var(--teal);font-size:11px;cursor:pointer;flex-shrink:0;opacity:0.7" onclick="editModalHeader()" title="Edit client &amp; project name">✎</span>
+        </div>
+        <div class="modal-sub" id="modal-sub"></div>
+      </div>
       <div style="display:flex;align-items:center;gap:8px">
         <div id="modal-delete-area"></div>
         <button class="modal-close" onclick="closeModal()">✕</button>
@@ -848,9 +852,12 @@ function toggleCompleted() {
 function openProject(id) {
   const p = projects.find(x => x.id === id);
   if (!p) return;
+  window._currentProjectId = id;
   const phase = p.phase || 0;
   document.getElementById('modal-title').textContent = p.clientName;
   document.getElementById('modal-sub').textContent   = p.projectName || '';
+  const editBtn = document.getElementById('modal-edit-btn');
+  if (editBtn) editBtn.style.display = '';
   // Set delete button dynamically with safe name
   const deleteArea = document.getElementById('modal-delete-area');
   if (deleteArea) {
@@ -2566,6 +2573,74 @@ async function editField(projectId, field, linkEl) {
   input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { displayEl.textContent = current || '—'; } });
 }
 
+// ── Edit modal header (client name + project name) ───────────────────────────
+async function editModalHeader() {
+  const titleEl = document.getElementById('modal-title');
+  const subEl   = document.getElementById('modal-sub');
+  const editBtn = document.getElementById('modal-edit-btn');
+  if (!titleEl || !subEl || !window._currentProjectId) return;
+
+  const p = projects.find(x => x.id === window._currentProjectId);
+  if (!p) return;
+
+  // Hide pencil while editing
+  editBtn.style.display = 'none';
+
+  // Replace title with input
+  const clientInput = document.createElement('input');
+  clientInput.value = p.clientName || '';
+  clientInput.placeholder = 'Client name';
+  clientInput.style.cssText = 'font-size:17px;font-weight:600;font-family:var(--fs);padding:3px 6px;border-radius:5px;background:var(--card2);border:1px solid var(--teal);color:var(--text);width:100%;box-sizing:border-box';
+  titleEl.innerHTML = '';
+  titleEl.appendChild(clientInput);
+
+  // Replace sub with input
+  const projectInput = document.createElement('input');
+  projectInput.value = p.projectName || '';
+  projectInput.placeholder = 'Project name';
+  projectInput.style.cssText = 'font-size:12px;padding:3px 6px;border-radius:5px;background:var(--card2);border:1px solid var(--teal);color:var(--text2);width:100%;box-sizing:border-box;margin-top:4px';
+  subEl.innerHTML = '';
+  subEl.appendChild(projectInput);
+
+  clientInput.focus();
+  clientInput.select();
+
+  const save = async () => {
+    const newClient  = clientInput.value.trim() || p.clientName;
+    const newProject = projectInput.value.trim() || p.projectName;
+    // Restore display
+    titleEl.textContent = newClient;
+    subEl.textContent   = newProject;
+    editBtn.style.display = '';
+    // Only save if something actually changed
+    if (newClient !== p.clientName || newProject !== p.projectName) {
+      await api('/api/projects/' + p.id, {
+        method: 'PUT',
+        body: JSON.stringify({ clientName: newClient, projectName: newProject })
+      });
+      p.clientName  = newClient;
+      p.projectName = newProject;
+      // Also refresh the tile on the board so it reflects immediately
+      renderProjects();
+    }
+  };
+
+  const onKey = e => {
+    if (e.key === 'Enter') { e.target.blur(); }
+    if (e.key === 'Escape') {
+      titleEl.textContent = p.clientName;
+      subEl.textContent   = p.projectName;
+      editBtn.style.display = '';
+    }
+  };
+  clientInput.addEventListener('blur', save);
+  clientInput.addEventListener('keydown', onKey);
+  projectInput.addEventListener('keydown', onKey);
+  // Tab from client → project
+  clientInput.addEventListener('keydown', e => { if (e.key === 'Tab') { e.preventDefault(); projectInput.focus(); } });
+  projectInput.addEventListener('blur', save);
+}
+
 // ── Project invoicing tracker ─────────────────────────────────────────────────
 async function loadProjectInvoices(projectId) {
   const el = document.getElementById('invoicing-content-' + projectId);
@@ -3201,7 +3276,6 @@ function renderInternalChecklist(project, checklist) {
             <div style="font-size:12px;color:${isDone ? 'var(--text3)' : 'var(--text)'};text-decoration:${isDone ? 'line-through' : 'none'};line-height:1.5">${item.task}</div>
             <div style="display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap">
               <span style="font-size:10px;padding:1px 7px;background:${ownerColor}22;color:${ownerColor};border-radius:10px;border:1px solid ${ownerColor}44">${item.owner}</span>
-              <button type="button" onclick="editChecklistOwner('${project.id}','${item.id}','${item.owner}')" title="Change owner" style="background:none;border:none;color:var(--text3);font-size:10px;cursor:pointer;padding:0 2px;opacity:0.6">✎</button>
               ${item.dueDate ? `<span style="font-size:10px;color:${isOverdue && !isDone ? 'var(--rose)' : 'var(--text3)'}">📅 ${item.dueDate}${isOverdue && !isDone ? ' — OVERDUE' : ''}</span>` : ''}
               ${isDone && item.completedAt ? `<span style="font-size:10px;color:var(--teal)">✓ ${new Date(item.completedAt).toLocaleDateString('en-AU',{day:'numeric',month:'short'})}</span>` : ''}
             </div>
@@ -3234,29 +3308,6 @@ async function toggleChecklistItem(projectId, itemId, btn) {
     const data = await api(`/api/internal/projects/${projectId}/checklist`);
     const project = internalProjects.find(p => p.id === projectId);
     if (project) renderInternalChecklist(project, data.checklist || []);
-  } catch(e) { showToast('Error: ' + e.message, 'var(--rose)'); }
-}
-
-async function editChecklistOwner(projectId, itemId, currentOwner) {
-  const staff = ['Dave Cohen','Diane Kruger','Cherry Abadeza','Janita Zhang','Dr Paul Johnston','Kandia Du Bruyn','Trainer'];
-  const newOwner = prompt(`Reassign task to:\n\n${staff.map((s,i)=>`${i+1}. ${s}`).join('\n')}\n\nCurrent: ${currentOwner}\nEnter name or number:`, currentOwner);
-  if (!newOwner || newOwner === currentOwner) return;
-  const resolved = isNaN(newOwner) ? newOwner.trim() : staff[parseInt(newOwner)-1];
-  if (!resolved || !staff.includes(resolved)) { showToast('Invalid staff member', 'var(--rose)'); return; }
-  const ownerEmails = {
-    'Dave Cohen':'dave.c@risk2solution.com','Diane Kruger':'diane.k@risk2solution.com',
-    'Cherry Abadeza': (typeof CHERRY_EMAIL !== 'undefined' ? CHERRY_EMAIL : 'cherry.a@risk2solution.com'),
-    'Janita Zhang':'janita.z@risk2solution.com','Dr Paul Johnston':'paul.j@risk2solution.com',
-    'Kandia Du Bruyn':'kandia@risk2solution.com','Trainer':'info@risk2solution.com',
-  };
-  try {
-    await api(`/api/internal/projects/${projectId}/checklist/${itemId}`, {
-      method: 'PUT', body: JSON.stringify({ owner: resolved, ownerEmail: ownerEmails[resolved] || 'info@risk2solution.com' })
-    });
-    showToast(`✓ Reassigned to ${resolved}`);
-    // Reload checklist
-    const data = await api(`/api/internal/projects/${projectId}/checklist`);
-    if (currentInternalProject) renderInternalChecklist(currentInternalProject, data.checklist || []);
   } catch(e) { showToast('Error: ' + e.message, 'var(--rose)'); }
 }
 
@@ -3676,139 +3727,7 @@ async function runExtract(btn) {
   }
   btn.textContent = orig; btn.disabled = false;
 }
-// ── Startup ───────────────────────────────────────────────────────────────────
-(function() {
-  const token = sessionStorage.getItem('aurora_token');
-  const ls = document.getElementById('login-screen');
-  if (token) {
-    if (ls) ls.style.display = 'none';
-    loadProjects().then(() => {
-      renderProjects();
-      loadSuggestions();
-    }).catch(() => {
-      sessionStorage.removeItem('aurora_token');
-      if (ls) ls.style.display = 'flex';
-    });
-  } else {
-    if (ls) ls.style.display = 'flex';
-  }
-})();
-
-async function doLogin() {
-  const pwd = document.getElementById('login-pwd').value;
-  const err = document.getElementById('login-error');
-  if (!err) return;
-  if (!pwd) { err.textContent = 'Please enter the password.'; return; }
-  try {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: pwd }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      sessionStorage.setItem('aurora_token', data.token);
-      const ls = document.getElementById('login-screen');
-      if (ls) ls.style.display = 'none';
-      loadProjects().then(() => { renderProjects(); loadSuggestions(); });
-    } else {
-      err.textContent = 'Incorrect password. Please try again.';
-      document.getElementById('login-pwd').value = '';
-      document.getElementById('login-pwd').focus();
-    }
-  } catch(e) {
-    err.textContent = 'Connection error. Please try again.';
-  }
-}
-
 
 </script>
-
-<!-- NEW GENERIC PROJECT MODAL -->
-<div class="modal-bg" id="new-generic-modal-bg" onclick="if(event.target===this)closeNewGenericModal()">
-  <div class="modal" style="max-width:680px;max-height:90vh;overflow-y:auto">
-    <div class="modal-hdr" style="position:sticky;top:0;background:var(--card);z-index:1">
-      <div><div class="modal-title" id="generic-modal-title">New Internal Project</div><div class="modal-sub">General internal project — track tasks and assign to staff</div></div>
-      <button class="modal-close" onclick="closeNewGenericModal()">✕</button>
-    </div>
-    <div style="padding:20px;display:flex;flex-direction:column;gap:12px">
-      <div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Project name *</label>
-        <input id="gp-name" placeholder="e.g. ASQA Renewal 2026" style="width:100%;font-size:13px"/></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Deadline</label>
-          <input id="gp-deadline" type="date" style="width:100%;font-size:12px"/></div>
-        <div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Priority</label>
-          <select id="gp-priority" style="width:100%;font-size:12px">
-            <option value="High">High</option><option value="Medium" selected>Medium</option><option value="Low">Low</option>
-          </select></div>
-      </div>
-      <div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Description</label>
-        <textarea id="gp-description" rows="3" placeholder="What is this project about?" style="width:100%;font-size:12px;resize:vertical"></textarea></div>
-      <div><label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px">Notes</label>
-        <textarea id="gp-notes" rows="2" placeholder="Any additional context…" style="width:100%;font-size:12px;resize:vertical"></textarea></div>
-      <div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <label style="font-size:11px;color:var(--text2);font-weight:600">Tasks / Deliverables</label>
-          <button type="button" onclick="addGenericTaskRow()" style="background:none;border:1px solid var(--teal);color:var(--teal);font-size:10px;padding:2px 8px;border-radius:4px;cursor:pointer">+ Add task</button>
-        </div>
-        <div id="gp-tasks-container"></div>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:4px">
-        <button class="btn btn-p" onclick="createGenericProject(this)">Create project &amp; assign tasks</button>
-        <button class="btn btn-g" onclick="closeNewGenericModal()">Cancel</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- UPLOAD/EXTRACT MODAL -->
-<div class="modal-bg" id="upload-extract-modal-bg" onclick="if(event.target===this)closeUploadExtractModal()">
-  <div class="modal" style="max-width:600px">
-    <div class="modal-hdr">
-      <div><div class="modal-title">Extract from documents &amp; email</div><div class="modal-sub">Upload files and/or paste text — Aurora combines everything and extracts project requirements</div></div>
-      <button class="modal-close" onclick="closeUploadExtractModal()">✕</button>
-    </div>
-    <div style="padding:20px;display:flex;flex-direction:column;gap:14px">
-      <div>
-        <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:6px">Upload files <span style="color:var(--text3)">(PDF, Word, .txt — multiple allowed)</span></label>
-        <div id="extract-dropzone" onclick="document.getElementById('extract-files').click()"
-          style="border:2px dashed var(--border);border-radius:8px;padding:20px;text-align:center;cursor:pointer;"
-          ondragover="event.preventDefault();this.style.borderColor='var(--teal)'"
-          ondragleave="this.style.borderColor='var(--border)'"
-          ondrop="handleExtractDrop(event)">
-          <div style="font-size:24px;margin-bottom:6px">📎</div>
-          <div style="font-size:12px;color:var(--text2)">Click to choose files or drag &amp; drop here</div>
-          <div style="font-size:10px;color:var(--text3);margin-top:4px">PDF, Word, .txt — up to 50MB each</div>
-        </div>
-        <input type="file" id="extract-files" multiple accept=".pdf,.doc,.docx,.txt" style="display:none" onchange="updateFileList()"/>
-        <div id="extract-file-list" style="margin-top:8px;"></div>
-      </div>
-      <div style="text-align:center;font-size:11px;color:var(--text3)">— and/or —</div>
-      <div>
-        <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:6px">Paste email or additional text <span style="color:var(--text3)">(copy from Outlook: Ctrl+A → Ctrl+C → paste here)</span></label>
-        <textarea id="extract-text" rows="5" placeholder="Paste email content, instructions, or any other text here…" style="width:100%;font-size:12px;resize:vertical"></textarea>
-      </div>
-      <div id="extract-status" style="font-size:11px;color:var(--text3)"></div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-p" onclick="runExtract(this)">⚡ Extract requirements</button>
-        <button class="btn btn-g" onclick="closeUploadExtractModal()">Cancel</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- LOGIN SCREEN -->
-<div id="login-screen" style="position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:999;flex-direction:column;gap:0">
-  <div class="login-box">
-    <div class="login-logo">A</div>
-    <div class="login-title">Aurora</div>
-    <div class="login-sub">R2S Project Management Intelligence</div>
-    <input id="login-pwd" class="login-input" type="password" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()"/>
-    <button class="login-btn" onclick="doLogin()">Sign in</button>
-    <div id="login-error" class="login-error"></div>
-    <div class="login-brand">Risk 2 Solution &copy; 2026</div>
-  </div>
-</div>
-
 </body>
 </html>
