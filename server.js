@@ -1381,6 +1381,202 @@ Return this exact JSON (no other text):
   }
 }
 
+// ── Build Outlook Classic HTML client status email ────────────────────────────
+function buildStatusEmailHtml({ clientContact, clientName, projectName, phaseName, phaseIndex, dueDate, deliverables, statusBody }) {
+  const dueDateFormatted = dueDate
+    ? new Date(dueDate).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })
+    : null;
+
+  const deliverableRows = (deliverables || '')
+    .split(/[\n,;]+/)
+    .map(d => d.trim())
+    .filter(d => d.length > 3)
+    .slice(0, 6)
+    .map(d => `<tr><td style="padding:4px 0;font-family:Arial,sans-serif;font-size:14px;color:#444444;">- ${d}</td></tr>`)
+    .join('');
+
+  // Phase progress indicator — filled dots for completed phases, open for upcoming
+  const phaseNames = ['Kick-off', 'Deployment', 'Monitoring and Review', 'Reporting', 'Close-out'];
+  const phaseRow = phaseNames.map((name, i) => {
+    const done   = i < phaseIndex;
+    const active = i === phaseIndex;
+    const color  = done ? '#1a5f7a' : active ? '#1a5f7a' : '#cccccc';
+    const textColor = done || active ? '#1a5f7a' : '#999999';
+    const weight = active ? 'bold' : 'normal';
+    return `<td align="center" style="padding:0 4px;vertical-align:top;">
+      <table cellpadding="0" cellspacing="0" border="0"><tr><td align="center">
+        <div style="width:12px;height:12px;border-radius:50%;background:${color};margin:0 auto 4px auto;"></div>
+        <div style="font-family:Arial,sans-serif;font-size:10px;color:${textColor};font-weight:${weight};white-space:nowrap;">${name}</div>
+      </td></tr></table>
+    </td>`;
+  }).join('');
+
+  // Connecting line between dots using a border-bottom trick
+  const connectorRow = phaseNames.slice(0, -1).map((_, i) => {
+    const filled = i < phaseIndex;
+    return `<td style="border-bottom:2px solid ${filled ? '#1a5f7a' : '#cccccc'};width:80px;"></td>`;
+  });
+
+  const greeting = clientContact ? `Dear ${clientContact.split(' ')[0]},` : 'Dear valued client,';
+
+  return `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="UTF-8">
+<!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]-->
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f8;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6f8;">
+  <tr>
+    <td align="center" style="padding:24px 10px;">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#ffffff;border:1px solid #dde2e8;">
+
+        <!-- Header -->
+        <tr>
+          <td style="background-color:#1a5f7a;padding:28px 36px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td>
+                  <div style="font-family:Arial,sans-serif;font-size:11px;color:#b0d8e8;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;">Risk 2 Solution Group</div>
+                  <div style="font-family:Arial,sans-serif;font-size:22px;font-weight:bold;color:#ffffff;margin-bottom:4px;">Weekly Project Update</div>
+                  <div style="font-family:Arial,sans-serif;font-size:13px;color:#b0d8e8;">${projectName || clientName}</div>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:32px 36px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+
+              <!-- Greeting -->
+              <tr>
+                <td style="font-family:Arial,sans-serif;font-size:15px;color:#333333;padding-bottom:18px;">
+                  ${greeting}
+                </td>
+              </tr>
+
+              <!-- Intro -->
+              <tr>
+                <td style="font-family:Arial,sans-serif;font-size:14px;color:#444444;line-height:1.7;padding-bottom:24px;">
+                  Thank you for your continued partnership with Risk 2 Solution. Please find below a brief update on the progress of the <strong>${projectName || clientName}</strong> engagement.
+                </td>
+              </tr>
+
+              <!-- Phase tracker -->
+              <tr>
+                <td style="padding-bottom:24px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="font-family:Arial,sans-serif;font-size:12px;font-weight:bold;color:#1a5f7a;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:14px;">
+                        Project Phase
+                      </td>
+                    </tr>
+                    <tr>
+                      ${phaseRow}
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <!-- Project details -->
+              <tr>
+                <td style="padding-bottom:24px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="font-family:Arial,sans-serif;font-size:12px;font-weight:bold;color:#1a5f7a;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:12px;border-bottom:1px solid #e0e8ed;">
+                        Project Details
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding-top:12px;">
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                          <tr>
+                            <td width="40%" style="font-family:Arial,sans-serif;font-size:13px;color:#777777;padding-bottom:8px;">Client</td>
+                            <td width="60%" style="font-family:Arial,sans-serif;font-size:13px;color:#333333;font-weight:bold;padding-bottom:8px;">${clientName}</td>
+                          </tr>
+                          <tr>
+                            <td style="font-family:Arial,sans-serif;font-size:13px;color:#777777;padding-bottom:8px;">Project</td>
+                            <td style="font-family:Arial,sans-serif;font-size:13px;color:#333333;font-weight:bold;padding-bottom:8px;">${projectName || clientName}</td>
+                          </tr>
+                          <tr>
+                            <td style="font-family:Arial,sans-serif;font-size:13px;color:#777777;padding-bottom:8px;">Current Phase</td>
+                            <td style="font-family:Arial,sans-serif;font-size:13px;color:#333333;font-weight:bold;padding-bottom:8px;">${phaseName}</td>
+                          </tr>
+                          ${dueDateFormatted ? `<tr><td style="font-family:Arial,sans-serif;font-size:13px;color:#777777;padding-bottom:8px;">Target Completion</td><td style="font-family:Arial,sans-serif;font-size:13px;color:#333333;font-weight:bold;padding-bottom:8px;">${dueDateFormatted}</td></tr>` : ''}
+                        </table>
+                      </td>
+                    </tr>
+                    ${deliverableRows ? `
+                    <tr>
+                      <td style="padding-top:4px;">
+                        <div style="font-family:Arial,sans-serif;font-size:13px;color:#777777;padding-bottom:6px;">Key Deliverables</div>
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0">${deliverableRows}</table>
+                      </td>
+                    </tr>` : ''}
+                  </table>
+                </td>
+              </tr>
+
+              <!-- This week's update -->
+              <tr>
+                <td style="padding-bottom:24px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="font-family:Arial,sans-serif;font-size:12px;font-weight:bold;color:#1a5f7a;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:12px;border-bottom:1px solid #e0e8ed;">
+                        Progress Update
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="font-family:Arial,sans-serif;font-size:14px;color:#444444;line-height:1.7;padding-top:12px;">
+                        ${statusBody}
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <!-- Closing -->
+              <tr>
+                <td style="font-family:Arial,sans-serif;font-size:14px;color:#444444;line-height:1.7;padding-bottom:28px;">
+                  If you have any questions or would like to discuss the project, please do not hesitate to contact us. We are always happy to help.
+                </td>
+              </tr>
+
+              <!-- Signature -->
+              <tr>
+                <td style="font-family:Arial,sans-serif;font-size:14px;color:#333333;border-top:1px solid #e0e8ed;padding-top:20px;">
+                  Kind regards,<br>
+                  <strong>Diane Kruger</strong><br>
+                  <span style="color:#666666;">Corporate Operations Lead | Risk 2 Solution Group</span><br>
+                  <span style="color:#666666;">E: diane.k@risk2solution.com</span><br>
+                  <span style="color:#666666;">W: www.risk2solution.com.au</span>
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background-color:#f4f6f8;padding:16px 36px;border-top:1px solid #dde2e8;">
+            <span style="font-family:Arial,sans-serif;font-size:11px;color:#888888;">
+              This update was prepared by Aurora, R2S Project Management Intelligence. Risk 2 Solution Group | www.risk2solution.com.au
+            </span>
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>`;
+}
+
 // ── Build phase-aware Outlook Classic HTML check-in email ─────────────────────
 function buildCheckinEmailHtml({ firstName, clientName, projectName, phaseName, phaseIndex, dueDate, deliverables, projectId }) {
   // Phase-specific context: what should have been done by now, what is upcoming
@@ -2535,25 +2731,68 @@ R2S Project Management Intelligence`,
 
   // ── 5. Weekly actions (Mondays only) ─────────────────────────────────────
   if (isMonday) {
-    // 5b. Weekly client status email drafts
+    // 5b. Weekly client status email drafts — saved to info@ Drafts for Diane to review and send
     for (const p of standard) {
       if (['Completed','Terminated','On Hold'].includes(p.status)) continue;
       try {
-        const context = buildContext(p);
-        const text = await aurora('status_email',
-          `Draft a short weekly status update email to ${p.clientContact || 'the client'} at ${p.clientName} for the ${p.projectName || p.clientName} project. Current phase: ${PHASES[p.phase||0]}. 3-4 sentences: what happened this week, what is next, anything needed from the client. Professional and concise.`,
+        const context   = buildContext(p);
+        const phaseName = PHASES[p.phase || 0] || 'Kick-off';
+
+        // Use Aurora to generate the progress update paragraph only
+        const statusBody = await aurora('status_email',
+          `Write 2-3 sentences summarising this week's progress on the ${p.projectName || p.clientName} project for ${p.clientName}. Current phase: ${phaseName}. Focus on: what was done or progressed this week, what is coming up next, and anything the client may need to be aware of or provide input on. Write in third person or passive voice as an update (not addressed directly to the reader). Professional and concise. Do not use long dashes or bullet points.`,
           context
         );
+
+        const bodyHtml = buildStatusEmailHtml({
+          clientContact : p.clientContact,
+          clientName    : p.clientName,
+          projectName   : p.projectName,
+          phaseName,
+          phaseIndex    : p.phase || 0,
+          dueDate       : p.dueDate,
+          deliverables  : p.deliverables,
+          statusBody,
+        });
+
+        // Plain-text fallback for portal preview
+        const bodyText = [
+          `Dear ${p.clientContact ? p.clientContact.split(' ')[0] : 'valued client'},`,
+          '',
+          `Thank you for your continued partnership with Risk 2 Solution. Please find below a brief update on the ${p.projectName || p.clientName} engagement.`,
+          '',
+          `Current Phase: ${phaseName}`,
+          p.dueDate ? `Target Completion: ${new Date(p.dueDate).toLocaleDateString('en-AU', { day:'numeric', month:'long', year:'numeric' })}` : '',
+          '',
+          statusBody,
+          '',
+          'If you have any questions, please do not hesitate to get in touch.',
+          '',
+          'Kind regards,',
+          'Diane Kruger',
+          'Corporate Operations Lead | Risk 2 Solution Group',
+          'E: diane.k@risk2solution.com',
+        ].filter(l => l !== null).join('\n');
+
         const draft = {
-          id: `d_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
-          projectId: p.id, clientName: p.clientName, projectName: p.projectName,
-          type: 'status_email', urgency: 'routine',
-          toName: p.clientContact, toEmail: p.clientEmail,
-          subject: `${p.projectName || p.clientName} — Weekly update`,
-          body: text, source: 'batch',
+          id           : `d_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+          projectId    : p.id,
+          clientName   : p.clientName,
+          projectName  : p.projectName,
+          type         : 'status_email',
+          urgency      : 'routine',
+          toName       : 'Diane Kruger',
+          toEmail      : 'diane.k@risk2solution.com',
+          clientContact: p.clientContact,
+          clientEmail  : p.clientEmail,
+          subject      : `${p.projectName || p.clientName} - Weekly update`,
+          body         : bodyText,
+          bodyHtml,
+          source       : 'batch',
         };
         await db.saveDraft(draft);
         await saveDraftEmail(draft);
+        console.log(`[Batch] Status email draft created for ${p.clientName}`);
       } catch (err) {
         if (err.message === 'MONTHLY_CAP_REACHED') break;
         console.error(`[Batch] Status email error on ${p.clientName}:`, err.message);
