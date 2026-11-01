@@ -4629,29 +4629,161 @@ async function sendInternalTaskReminder(project, item) {
   const ownerEmail = item.ownerEmail || INTERNAL_STAFF[item.owner] || 'info@risk2solution.com';
   const programName = project.programType === 'grad_cert'
     ? 'Graduate Certificate in Organisational Resilience, Risk and High Reliability (11056NAT)'
-    : 'Graduate Diploma of Organisational Presilience®, Risk and High Performance (11066NAT)';
+    : 'Graduate Diploma of Organisational Presilience, Risk and High Performance (11066NAT)';
 
-  const subject = `[Aurora] Action required — ${project.cohortName}: ${item.group}`;
-  const body = `Hi ${item.owner.split(' ')[0]},
+  const firstName = item.owner.split(' ')[0];
+  const dueDateFormatted = item.dueDate
+    ? new Date(item.dueDate).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+    : 'As soon as possible';
 
-Aurora is writing to remind you of an upcoming task for the ${programName} — ${project.cohortName} cohort.
+  // Determine urgency label based on days until due
+  const daysUntil = item.dueDate
+    ? Math.round((new Date(item.dueDate) - new Date()) / (1000 * 60 * 60 * 24))
+    : null;
+  let urgencyLabel = 'Action Required';
+  let urgencyColor = '#1a5f7a';
+  if (daysUntil !== null && daysUntil < 0)  { urgencyLabel = 'Overdue';      urgencyColor = '#c0392b'; }
+  else if (daysUntil !== null && daysUntil === 0) { urgencyLabel = 'Due Today'; urgencyColor = '#e67e22'; }
+  else if (daysUntil !== null && daysUntil <= 2)  { urgencyLabel = 'Due Soon';  urgencyColor = '#e67e22'; }
 
-TASK: ${item.task}
-PHASE: ${item.phaseName}
-DUE: ${item.dueDate || 'As soon as possible'}
-ASSIGNED TO: ${item.owner}
+  const subject = `[Aurora] Action required - ${project.cohortName}: ${item.group}`;
 
-Please action this task and reply to this email (to info@risk2solution.com) once it is complete. Aurora will automatically mark it as done when your reply is received.
+  const html = `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="UTF-8">
+<!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]-->
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f8;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6f8;">
+  <tr>
+    <td align="center" style="padding:24px 10px;">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#ffffff;border:1px solid #dde2e8;">
 
-Aurora
-R2S Project Management Intelligence
+        <!-- Header -->
+        <tr>
+          <td style="background-color:#1a5f7a;padding:28px 36px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td>
+                  <div style="font-family:Arial,sans-serif;font-size:11px;color:#b0d8e8;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;">Institute of Presilience</div>
+                  <div style="font-family:Arial,sans-serif;font-size:22px;font-weight:bold;color:#ffffff;margin-bottom:4px;">Task Reminder</div>
+                  <div style="font-family:Arial,sans-serif;font-size:13px;color:#b0d8e8;">${project.cohortName}</div>
+                </td>
+                <td align="right" valign="top">
+                  <table cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="background-color:${urgencyColor};padding:6px 14px;border-radius:4px;">
+                        <span style="font-family:Arial,sans-serif;font-size:12px;font-weight:bold;color:#ffffff;">${urgencyLabel}</span>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
 
----
-Task ID: ${item.id} (include this in your reply to auto-confirm)`;
+        <!-- Body -->
+        <tr>
+          <td style="padding:32px 36px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
 
-  // Only CC Diane if she is NOT the primary recipient (i.e. she's not the assigned owner)
-  const cc = item.owner === 'Diane Kruger' ? [] : [];
-  await sendEmail(ownerEmail, subject, body, false, cc);
+              <!-- Greeting -->
+              <tr>
+                <td style="font-family:Arial,sans-serif;font-size:15px;color:#333333;padding-bottom:18px;">
+                  Hi ${firstName},
+                </td>
+              </tr>
+
+              <!-- Intro -->
+              <tr>
+                <td style="font-family:Arial,sans-serif;font-size:14px;color:#444444;line-height:1.7;padding-bottom:24px;">
+                  This is a reminder from Aurora about an upcoming task assigned to you for the <strong>${project.cohortName}</strong> cohort.
+                </td>
+              </tr>
+
+              <!-- Task details box -->
+              <tr>
+                <td style="padding-bottom:24px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="font-family:Arial,sans-serif;font-size:12px;font-weight:bold;color:#1a5f7a;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:12px;border-bottom:1px solid #e0e8ed;">
+                        Task Details
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding-top:14px;">
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                          <tr>
+                            <td width="35%" style="font-family:Arial,sans-serif;font-size:13px;color:#777777;padding-bottom:10px;vertical-align:top;">Programme</td>
+                            <td width="65%" style="font-family:Arial,sans-serif;font-size:13px;color:#333333;padding-bottom:10px;vertical-align:top;">${programName}</td>
+                          </tr>
+                          <tr>
+                            <td style="font-family:Arial,sans-serif;font-size:13px;color:#777777;padding-bottom:10px;vertical-align:top;">Cohort</td>
+                            <td style="font-family:Arial,sans-serif;font-size:13px;color:#333333;padding-bottom:10px;vertical-align:top;">${project.cohortName}</td>
+                          </tr>
+                          <tr>
+                            <td style="font-family:Arial,sans-serif;font-size:13px;color:#777777;padding-bottom:10px;vertical-align:top;">Phase</td>
+                            <td style="font-family:Arial,sans-serif;font-size:13px;color:#333333;padding-bottom:10px;vertical-align:top;">${item.phaseName}</td>
+                          </tr>
+                          <tr>
+                            <td style="font-family:Arial,sans-serif;font-size:13px;color:#777777;padding-bottom:10px;vertical-align:top;">Task</td>
+                            <td style="font-family:Arial,sans-serif;font-size:13px;font-weight:bold;color:#1a5f7a;padding-bottom:10px;vertical-align:top;">${item.task}</td>
+                          </tr>
+                          <tr>
+                            <td style="font-family:Arial,sans-serif;font-size:13px;color:#777777;padding-bottom:10px;vertical-align:top;">Assigned to</td>
+                            <td style="font-family:Arial,sans-serif;font-size:13px;color:#333333;padding-bottom:10px;vertical-align:top;">${item.owner}</td>
+                          </tr>
+                          <tr>
+                            <td style="font-family:Arial,sans-serif;font-size:13px;color:#777777;vertical-align:top;">Due date</td>
+                            <td style="font-family:Arial,sans-serif;font-size:13px;font-weight:bold;color:${urgencyColor};vertical-align:top;">${dueDateFormatted}</td>
+                          </tr>
+                        </table>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <!-- Action instruction -->
+              <tr>
+                <td style="font-family:Arial,sans-serif;font-size:14px;color:#444444;line-height:1.7;padding-bottom:24px;">
+                  Once you have completed this task, please reply to this email and Aurora will automatically mark it as done in the project checklist. No special wording is needed - a simple reply confirming completion is all that is required.
+                </td>
+              </tr>
+
+              <!-- Signature -->
+              <tr>
+                <td style="font-family:Arial,sans-serif;font-size:14px;color:#333333;border-top:1px solid #e0e8ed;padding-top:20px;">
+                  Kind regards,<br>
+                  <strong>Aurora</strong><br>
+                  <span style="color:#666666;">R2S Project Management Intelligence</span><br>
+                  <span style="color:#666666;">E: info@risk2solution.com</span>
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+
+        <!-- Footer with task ID for auto-confirm -->
+        <tr>
+          <td style="background-color:#f4f6f8;padding:14px 36px;border-top:1px solid #dde2e8;">
+            <span style="font-family:Arial,sans-serif;font-size:11px;color:#888888;">
+              Task ID: ${item.id} - include this in your reply to auto-confirm. Aurora - R2S Project Management Intelligence.
+            </span>
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>`;
+
+  await sendEmail(ownerEmail, subject, html, false, []);
   console.log(`[Internal] Reminder sent to ${item.owner} (${ownerEmail}): ${item.task.slice(0, 60)}`);
 }
 
