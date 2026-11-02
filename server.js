@@ -899,10 +899,218 @@ async function readConsultantReplies() {
       }
 
       // Skip Aurora's own emails — prevents infinite feedback loops
+      // BUT: do NOT skip emails from Diane or Kandia even if sent via info@ mailbox
       const isXeroInvoice = fromEmail.toLowerCase().includes('xero.com') ||
                             fromEmail.toLowerCase().includes('post.xero.com');
 
-      if (subject.startsWith('[Aurora]') || fromEmail.toLowerCase() === (process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com').toLowerCase()) {
+      const isTrustedSender = ['diane.k@risk2solution.com', 'kandia@risk2solution.com']
+        .includes(fromEmail.toLowerCase());
+      const isAuroraGenerated = subject.startsWith('[Aurora]');
+      const isSharedMailboxSelf = fromEmail.toLowerCase() === (process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com').toLowerCase();
+
+      // ── Cohort scheduling detection — Diane or Kandia emailing in a new cohort schedule ──
+      // Detect BEFORE the skip logic so it catches emails from any R2S address
+      const isCohortScheduleEmail =
+        (isTrustedSender || isSharedMailboxSelf) &&
+        !isAuroraGenerated &&
+        /grad(?:uate)?\s+(?:cert(?:ificate)?|dip(?:loma)?)|11056NAT|11066NAT|cohort|new\s+intake|module\s+schedule|schedule\s+(?:the\s+)?(?:grad|cert|diploma)|program(?:me)?\s+dates|delivery\s+dates|delivery\s+schedule/i.test(subject + ' ' + bodyText.slice(0, 1000));
+
+      if (isCohortScheduleEmail) {
+        console.log(`[Poll] Cohort schedule email detected from ${fromEmail} — extracting details`);
+        try {
+          const cohortJson = await aurora('status_report',
+            `You are reading an email from an R2S team member scheduling a new cohort for an internal training programme (Graduate Certificate or Graduate Diploma).
+
+Extract the following fields from the email and return ONLY valid JSON (no markdown, no explanation):
+{
+  "cohortName": "short label e.g. '2026 Cohort August'",
+  "programType": "grad_cert OR grad_dip",
+  "programStart": "YYYY-MM-DD or null",
+  "programEnd": "YYYY-MM-DD or null",
+  "studentCount": number or null,
+  "notes": "any other relevant notes",
+  "moduleDates": [
+    { "moduleNumber": 1, "title": "Module 1 title or null", "date": "YYYY-MM-DD", "startTime": "HH:MM or null", "endTime": "HH:MM or null", "deliveryMethod": "online or in-person or null", "location": "location or null" }
+  ]
+}
+
+Rules:
+- programType must be "grad_cert" if Graduate Certificate / 11056NAT, or "grad_dip" if Graduate Diploma / 11066NAT
+- Extract ALL module/session dates mentioned — even if just listed as "Module 1: 6 Nov 2026" style
+- If no start/end time is given, use null
+- If studentCount is not mentioned, use null
+- cohortName should describe the intake clearly (year + month if available)
+- If you cannot determine programType, default to "grad_dip"
+- Return ONLY the JSON object, nothing else
+
+EMAIL SUBJECT: ${subject}
+EMAIL BODY:
+${bodyText.slice(0, 4000)}`,
+            ''
+          );
+
+          let parsed = null;
+          try {
+            const jsonMatch = cohortJson.match(/\{[\s\S]*\}/);
+            parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+          } catch(parseErr) {
+            console.error('[Cohort] JSON parse error:', parseErr.message, '— raw:', cohortJson.slice(0, 200));
+          }
+
+          if (parsed && parsed.programType && (parsed.moduleDates?.length > 0 || parsed.programStart)) {
+            console.log(`[Cohort] Extracted: ${parsed.cohortName} (${parsed.programType}) — ${parsed.moduleDates?.length || 0} modules`);
+
+            // Check for duplicate cohort (same name already exists)
+            const existingCohorts = await readInternalProjects();
+            const duplicate = existingCohorts.find(c =>
+              c.cohortName?.toLowerCase().trim() === (parsed.cohortName || '').toLowerCase().trim()
+            );
+
+            if (duplicate) {
+              console.log(`[Cohort] Duplicate detected — ${parsed.cohortName} already exists`);
+              await sendEmail('diane.k@risk2solution.com',
+                `[Aurora] Cohort already exists: ${parsed.cohortName}`,
+                buildAlertEmailHtml({
+                  title: 'Cohort Already Exists',
+                  subtitle: parsed.cohortName,
+                  greeting: 'Hi Diane,',
+                  intro: `Aurora detected a cohort scheduling email but the cohort <strong>${parsed.cohortName}</strong> already exists in Aurora. No new cohort was created.`,
+                  rows: [
+                    { label: 'Cohort Name', value: parsed.cohortName, bold: true },
+                    { label: 'Programme', value: parsed.programType === 'grad_cert' ? 'Graduate Certificate (11056NAT)' : 'Graduate Diploma (11066NAT)' },
+                    { label: 'Status', value: duplicate.status || 'Scheduled' },
+                  ],
+                  note: 'If you need to update this cohort, please open it in Aurora and edit the module dates directly.',
+                  ...(process.env.FRONTEND_URL ? { cta: 'Open Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+                }),
+                true
+              );
+            } else {
+              // Create the cohort
+              const id = `ip_${Date.now()}`;
+              const newCohort = {
+                id,
+                cohortName: parsed.cohortName || `New Cohort ${new Date().getFullYear()}`,
+                programType: parsed.programType,
+                programStart: parsed.programStart || parsed.moduleDates?.[0]?.date || null,
+                programEnd: parsed.programEnd || parsed.moduleDates?.[parsed.moduleDates.length - 1]?.date || null,
+                studentCount: parsed.studentCount || 0,
+                notes: parsed.notes || `Auto-created from email sent by ${fromEmail}`,
+                status: 'Scheduled',
+                moduleDates: (parsed.moduleDates || []).map((m, i) => ({
+                  moduleNumber: m.moduleNumber || (i + 1),
+                  title: m.title || `Module ${m.moduleNumber || (i + 1)}`,
+                  date: m.date,
+                  startTime: m.startTime || null,
+                  endTime: m.endTime || null,
+                  deliveryMethod: m.deliveryMethod || 'online',
+                  location: m.location || null,
+                })),
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                createdBy: fromEmail,
+                createdFrom: 'email',
+              };
+
+              const allCohorts = await readInternalProjects();
+              allCohorts.push(newCohort);
+              await writeInternalProjects(allCohorts);
+
+              // Build and save checklist
+              const checklist = buildChecklist(id, newCohort.programStart, newCohort.programEnd, newCohort.moduleDates);
+              await writeInternalChecklist(id, checklist);
+              console.log(`[Cohort] Auto-created: ${newCohort.cohortName} — ${checklist.length} checklist items, ${newCohort.moduleDates.length} modules`);
+
+              // Send immediate reminders for any checklist items due within 14 days
+              const today = new Date(); today.setHours(0,0,0,0);
+              let autoSent = 0;
+              for (const item of checklist) {
+                if (!item.dueDate) continue;
+                const due = new Date(item.dueDate); due.setHours(0,0,0,0);
+                const daysUntil = Math.round((due - today) / (1000*60*60*24));
+                if (daysUntil <= 14 && item.status !== 'Completed') {
+                  try {
+                    await sendInternalTaskReminder(newCohort, item);
+                    item.reminderSent = true;
+                    item.lastReminderAt = new Date().toISOString();
+                    autoSent++;
+                  } catch(reminderErr) {
+                    if (reminderErr.message === 'MONTHLY_CAP_REACHED') break;
+                    console.error(`[Cohort] Reminder error: ${reminderErr.message}`);
+                  }
+                }
+              }
+              if (autoSent > 0) await writeInternalChecklist(id, checklist);
+
+              // Notify Diane and Kandia that the cohort was created
+              const moduleList = (newCohort.moduleDates || []).map(m =>
+                `Module ${m.moduleNumber}${m.title ? ' - ' + m.title : ''}: ${m.date ? new Date(m.date).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : 'TBC'}${m.startTime ? ' at ' + m.startTime : ''}`
+              );
+
+              const programLabel = newCohort.programType === 'grad_cert'
+                ? 'Graduate Certificate in Organisational Resilience, Risk and High Reliability (11056NAT)'
+                : 'Graduate Diploma of Organisational Presilience, Risk and High Performance (11066NAT)';
+
+              await sendEmail(
+                ['diane.k@risk2solution.com', 'kandia@risk2solution.com'],
+                `[Aurora] New cohort created: ${newCohort.cohortName}`,
+                buildAlertEmailHtml({
+                  title: 'New Cohort Created',
+                  subtitle: newCohort.cohortName,
+                  greeting: 'Hi Diane and Kandia,',
+                  intro: `Aurora has detected a cohort scheduling email from <strong>${fromEmail}</strong> and automatically created the cohort in Aurora, including the full delivery checklist.`,
+                  rows: [
+                    { label: 'Cohort', value: newCohort.cohortName, bold: true },
+                    { label: 'Programme', value: programLabel },
+                    { label: 'Start Date', value: newCohort.programStart ? new Date(newCohort.programStart).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : 'TBC' },
+                    { label: 'End Date', value: newCohort.programEnd ? new Date(newCohort.programEnd).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : 'TBC' },
+                    { label: 'Modules Scheduled', value: `${newCohort.moduleDates.length}`, bold: true },
+                    { label: 'Checklist Items', value: `${checklist.length}` },
+                    ...(autoSent > 0 ? [{ label: 'Immediate Reminders Sent', value: `${autoSent} (tasks due within 14 days)`, color: '#c0392b' }] : []),
+                  ],
+                  ...(moduleList.length > 0 ? { bullets: moduleList } : {}),
+                  note: 'Please review the cohort in Aurora to confirm all details are correct. You can edit module dates, add students, and adjust the checklist directly in the portal.',
+                  ...(process.env.FRONTEND_URL ? { cta: 'Open Cohort in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+                }),
+                true
+              );
+            }
+          } else {
+            console.log(`[Cohort] Could not extract enough details — parsed:`, JSON.stringify(parsed)?.slice(0, 200));
+            // Notify Diane that Aurora saw the email but couldn't fully parse it
+            await sendEmail('diane.k@risk2solution.com',
+              `[Aurora] Cohort email detected but could not be parsed: ${subject}`,
+              buildAlertEmailHtml({
+                title: 'Cohort Email - Manual Action Needed',
+                subtitle: 'Could not auto-create cohort',
+                greeting: 'Hi Diane,',
+                intro: `Aurora detected what looks like a cohort scheduling email from <strong>${fromEmail}</strong> but could not extract enough details to automatically create the cohort.`,
+                rows: [
+                  { label: 'From', value: fromEmail },
+                  { label: 'Subject', value: subject },
+                ],
+                note: 'Please create the cohort manually in Aurora under Internal Programmes, or forward the email again with the module dates clearly listed (e.g. "Module 1: 6 Nov 2026").',
+                urgency: 'REVIEW NEEDED',
+                ...(process.env.FRONTEND_URL ? { cta: 'Create Cohort in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+              }),
+              true
+            );
+          }
+        } catch (cohortErr) {
+          console.error('[Cohort] Auto-creation error:', cohortErr.message);
+        }
+        // Tag and skip standard processing
+        try {
+          await axios.patch(
+            `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}`,
+            { isRead: true, categories: ['Aurora Processed'] },
+            { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+          );
+        } catch(e) {}
+        continue;
+      }
+
+      if (isAuroraGenerated || (isSharedMailboxSelf && !isTrustedSender)) {
         console.log(`[Poll] Skipping — Aurora's own email or self-sent`);
         try {
           await axios.patch(
@@ -1009,15 +1217,16 @@ async function readConsultantReplies() {
       const isInternal = fromEmail.toLowerCase().endsWith('@risk2solution.com') ||
                          fromEmail.toLowerCase().endsWith('@presilience.com');
       const isFromDiane = fromEmail.toLowerCase() === 'diane.k@risk2solution.com';
+      const isFromKandia = fromEmail.toLowerCase() === 'kandia@risk2solution.com';
 
-      // ── Special case: Diane forwarding a new agreement/contract ─────────────
+      // ── Special case: Diane or Kandia forwarding a new agreement/contract ────
       // Catches: attachment + agreement keywords, OR body mentions a new client/org
       const hasAttachment = msg.hasAttachments || false;
       const mentionsNewProject = /agreement|contract|proposal|signed|new client|new project|new engagement/i.test(subject + ' ' + bodyText.slice(0, 500));
 
-      // Catch agreement emails from Diane — with OR without attachment flag
+      // Catch agreement emails from Diane or Kandia — with OR without attachment flag
       // (Graph API hasAttachments can be unreliable for forwarded emails)
-      const isDianeAgreement = isFromDiane && mentionsNewProject;
+      const isDianeAgreement = (isFromDiane || isFromKandia) && mentionsNewProject;
 
       if (isDianeAgreement) {
         console.log(`[Poll] Agreement email from Diane — attempting to auto-create project from attachment`);
