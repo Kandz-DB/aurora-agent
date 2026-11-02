@@ -2212,11 +2212,13 @@ function buildCheckinEmailHtml({ firstName, clientName, projectName, phaseName, 
 
 // ── Weekly consultant check-in draft ─────────────────────────────────────────
 async function generateWeeklyConsultantCheckins(projects) {
-  // Include all active standard projects with a consultant assigned (all phases)
+  // Include active standard projects with a consultant assigned
+  // Exclude: Completed/Terminated/Closed status, phase 5 (Completed), phase 4 (Close-out — no active delivery)
   const active = projects.filter(p =>
     p.type === 'standard' &&
     p.consultant &&
-    !['Completed','Terminated','Closed'].includes(p.status)
+    !['Completed','Terminated','Closed'].includes(p.status) &&
+    (p.phase === undefined || p.phase === null || p.phase < 4)
   );
 
   let count = 0;
@@ -3258,7 +3260,9 @@ async function runBatch() {
   if (isMonday) {
     // 5b. Weekly client status email drafts — saved to info@ Drafts for Diane to review and send
     for (const p of standard) {
+      // Skip completed/terminated/on-hold status, AND projects in Completed or Close-out phase
       if (['Completed','Terminated','On Hold'].includes(p.status)) continue;
+      if (p.phase !== undefined && p.phase !== null && p.phase >= 4) continue;
       try {
         const context   = buildContext(p);
         const phaseName = PHASES[p.phase || 0] || 'Kick-off';
@@ -3336,7 +3340,7 @@ async function runBatch() {
         greeting: 'Good morning Diane,',
         intro: 'Aurora has prepared your weekly emails and saved them as drafts ready for your review. Please check each one for accuracy before sending.',
         bullets: [
-          `<strong>${standard.filter(p => !['Completed','Terminated'].includes(p.status)).length} client status update emails</strong> - weekly project updates for your clients`,
+          `<strong>${standard.filter(p => !['Completed','Terminated','On Hold'].includes(p.status) && (p.phase === undefined || p.phase === null || p.phase < 4)).length} client status update emails</strong> - weekly project updates for your clients`,
           `<strong>${checkinCount} consultant/trainer check-in emails</strong> - weekly check-ins with your allocated consultants and trainers`,
         ],
         note: 'All drafts are in the <strong>info@risk2solution.com</strong> Outlook shared mailbox Drafts folder and visible in the Aurora portal under Comms Drafts.',
