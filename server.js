@@ -239,7 +239,8 @@ async function saveDraftEmail(draft) {
         {
           subject: draft.subject,
           body: bodyPayload,
-          toRecipients: [{ emailAddress: { address: draft.toEmail || fromMailbox } }],
+          // Only set toRecipients if a real address exists — avoids drafts accidentally addressed to info@
+          ...(draft.toEmail ? { toRecipients: [{ emailAddress: { address: draft.toEmail } }] } : {}),
           ...(ccList.length > 0 ? { ccRecipients: ccList } : {}),
         },
         { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 15000 }
@@ -1219,10 +1220,22 @@ ${bodyText.slice(0, 4000)}`,
       const isFromDiane = fromEmail.toLowerCase() === 'diane.k@risk2solution.com';
       const isFromKandia = fromEmail.toLowerCase() === 'kandia@risk2solution.com';
 
-      // ── Special case: Diane or Kandia forwarding a new agreement/contract ────
-      // Catches: attachment + agreement keywords, OR body mentions a new client/org
+      // ── Special case: Diane or Kandia forwarding a CONFIRMED new agreement/contract ────
+      // IMPORTANT: Only trigger on confirmed sign-off language — NOT on inquiries, proposals sent,
+      // or expressions of interest. A proposal going OUT or an inquiry coming IN is NOT a project.
+      // Aurora must wait for confirmed acceptance before creating a project.
       const hasAttachment = msg.hasAttachments || false;
-      const mentionsNewProject = /agreement|contract|proposal|signed|new client|new project|new engagement/i.test(subject + ' ' + bodyText.slice(0, 500));
+      const combinedText = subject + ' ' + bodyText.slice(0, 1000);
+
+      // Positive signals — confirmed sign-off / acceptance language only
+      const hasConfirmedSignoff = /\b(signed|sign.off|accepted|acceptance|approved|approval|confirmed|go.ahead|green.light|proceed|awarded|award|engagement.confirmed|contract.executed|they.re.in|they.are.in|client.confirmed|client.approved|client.signed|agreement.signed|agreement.executed|purchase.order|PO.issued|PO.received|commencement|start.date.confirmed|kick.?off.confirmed)\b/i.test(combinedText);
+
+      // Negative signals — these are inquiries/proposals/EOIs, NOT confirmed projects
+      const isInquiryOrProposal = /\b(inquiry|enquiry|enquiries|inquiries|proposal.sent|proposal.submitted|we.sent|sending.a.proposal|submitted.our.proposal|sent.our.proposal|expression.of.interest|EOI|quote.sent|quotation.sent|tender.submitted|RFQ|RFT|ATM|following.up|chase.up|no.response|waiting.for|pending.confirmation|pending.sign|not.yet|yet.to.confirm|still.considering|they.haven.t|hasn.t.been.confirmed|not.confirmed|not.signed)\b/i.test(combinedText);
+
+      // Only treat as a confirmed project if we have sign-off signals AND no inquiry signals,
+      // OR if there is a contract/agreement attachment from a trusted sender
+      const mentionsNewProject = hasConfirmedSignoff && !isInquiryOrProposal;
 
       // Catch agreement emails from Diane or Kandia — with OR without attachment flag
       // (Graph API hasAttachments can be unreliable for forwarded emails)
@@ -1354,15 +1367,15 @@ ${bodyText.slice(0, 4000)}`,
 
         // Fallback — if no attachment processed, prompt Diane to upload manually
         if (!projectCreated) {
-          const clientHint = subject.replace(/new (project|agreement|proposal) (for )?/i,'').trim();
+          const clientHint = subject.replace(/new (project|agreement|proposal|engagement|contract) (for )?/i,'').trim();
           const valueHint = bodyText.match(/\$([\d,]+)/)?.[0] || '';
           await sendEmail('diane.k@risk2solution.com',
-            `[Aurora] New project detected - please upload contract: ${clientHint}`,
+            `[Aurora] Confirmed project - please upload contract: ${clientHint}`,
             buildAlertEmailHtml({
-              title: 'New Project Detected',
+              title: 'Confirmed Project - Upload Contract',
               subtitle: 'Manual upload required',
               greeting: 'Hi Diane,',
-              intro: 'Aurora detected a new client agreement but could not automatically process the attachment. Please upload the contract manually in Aurora.',
+              intro: 'Aurora detected a confirmed client engagement but could not automatically process the contract attachment. Please upload the signed contract in Aurora to create the project.',
               rows: [
                 { label: 'Email Subject', value: subject },
                 ...(valueHint ? [{ label: 'Value Mentioned', value: valueHint }] : []),
@@ -3623,13 +3636,22 @@ async function draftClientOnboarding(project) {
       `Write a professional client welcome and onboarding email from R2S to ${project.clientContact || 'the client'} at ${project.clientName}.
 
 FORMAT RULES:
-- Plain text only. No asterisks, no bold markdown, no long dashes.
+- Plain text only. No asterisks, no bold markdown, no long dashes (use a hyphen - instead of an em dash).
 - Professional, warm, and human-centred tone.
 - Concise — this is a welcome email, not a report.
+- CRITICAL: Do NOT include any To:, CC:, Subject:, or email header lines anywhere in the body. Start directly with the greeting.
+- CRITICAL: Do NOT include any language such as "this is a draft", "note to Diane", "please review before sending", "for Diane's review", or any similar internal instructions. Write as if sending directly to the client.
+- CRITICAL: Do NOT add any meta-commentary, preamble, or notes about the email itself.
 
-Write the email starting with "Hi ${(project.clientContact || 'there').split(' ')[0]}," and covering:
+Write the email in this exact structure:
 
-1. A warm welcome to the R2S engagement (1-2 sentences)
+Line 1: "Hi ${(project.clientContact || 'there').split(' ')[0]},"
+Line 2: (blank line)
+Line 3: "Welcome to Risk 2 Solution."
+Line 4: (blank line)
+Then continue with:
+
+1. A warm welcome sentence (1 sentence — do NOT repeat "Welcome to Risk 2 Solution" — just continue warmly)
 
 2. Brief confirmation of what R2S will be delivering (1-2 sentences referencing the project scope)
 
@@ -3689,18 +3711,40 @@ Queensland, Australia`,
       context
     );
 
+    // Warn Diane if no client email — draft will still be created but she must add the recipient
+    if (!project.clientEmail) {
+      console.warn(`[Onboarding] No clientEmail on project ${project.id} — draft will have no To address`);
+      await sendEmail('diane.k@risk2solution.com',
+        `[Aurora] Action needed - no client email for onboarding draft: ${project.clientName}`,
+        buildAlertEmailHtml({
+          title: 'Client Email Missing',
+          subtitle: project.clientName,
+          greeting: 'Hi Diane,',
+          intro: `Aurora drafted the client onboarding email for <strong>${project.clientName}</strong> but the project has no client email address on file. The Outlook draft has been created but the To field is blank — please add the client's email before sending.`,
+          rows: [
+            { label: 'Project', value: project.projectName || project.clientName },
+            { label: 'Client Contact', value: project.clientContact || 'Not set' },
+          ],
+          note: 'Update the client email in Aurora (Projects > Edit) and the next onboarding draft will populate correctly.',
+          urgency: 'ACTION NEEDED',
+          ...(process.env.FRONTEND_URL ? { cta: 'Open Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+        }),
+        true
+      );
+    }
+
     const draft = {
       id: `d_${Date.now()}_onboard`,
       projectId: project.id, clientName: project.clientName,
       projectName: project.projectName, type: 'client_onboarding',
       urgency: 'routine', toName: project.clientContact,
-      toEmail: project.clientEmail,
-      subject: `Welcome to R2S — ${project.projectName || project.clientName}`,
+      toEmail: project.clientEmail || null,
+      subject: `Welcome to R2S - ${project.projectName || project.clientName}`,
       body: onboardingBody, source: 'auto',
     };
     await db.saveDraft(draft);
     await saveDraftEmail(draft);
-    console.log(`[Onboarding] Client welcome email drafted for ${project.clientName}`);
+    console.log(`[Onboarding] Client welcome email drafted for ${project.clientName} → ${project.clientEmail || 'NO EMAIL'}`);
   } catch (err) {
     if (err.message === 'MONTHLY_CAP_REACHED') throw err;
     console.error('[Onboarding] Draft failed:', err.message);
