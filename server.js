@@ -134,7 +134,21 @@ async function aurora(taskType, userMessage, context) {
   await db.recordSpend(cost);
 
   if (spend.total + cost >= CAP_USD * 0.8 && spend.total < CAP_USD * 0.8) {
-    await sendInternalEmail('⚠ Aurora spend alert', `Monthly API spend has reached 80% of the $${CAP_USD} USD cap. Current: $${(spend.total + cost).toFixed(2)}`);
+    await sendInternalEmail('[Aurora] Spend alert - 80% of monthly cap reached',
+      buildAlertEmailHtml({
+        title: 'Spend Alert',
+        subtitle: 'Monthly API Cap - 80% Reached',
+        greeting: 'Hi Diane,',
+        intro: 'Aurora\'s monthly API spend has reached <strong>80% of the monthly cap</strong>. No action is required right now, but you may want to review usage levels.',
+        rows: [
+          { label: 'Monthly Cap', value: `$${CAP_USD} USD` },
+          { label: 'Current Spend', value: `$${(spend.total + cost).toFixed(2)} USD`, bold: true, color: '#c0392b' },
+          { label: 'Remaining', value: `$${(CAP_USD - (spend.total + cost)).toFixed(2)} USD` },
+        ],
+        note: 'Aurora will stop processing AI requests if the monthly cap is reached. Contact your system administrator to adjust the cap if needed.',
+        urgency: 'REVIEW',
+      })
+    );
   }
 
   return response.content.filter(b => b.type === 'text').map(b => b.text).join('');
@@ -433,18 +447,21 @@ Queensland, Australia`,
 
   // Notify internal team that a briefing has been prepared
   await sendInternalEmail(
-    `[Aurora] Consultant briefing ready: ${project.clientName}`,
-    `Aurora has prepared a consultant briefing email for ${consultantName} on the ${project.projectName || project.clientName} project.
-
-Please review and approve in the Comms Drafts section of Aurora or in the info@risk2solution.com Outlook shared mailbox drafts folder before sending.
-
-Project: ${project.projectName || project.clientName}
-Client: ${project.clientName}
-Consultant: ${consultantName}
-Due date: ${project.dueDate || 'TBC'}
-
-Aurora
-R2S Project Management Intelligence`
+    `[Aurora] Consultant briefing ready - ${project.clientName}`,
+    buildAlertEmailHtml({
+      title: 'Consultant Briefing Ready',
+      subtitle: project.projectName || project.clientName,
+      greeting: 'Hi team,',
+      intro: `Aurora has prepared a consultant briefing email for <strong>${consultantName}</strong> on the <strong>${project.projectName || project.clientName}</strong> project. Please review the draft before sending.`,
+      rows: [
+        { label: 'Client', value: project.clientName },
+        { label: 'Project', value: project.projectName || project.clientName },
+        { label: 'Consultant', value: consultantName, bold: true },
+        { label: 'Due Date', value: project.dueDate ? new Date(project.dueDate).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : 'TBC' },
+      ],
+      note: 'The draft is in the <strong>info@risk2solution.com</strong> Outlook shared mailbox Drafts folder and in Aurora under Comms Drafts.',
+      ...(process.env.FRONTEND_URL ? { cta: 'Review Draft in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+    })
   );
 
   return draft;
@@ -573,10 +590,10 @@ async function checkDueDateReminders() {
 
     // Send reminders at 14, 7, and 3 days before due date
     if ([14, 7, 3].includes(days)) {
-      const urgency = days <= 3 ? 'URGENT' : days <= 7 ? 'Important' : 'Reminder';
-      const subject = `[Aurora] ${urgency}: ${p.clientName} — ${p.projectName || 'Project'} due in ${days} day${days !== 1 ? 's' : ''}`;
+      const urgencyLabel = days <= 3 ? 'URGENT' : days <= 7 ? 'Important' : 'Reminder';
+      const subject = `[Aurora] ${urgencyLabel}: ${p.clientName} - ${p.projectName || 'Project'} due in ${days} day${days !== 1 ? 's' : ''}`;
 
-      const body = await aurora(
+      const auroraBody = await aurora(
         'reminder_email',
         `Draft an internal reminder email to the R2S team. The ${p.projectName || p.clientName} project is due in ${days} days (${p.dueDate}).
 Current phase: ${PHASES[p.phase || 0]}.
@@ -586,22 +603,60 @@ Ask the team to review the phase completion status, confirm all deliverables are
         context
       );
 
-      await sendInternalEmail(subject, body);
+      await sendInternalEmail(subject, buildAlertEmailHtml({
+        title: `${p.projectName || p.clientName} - Due in ${days} day${days !== 1 ? 's' : ''}`,
+        subtitle: `${p.clientName} | Phase: ${PHASES[p.phase || 0]}`,
+        greeting: 'Hi team,',
+        body: auroraBody,
+        rows: [
+          { label: 'Client', value: p.clientName },
+          { label: 'Project', value: p.projectName || p.clientName },
+          { label: 'Current Phase', value: PHASES[p.phase || 0] },
+          { label: 'Due Date', value: new Date(p.dueDate).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }), bold: true, color: days <= 3 ? '#c0392b' : '#1a5f7a' },
+        ],
+        urgency: days <= 3 ? 'URGENT' : days <= 7 ? 'IMPORTANT' : '',
+        ...(process.env.FRONTEND_URL ? { cta: 'Open Aurora Portal', ctaUrl: process.env.FRONTEND_URL } : {}),
+      }));
       console.log(`[Reminders] ✓ ${days}-day reminder sent for ${p.clientName}`);
     }
 
     // Day of due date
     if (days === 0) {
-      const subject = `[Aurora] Due today: ${p.clientName} — ${p.projectName || 'Project'}`;
-      const body = `The contract end date for ${p.clientName} (${p.projectName || 'project'}) is today.\n\nCurrent phase: ${PHASES[p.phase || 0]}\n\nPlease confirm whether the project is ready for close-out or if the date needs to be updated in Aurora.`;
-      await sendInternalEmail(subject, body);
+      const subject = `[Aurora] Due today: ${p.clientName} - ${p.projectName || 'Project'}`;
+      await sendInternalEmail(subject, buildAlertEmailHtml({
+        title: `Due Today - ${p.projectName || p.clientName}`,
+        subtitle: p.clientName,
+        greeting: 'Hi team,',
+        intro: `The contract end date for <strong>${p.clientName}</strong> (${p.projectName || 'project'}) is today.`,
+        rows: [
+          { label: 'Client', value: p.clientName },
+          { label: 'Current Phase', value: PHASES[p.phase || 0] },
+          { label: 'Due Date', value: 'Today', bold: true, color: '#c0392b' },
+        ],
+        note: 'Please confirm whether the project is ready for close-out or if the date needs to be updated in Aurora.',
+        urgency: 'DUE TODAY',
+        ...(process.env.FRONTEND_URL ? { cta: 'Open Aurora Portal', ctaUrl: process.env.FRONTEND_URL } : {}),
+      }));
     }
 
     // Overdue
     if (days < 0 && days >= -3) {
-      const subject = `[Aurora] OVERDUE: ${p.clientName} — ${p.projectName || 'Project'} (${Math.abs(days)} days overdue)`;
-      const body = `The ${p.clientName} project was due ${Math.abs(days)} days ago and has not been marked complete in Aurora.\n\nPlease review and either update the due date or move to Close-out.`;
-      await sendInternalEmail(subject, body);
+      const subject = `[Aurora] OVERDUE: ${p.clientName} - ${p.projectName || 'Project'} (${Math.abs(days)} days overdue)`;
+      await sendInternalEmail(subject, buildAlertEmailHtml({
+        title: `Overdue - ${p.projectName || p.clientName}`,
+        subtitle: `${p.clientName} | ${Math.abs(days)} days overdue`,
+        greeting: 'Hi team,',
+        intro: `The <strong>${p.clientName}</strong> project was due ${Math.abs(days)} day${Math.abs(days) !== 1 ? 's' : ''} ago and has not been marked complete in Aurora.`,
+        rows: [
+          { label: 'Client', value: p.clientName },
+          { label: 'Project', value: p.projectName || p.clientName },
+          { label: 'Current Phase', value: PHASES[p.phase || 0] },
+          { label: 'Days Overdue', value: `${Math.abs(days)} days`, bold: true, color: '#c0392b' },
+        ],
+        note: 'Please review and either update the due date or move the project to Close-out in Aurora.',
+        urgency: 'OVERDUE',
+        ...(process.env.FRONTEND_URL ? { cta: 'Open Aurora Portal', ctaUrl: process.env.FRONTEND_URL } : {}),
+      }));
     }
   }
 }
@@ -887,7 +942,20 @@ async function readConsultantReplies() {
                 await db.logActivity(xeroProject.id, { type:'contract', summary:`Invoice ${invoiceNum} sent via Xero — $${parseFloat(amount).toLocaleString('en-AU')} to ${xeroClient}` });
                 await sendEmail('diane.k@risk2solution.com',
                   `[Aurora] Invoice recorded: ${invoiceNum} for ${xeroProject.clientName}`,
-                  `Aurora detected a Xero invoice sent to ${xeroClient}.\n\nInvoice: ${invoiceNum}\nAmount: $${parseFloat(amount).toLocaleString('en-AU')} AUD\nDue: ${bodyText.match(/due by (.+?)[\.\r\n]/i)?.[1] || 'See Xero'}\n\nThis has been recorded in the ${xeroProject.clientName} project invoicing tab in Aurora.\n\nAurora\nR2S Project Management Intelligence`,
+                  buildAlertEmailHtml({
+                    title: 'Invoice Recorded',
+                    subtitle: xeroProject.clientName,
+                    greeting: 'Hi Diane,',
+                    intro: `Aurora has detected a Xero invoice sent to <strong>${xeroClient}</strong> and recorded it against the project.`,
+                    rows: [
+                      { label: 'Client', value: xeroClient },
+                      { label: 'Invoice Number', value: invoiceNum, bold: true },
+                      { label: 'Amount', value: `$${parseFloat(amount).toLocaleString('en-AU')} AUD`, bold: true, color: '#1a5f7a' },
+                      { label: 'Due Date', value: bodyText.match(/due by (.+?)[\.\r\n]/i)?.[1] || 'See Xero' },
+                    ],
+                    note: `This has been recorded in the <strong>${xeroProject.clientName}</strong> project invoicing tab in Aurora.`,
+                    ...(process.env.FRONTEND_URL ? { cta: 'View Invoicing in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+                  }),
                   true
                 );
                 console.log(`[Invoice] Xero invoice ${invoiceNum} $${amount} recorded for ${xeroProject.clientName}`);
@@ -897,8 +965,21 @@ async function readConsultantReplies() {
             } catch(xeroErr) { console.error('[Xero Invoice]', xeroErr.message); }
           } else {
             await sendEmail('diane.k@risk2solution.com',
-              `[Aurora] Xero invoice — no project match: ${subject}`,
-              `Aurora detected a Xero invoice but could not match it to a project.\n\nInvoice: ${xeroInvNum[1]}\nClient in Xero: ${xeroClient}\nAmount: $${parseFloat(amount).toLocaleString('en-AU')} AUD\n\nPlease check the project exists in Aurora with the correct client name.\n\nAurora\nR2S Project Management Intelligence`,
+              `[Aurora] Xero invoice - no project match: ${subject}`,
+              buildAlertEmailHtml({
+                title: 'Xero Invoice - No Project Match',
+                subtitle: 'Manual review required',
+                greeting: 'Hi Diane,',
+                intro: 'Aurora detected a Xero invoice but could not match it to an existing project. Please review and update.',
+                rows: [
+                  { label: 'Invoice Number', value: xeroInvNum[1] },
+                  { label: 'Client in Xero', value: xeroClient, bold: true },
+                  { label: 'Amount', value: `$${parseFloat(amount).toLocaleString('en-AU')} AUD` },
+                ],
+                note: 'Please check that the project exists in Aurora with the correct client name.',
+                urgency: 'REVIEW NEEDED',
+                ...(process.env.FRONTEND_URL ? { cta: 'Open Aurora Portal', ctaUrl: process.env.FRONTEND_URL } : {}),
+              }),
               true
             );
           }
@@ -1017,14 +1098,39 @@ async function readConsultantReplies() {
 
                     await sendEmail('diane.k@risk2solution.com',
                       `[Aurora] New project created: ${extracted.clientName}`,
-                      `Aurora automatically created a new project from the attachment in your email.\n\nClient: ${extracted.clientName}\nProject: ${extracted.projectName || 'See Aurora'}\nValue: ${extracted.value || 'TBC'}\nConsultant identified: ${extracted.consultant || 'Not specified'}\n\nThe project has been added to Aurora. A client onboarding email draft is ready for your review.\n\n${process.env.FRONTEND_URL || ''}\n\nAurora\nR2S Project Management Intelligence`,
+                      buildAlertEmailHtml({
+                        title: 'New Project Created',
+                        subtitle: extracted.clientName,
+                        greeting: 'Hi Diane,',
+                        intro: `Aurora automatically created a new project from the attachment in your email. A client onboarding email draft is ready for your review.`,
+                        rows: [
+                          { label: 'Client', value: extracted.clientName, bold: true },
+                          { label: 'Project', value: extracted.projectName || 'See Aurora' },
+                          { label: 'Value', value: extracted.value || 'TBC' },
+                          { label: 'Consultant', value: extracted.consultant || 'Not specified' },
+                        ],
+                        ...(process.env.FRONTEND_URL ? { cta: 'Review Project in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+                      }),
                       true
                     );
                   } else {
                     console.log(`[Poll] Duplicate detected — project already exists: ${existing.clientName}`);
                     await sendEmail('diane.k@risk2solution.com',
                       `[Aurora] Duplicate project detected: ${extracted.clientName}`,
-                      `Aurora detected a possible duplicate when processing the attachment from your email.\n\nAttachment: ${pdfAtt.name}\nDetected client: ${extracted.clientName}\nExisting project: ${existing.clientName} (${existing.status})\n\nPlease review in Aurora to confirm.\n\n${process.env.FRONTEND_URL || ''}\n\nAurora\nR2S Project Management Intelligence`,
+                      buildAlertEmailHtml({
+                        title: 'Possible Duplicate Project',
+                        subtitle: extracted.clientName,
+                        greeting: 'Hi Diane,',
+                        intro: 'Aurora detected a possible duplicate project when processing the attachment from your email. Please review.',
+                        rows: [
+                          { label: 'Attachment', value: pdfAtt.name },
+                          { label: 'Detected Client', value: extracted.clientName },
+                          { label: 'Existing Project', value: `${existing.clientName} (${existing.status})`, bold: true, color: '#e67e22' },
+                        ],
+                        note: 'Please check Aurora to confirm whether this is a new project or an existing one.',
+                        urgency: 'REVIEW NEEDED',
+                        ...(process.env.FRONTEND_URL ? { cta: 'Review in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+                      }),
                       true
                     );
                     projectCreated = true; // Suppress fallback prompt
@@ -1042,8 +1148,19 @@ async function readConsultantReplies() {
           const clientHint = subject.replace(/new (project|agreement|proposal) (for )?/i,'').trim();
           const valueHint = bodyText.match(/\$([\d,]+)/)?.[0] || '';
           await sendEmail('diane.k@risk2solution.com',
-            `[Aurora] New project detected — please upload contract: ${clientHint}`,
-            `Hi Diane,\n\nAurora detected a new client agreement but could not automatically process the attachment.\n\nSubject: ${subject}${valueHint ? '\nValue mentioned: ' + valueHint : ''}\n\nPlease upload the contract manually:\n${process.env.FRONTEND_URL || ''}\n→ Projects → New Project → Upload Contract\n\nAurora\nR2S Project Management Intelligence`,
+            `[Aurora] New project detected - please upload contract: ${clientHint}`,
+            buildAlertEmailHtml({
+              title: 'New Project Detected',
+              subtitle: 'Manual upload required',
+              greeting: 'Hi Diane,',
+              intro: 'Aurora detected a new client agreement but could not automatically process the attachment. Please upload the contract manually in Aurora.',
+              rows: [
+                { label: 'Email Subject', value: subject },
+                ...(valueHint ? [{ label: 'Value Mentioned', value: valueHint }] : []),
+              ],
+              note: 'To create the project: go to Aurora &rarr; Projects &rarr; New Project &rarr; Upload Contract.',
+              ...(process.env.FRONTEND_URL ? { cta: 'Upload Contract in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+            }),
             true
           );
         }
@@ -1182,8 +1299,21 @@ Return this exact JSON (no other text):
           console.error('[Replies] JSON parse failed. Raw:', analysis.slice(0, 400));
           // Notify Diane manually
           await sendEmail('diane.k@risk2solution.com',
-            `[Aurora] Email received — needs manual review: ${matchedProject.clientName}`,
-            `Aurora received an email from ${fromEmail} about ${matchedProject.projectName || matchedProject.clientName} but could not automatically analyse it.\n\nSubject: ${subject}\n\nContent:\n${bodyText.slice(0, 1000)}\n\nPlease review and update Aurora project record manually.\n\nAurora\nR2S Project Management Intelligence`,
+            `[Aurora] Email received - needs manual review: ${matchedProject.clientName}`,
+            buildAlertEmailHtml({
+              title: 'Email Needs Manual Review',
+              subtitle: matchedProject.projectName || matchedProject.clientName,
+              greeting: 'Hi Diane,',
+              intro: `Aurora received an email about <strong>${matchedProject.projectName || matchedProject.clientName}</strong> but could not automatically analyse it. Please review and update the project record manually.`,
+              rows: [
+                { label: 'From', value: fromEmail },
+                { label: 'Subject', value: subject },
+                { label: 'Client', value: matchedProject.clientName },
+              ],
+              body: bodyText.slice(0, 600) + (bodyText.length > 600 ? '...' : ''),
+              urgency: 'REVIEW NEEDED',
+              ...(process.env.FRONTEND_URL ? { cta: 'Open Project in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+            }),
             true
           );
           await db.logActivity(matchedProject.id, { type: 'email_processed', source: fromEmail, subject, summary: `Email from ${fromEmail} received — manual review needed` });
@@ -1253,7 +1383,18 @@ Return this exact JSON (no other text):
           actions.push(`Invoice milestone reached: ${parsed.invoiceNote}`);
           await sendEmail('diane.k@risk2solution.com',
             `[Aurora] Invoice milestone: ${matchedProject.clientName}`,
-            `Aurora detected an invoice milestone on the ${matchedProject.projectName || matchedProject.clientName} project.\n\nMilestone: ${parsed.invoiceNote}\n\nPlease review the invoicing status in Aurora and issue the relevant invoice to the client.\n\n${process.env.FRONTEND_URL || ''}\n\nAurora\nR2S Project Management Intelligence`,
+            buildAlertEmailHtml({
+              title: 'Invoice Milestone Reached',
+              subtitle: matchedProject.projectName || matchedProject.clientName,
+              greeting: 'Hi Diane,',
+              intro: `Aurora has detected an invoice milestone on the <strong>${matchedProject.projectName || matchedProject.clientName}</strong> project. Please review and issue the relevant invoice.`,
+              rows: [
+                { label: 'Client', value: matchedProject.clientName },
+                { label: 'Milestone', value: parsed.invoiceNote, bold: true, color: '#1a5f7a' },
+              ],
+              note: 'Please review the invoicing status in Aurora and issue the relevant invoice to the client.',
+              ...(process.env.FRONTEND_URL ? { cta: 'View Invoicing in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+            }),
             true
           );
         }
@@ -1293,7 +1434,19 @@ Return this exact JSON (no other text):
             }
             await sendEmail('diane.k@risk2solution.com',
               `[Aurora] Kick-off scheduling needed: ${matchedProject.clientName}`,
-              `A kick-off meeting needs to be scheduled for the ${matchedProject.projectName || matchedProject.clientName} project.\n\nReason: ${parsed.kickoffNote}\n\nBased on the R2S Training & Education calendar, these slots appear available:\n\n${availText}\n\nPlease confirm with ${matchedProject.consultant || 'the consultant'} and schedule with the client.\n\nAurora\nR2S Project Management Intelligence`,
+              buildAlertEmailHtml({
+                title: 'Kick-off Meeting to be Scheduled',
+                subtitle: matchedProject.projectName || matchedProject.clientName,
+                greeting: 'Hi Diane,',
+                intro: `A kick-off meeting needs to be scheduled for the <strong>${matchedProject.projectName || matchedProject.clientName}</strong> project.`,
+                rows: [
+                  { label: 'Client', value: matchedProject.clientName },
+                  { label: 'Reason', value: parsed.kickoffNote },
+                  { label: 'Consultant', value: matchedProject.consultant || 'Not assigned' },
+                ],
+                note: `Based on the R2S Training and Education calendar, the following slots appear available:<br><br>${availText.replace(/\n/g, '<br>')}`,
+                ...(process.env.FRONTEND_URL ? { cta: 'Open Project in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+              }),
               true
             );
             actions.push(`Kick-off scheduling options sent to Diane`);
@@ -1349,8 +1502,22 @@ Return this exact JSON (no other text):
           : '\nNo automatic actions were taken.\n';
 
         await sendEmail('diane.k@risk2solution.com',
-          `[Aurora] Email processed: ${matchedProject.clientName}${actions.length ? ` — ${actions.length} action${actions.length > 1 ? 's' : ''} taken` : ''}`,
-          `Aurora has processed an email from ${fromEmail} regarding the ${matchedProject.projectName || matchedProject.clientName} project.\n\nSummary: ${parsed.statusSummary}\n${actionsText}\nPlease log into Aurora to review.\n\n${process.env.FRONTEND_URL || ''}\n\nAurora\nR2S Project Management Intelligence`,
+          `[Aurora] Email processed: ${matchedProject.clientName}${actions.length ? ` - ${actions.length} action${actions.length > 1 ? 's' : ''} taken` : ''}`,
+          buildAlertEmailHtml({
+            title: 'Email Processed',
+            subtitle: matchedProject.projectName || matchedProject.clientName,
+            greeting: 'Hi Diane,',
+            intro: `Aurora has processed an email from <strong>${fromEmail}</strong> regarding the <strong>${matchedProject.projectName || matchedProject.clientName}</strong> project.`,
+            rows: [
+              { label: 'From', value: fromEmail },
+              { label: 'Summary', value: parsed.statusSummary },
+            ],
+            ...(actions.length ? {
+              bullets: actions.map(a => a),
+            } : {}),
+            note: actions.length ? '' : 'No automatic actions were taken. Please review the project record if needed.',
+            ...(process.env.FRONTEND_URL ? { cta: 'Review in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+          }),
           true
         );
 
@@ -1379,6 +1546,112 @@ Return this exact JSON (no other text):
   } catch (err) {
     console.error('[Replies] Read failed:', err.message);
   }
+}
+
+// ── Universal Outlook Classic HTML alert/notification email ──────────────────
+// Use for any internal alert or notification that isn't a checkin/status email.
+// params: { to, subject, title, subtitle, greeting, intro, rows, bullets, note, body, cta, ctaUrl, footer, accent }
+// rows: [{ label, value, bold, color }] — detail table rows
+// bullets: [string] — bullet list items
+// note: string — optional highlighted note block
+// body: string — freeform paragraph(s) (used instead of rows/bullets when simpler)
+// accent: hex colour for header (defaults to #1a5f7a teal)
+function buildAlertEmailHtml({ title = 'Aurora', subtitle = '', greeting = '', intro = '', rows = [], bullets = [], note = '', body = '', cta = '', ctaUrl = '', footer = 'Aurora • R2S Project Management Intelligence', accent = '#1a5f7a', urgency = '' } = {}) {
+  const hdr = accent;
+  const urgencyBadge = urgency
+    ? `<td align="right" valign="top"><table cellpadding="0" cellspacing="0" border="0"><tr><td style="background-color:${urgency === 'URGENT' ? '#c0392b' : '#e67e22'};padding:5px 12px;"><span style="font-family:Arial,sans-serif;font-size:11px;font-weight:bold;color:#ffffff;">${urgency}</span></td></tr></table></td>`
+    : '';
+
+  const rowsHtml = rows.length ? `
+    <tr><td style="padding-bottom:20px;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr><td style="font-family:Arial,sans-serif;font-size:11px;font-weight:bold;color:${hdr};text-transform:uppercase;letter-spacing:0.5px;padding-bottom:10px;border-bottom:1px solid #e0e8ed;">Details</td></tr>
+        <tr><td style="padding-top:12px;"><table width="100%" cellpadding="0" cellspacing="0" border="0">
+          ${rows.map(r => `<tr>
+            <td width="38%" style="font-family:Arial,sans-serif;font-size:13px;color:#777777;padding-bottom:9px;vertical-align:top;">${r.label}</td>
+            <td width="62%" style="font-family:Arial,sans-serif;font-size:13px;${r.bold ? 'font-weight:bold;' : ''}color:${r.color || '#333333'};padding-bottom:9px;vertical-align:top;">${r.value}</td>
+          </tr>`).join('')}
+        </table></td></tr>
+      </table>
+    </td></tr>` : '';
+
+  const bulletsHtml = bullets.length ? `
+    <tr><td style="padding-bottom:20px;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        ${bullets.map(b => `<tr>
+          <td width="18" valign="top" style="font-family:Arial,sans-serif;font-size:14px;color:${hdr};padding-bottom:8px;">&#8226;</td>
+          <td style="font-family:Arial,sans-serif;font-size:14px;color:#333333;line-height:1.6;padding-bottom:8px;">${b}</td>
+        </tr>`).join('')}
+      </table>
+    </td></tr>` : '';
+
+  const noteHtml = note ? `
+    <tr><td style="padding-bottom:20px;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr><td style="border-left:4px solid ${hdr};padding:12px 16px;background-color:#f0f6f9;">
+          <span style="font-family:Arial,sans-serif;font-size:13px;color:#333333;line-height:1.6;">${note}</span>
+        </td></tr>
+      </table>
+    </td></tr>` : '';
+
+  const bodyHtml = body ? `
+    <tr><td style="font-family:Arial,sans-serif;font-size:14px;color:#444444;line-height:1.7;padding-bottom:20px;">${body.replace(/\n/g,'<br>')}</td></tr>` : '';
+
+  const ctaHtml = cta && ctaUrl ? `
+    <tr><td style="padding-bottom:20px;" align="center">
+      <table cellpadding="0" cellspacing="0" border="0">
+        <tr><td style="background-color:${hdr};padding:10px 24px;">
+          <a href="${ctaUrl}" style="font-family:Arial,sans-serif;font-size:14px;font-weight:bold;color:#ffffff;text-decoration:none;">${cta}</a>
+        </td></tr>
+      </table>
+    </td></tr>` : '';
+
+  return `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office">
+<head><meta charset="UTF-8">
+<!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]-->
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f8;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6f8;">
+  <tr><td align="center" style="padding:24px 10px;">
+    <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#ffffff;border:1px solid #dde2e8;">
+      <!-- Header -->
+      <tr><td style="background-color:${hdr};padding:26px 36px;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td>
+            <div style="font-family:Arial,sans-serif;font-size:11px;color:#b0d8e8;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:5px;">Risk 2 Solution Group</div>
+            <div style="font-family:Arial,sans-serif;font-size:20px;font-weight:bold;color:#ffffff;margin-bottom:3px;">${title}</div>
+            ${subtitle ? `<div style="font-family:Arial,sans-serif;font-size:13px;color:#b0d8e8;">${subtitle}</div>` : ''}
+          </td>
+          ${urgencyBadge}
+        </tr></table>
+      </td></tr>
+      <!-- Body -->
+      <tr><td style="padding:30px 36px;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+          ${greeting ? `<tr><td style="font-family:Arial,sans-serif;font-size:15px;color:#333333;padding-bottom:16px;">${greeting}</td></tr>` : ''}
+          ${intro ? `<tr><td style="font-family:Arial,sans-serif;font-size:14px;color:#444444;line-height:1.7;padding-bottom:20px;">${intro}</td></tr>` : ''}
+          ${rowsHtml}
+          ${bulletsHtml}
+          ${bodyHtml}
+          ${noteHtml}
+          ${ctaHtml}
+          <!-- Signature -->
+          <tr><td style="font-family:Arial,sans-serif;font-size:14px;color:#333333;border-top:1px solid #e0e8ed;padding-top:18px;">
+            Kind regards,<br>
+            <strong>Aurora</strong><br>
+            <span style="color:#666666;">R2S Project Management Intelligence</span>
+          </td></tr>
+        </table>
+      </td></tr>
+      <!-- Footer -->
+      <tr><td style="background-color:#f4f6f8;padding:12px 36px;border-top:1px solid #dde2e8;">
+        <span style="font-family:Arial,sans-serif;font-size:11px;color:#888888;">${footer}</span>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>`;
 }
 
 // ── Build Outlook Classic HTML client status email ────────────────────────────
@@ -1831,13 +2104,22 @@ async function checkStuckPhases(projects) {
     const maxDays = MAX_PHASE_DAYS[p.phase || 0];
     if (daysSinceUpdate >= maxDays) {
       await sendEmail('diane.k@risk2solution.com',
-        `[Aurora] Project phase check: ${p.clientName} — ${PHASES[p.phase||0]}`,
-        `The ${p.clientName} project (${p.projectName || ''}) has been in the ${PHASES[p.phase||0]} phase for ${daysSinceUpdate} days without a recorded update in Aurora.
-
-Please log into Aurora and update the project status or phase as appropriate.
-
-Aurora
-R2S Project Management Intelligence`,
+        `[Aurora] Project phase check: ${p.clientName} - ${PHASES[p.phase||0]}`,
+        buildAlertEmailHtml({
+          title: 'Project Phase Check',
+          subtitle: p.projectName || p.clientName,
+          greeting: 'Hi Diane,',
+          intro: `The <strong>${p.clientName}</strong> project has been in the <strong>${PHASES[p.phase||0]}</strong> phase for <strong>${daysSinceUpdate} days</strong> without a recorded update in Aurora.`,
+          rows: [
+            { label: 'Client', value: p.clientName },
+            { label: 'Project', value: p.projectName || p.clientName },
+            { label: 'Current Phase', value: PHASES[p.phase||0], bold: true, color: '#1a5f7a' },
+            { label: 'Days Without Update', value: `${daysSinceUpdate} days`, bold: true, color: '#c0392b' },
+          ],
+          note: 'Please log into Aurora and update the project status or phase as appropriate.',
+          ...(process.env.FRONTEND_URL ? { cta: 'Review in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+          urgency: 'REVIEW',
+        }),
         true
       );
     }
@@ -1860,38 +2142,45 @@ async function checkMaterialsSubmissionReminders(projects) {
       const consultantFirst = (p.consultant || '').split(' ')[0];
       await sendEmail(p.consultantEmail || 'info@risk2solution.com',
         `[Aurora] Materials submission reminder: ${p.clientName}`,
-        `Hi ${consultantFirst},
-
-This is a reminder that all training and consulting materials for the ${p.projectName || p.clientName} project must be submitted to the COO for approval no later than 2 business days before delivery.
-
-Project due date: ${p.dueDate}
-Deadline for materials submission: Please ensure materials are submitted immediately to allow time for COO review.
-
-Please ensure all materials are:
-• Fully customised to ${p.clientName}
-• Client-ready (not draft)
-• Submitted via the SharePoint project folder
-
-Contact Diane if you have any questions.
-
-Kind regards,
-Diane Kruger
-Corporate Operations Lead | Risk 2 Solution Group`,
+        buildAlertEmailHtml({
+          title: 'Materials Submission Reminder',
+          subtitle: p.projectName || p.clientName,
+          greeting: `Hi ${consultantFirst},`,
+          intro: `This is a reminder that all training and consulting materials for the <strong>${p.projectName || p.clientName}</strong> project must be submitted to the COO for approval no later than <strong>2 business days before delivery</strong>.`,
+          rows: [
+            { label: 'Client', value: p.clientName },
+            { label: 'Project', value: p.projectName || p.clientName },
+            { label: 'Project Due Date', value: p.dueDate ? new Date(p.dueDate).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : 'TBC', bold: true, color: '#c0392b' },
+          ],
+          bullets: [
+            `Fully customised to <strong>${p.clientName}</strong>`,
+            'Client-ready (not draft)',
+            'Submitted via the SharePoint project folder',
+          ],
+          note: 'Please ensure materials are submitted immediately to allow time for COO review. Contact Diane if you have any questions.',
+          footer: 'Diane Kruger - Corporate Operations Lead | Risk 2 Solution Group',
+        }),
         false,
-        'diane.k@risk2solution.com'
+        ['diane.k@risk2solution.com']
       );
 
       // Also prompt COO (Diane) to expect materials
       await sendEmail('diane.k@risk2solution.com',
         `[Aurora] COO approval needed soon: ${p.clientName}`,
-        `Materials for the ${p.clientName} project (${p.projectName || ''}) should be submitted by ${p.consultant} for your approval within the next 1-2 days.
-
-Project due date: ${p.dueDate}
-
-Please allow time in your schedule to review and approve before delivery.
-
-Aurora
-R2S Project Management Intelligence`,
+        buildAlertEmailHtml({
+          title: 'COO Approval Needed',
+          subtitle: p.projectName || p.clientName,
+          greeting: 'Hi Diane,',
+          intro: `Materials for the <strong>${p.clientName}</strong> project should be submitted by <strong>${p.consultant}</strong> for your approval within the next 1-2 days.`,
+          rows: [
+            { label: 'Client', value: p.clientName },
+            { label: 'Project', value: p.projectName || p.clientName },
+            { label: 'Consultant', value: p.consultant, bold: true },
+            { label: 'Project Due Date', value: p.dueDate ? new Date(p.dueDate).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : 'TBC', bold: true },
+          ],
+          note: 'Please allow time in your schedule to review and approve materials before delivery.',
+          urgency: 'ACTION REQUIRED',
+        }),
         true
       );
     }
@@ -1901,26 +2190,30 @@ R2S Project Management Intelligence`,
       const consultantFirst = (p.consultant || '').split(' ')[0];
       await sendEmail(p.consultantEmail || 'info@risk2solution.com',
         `[Aurora] Session report due: ${p.clientName}`,
-        `Hi ${consultantFirst},
-
-This is a reminder that your session report for the ${p.projectName || p.clientName} engagement is due today (within 2 business days of delivery).
-
-Your session report should include:
-• Session overview
-• Key observations
-• Identified gaps
-• Recommendations
-• Any follow-up actions
-• Any off-scope items raised
-• Any incidents or issues
-
-Please submit your completed report to Diane and save it to the SharePoint project folder: 07 Session Reports
-
-Kind regards,
-Diane Kruger
-Corporate Operations Lead | Risk 2 Solution Group`,
+        buildAlertEmailHtml({
+          title: 'Session Report Due',
+          subtitle: p.projectName || p.clientName,
+          greeting: `Hi ${consultantFirst},`,
+          intro: `Your session report for the <strong>${p.projectName || p.clientName}</strong> engagement is due today (within 2 business days of delivery).`,
+          rows: [
+            { label: 'Client', value: p.clientName },
+            { label: 'Project', value: p.projectName || p.clientName },
+          ],
+          bullets: [
+            'Session overview',
+            'Key observations',
+            'Identified gaps',
+            'Recommendations',
+            'Any follow-up actions',
+            'Any off-scope items raised',
+            'Any incidents or issues',
+          ],
+          note: 'Please submit your completed report to Diane and save it to the SharePoint project folder: <strong>07 Session Reports</strong>',
+          urgency: 'DUE TODAY',
+          footer: 'Diane Kruger - Corporate Operations Lead | Risk 2 Solution Group',
+        }),
         false,
-        'diane.k@risk2solution.com'
+        ['diane.k@risk2solution.com']
       );
     }
   }
@@ -2138,7 +2431,19 @@ async function applySuggestion(suggestion) {
       try { await createCalendarReminder(`2-year follow-up: ${project.clientName}`, `2-year relationship check-in with ${project.clientName}.`, yr2.toISOString().slice(0,10)); } catch(e) {}
       await sendEmail('diane.k@risk2solution.com',
         `[Aurora] Project ${suggestion.action.phase === 5 ? 'completed' : 'in close-out'}: ${project.clientName}`,
-        `The ${project.projectName||project.clientName} project has been moved to ${PHASES[suggestion.action.phase]}.\n\nAurora has drafted a client feedback email for your review and set follow-up calendar reminders.\n\n${process.env.FRONTEND_URL||''}\n\nAurora\nR2S Project Management Intelligence`,
+        buildAlertEmailHtml({
+          title: suggestion.action.phase === 5 ? 'Project Completed' : 'Project in Close-out',
+          subtitle: project.projectName || project.clientName,
+          greeting: 'Hi team,',
+          intro: `The <strong>${project.projectName || project.clientName}</strong> project has been moved to <strong>${PHASES[suggestion.action.phase]}</strong>.`,
+          note: 'Aurora has drafted a client feedback email for your review and set follow-up calendar reminders.',
+          rows: [
+            { label: 'Client', value: project.clientName },
+            { label: 'Project', value: project.projectName || project.clientName },
+            { label: 'New Phase', value: PHASES[suggestion.action.phase], bold: true, color: '#1a5f7a' },
+          ],
+          ...(process.env.FRONTEND_URL ? { cta: 'Open Project in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+        }),
         true
       );
     }
@@ -2153,8 +2458,20 @@ async function applySuggestion(suggestion) {
   if (suggestion.action?.draftInvoice) {
     // Internal email to Diane only — just a prompt to check and send invoices
     await sendEmail('diane.k@risk2solution.com',
-      `[Aurora] Action required — check invoicing: ${project.clientName}`,
-      `Hi Diane,\n\nThe ${project.projectName || project.clientName} project is now in Close-out. Please review the invoicing status in Aurora and send any outstanding invoices to the client.\n\nProject: ${project.projectName || project.clientName}\nClient: ${project.clientName}\nContract value: ${project.value || 'See project record'}\nInvoicing terms: ${project.invoicingNotes || 'See project record'}\n\nPlease log into Aurora to review and update the invoicing status.\n\n${process.env.FRONTEND_URL || ''}\n\nAurora\nR2S Project Management Intelligence`,
+      `[Aurora] Action required - check invoicing: ${project.clientName}`,
+      buildAlertEmailHtml({
+        title: 'Invoicing Action Required',
+        subtitle: project.projectName || project.clientName,
+        greeting: 'Hi Diane,',
+        intro: `The <strong>${project.projectName || project.clientName}</strong> project is now in Close-out. Please review the invoicing status in Aurora and send any outstanding invoices to the client.`,
+        rows: [
+          { label: 'Client', value: project.clientName },
+          { label: 'Project', value: project.projectName || project.clientName },
+          { label: 'Contract Value', value: project.value || 'See project record', bold: true },
+          { label: 'Invoicing Terms', value: project.invoicingNotes || 'See project record' },
+        ],
+        ...(process.env.FRONTEND_URL ? { cta: 'Open Project in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+      }),
       true
     );
     await db.logActivity(project.id, { type: 'manual_note', summary: 'Invoicing check alert sent to Diane' });
@@ -2170,13 +2487,16 @@ async function applySuggestion(suggestion) {
     // Notify Diane that invites were sent
     await sendEmail('diane.k@risk2solution.com',
       `[Aurora] Meeting invites sent: ${suggestion.action.booking?.title || 'Event'}`,
-      `Meeting invites have been sent to all attendees for:
-
-${suggestion.action.booking?.title || 'Event'}
-Date: ${suggestion.action.booking?.startDateTime?.slice(0,10) || 'TBC'}
-
-Aurora
-R2S Project Management Intelligence`,
+      buildAlertEmailHtml({
+        title: 'Meeting Invites Sent',
+        subtitle: suggestion.action.booking?.title || 'Event',
+        greeting: 'Hi Diane,',
+        intro: 'Aurora has sent calendar invites to all attendees for the following meeting.',
+        rows: [
+          { label: 'Meeting', value: suggestion.action.booking?.title || 'Event', bold: true },
+          { label: 'Date', value: suggestion.action.booking?.startDateTime ? new Date(suggestion.action.booking.startDateTime).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : 'TBC' },
+        ],
+      }),
       true
     );
   }
@@ -2286,30 +2606,27 @@ async function monitorRisks(projects) {
 
         // Email Diane
         await sendEmail('diane.k@risk2solution.com',
-          `[Aurora] Risk triggered: ${p.clientName} — ${risk.description.slice(0,60)}`,
-          `Hi Diane,
-
-Aurora has detected that a documented risk has been triggered on the ${p.clientName} project.
-
-Project: ${p.projectName || p.clientName}
-Current phase: ${PHASES[phase]}
-
-RISK #${risk.number}: ${risk.description}
-Likelihood: ${risk.likelihood} | Impact: ${risk.impact} | Level: ${risk.level}
-
-Trigger reason: ${triggerReason}
-
-DOCUMENTED MITIGATION:
-${risk.mitigation || 'No mitigation documented — please review.'}
-
-Risk owner: ${risk.owner || 'Diane Kruger'}
-
-Please review the mitigation plan and take appropriate action. You can view and update the full risk register in Aurora under the project record.
-
-${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}
-
-Aurora
-R2S Project Management Intelligence`,
+          `[Aurora] Risk triggered: ${p.clientName} - ${risk.description.slice(0,60)}`,
+          buildAlertEmailHtml({
+            title: 'Risk Triggered',
+            subtitle: p.projectName || p.clientName,
+            greeting: 'Hi Diane,',
+            intro: `Aurora has detected that a documented risk has been triggered on the <strong>${p.clientName}</strong> project. Please review the mitigation plan and take appropriate action.`,
+            rows: [
+              { label: 'Client', value: p.clientName },
+              { label: 'Project', value: p.projectName || p.clientName },
+              { label: 'Current Phase', value: PHASES[phase] },
+              { label: `Risk #${risk.number}`, value: risk.description, bold: true, color: '#c0392b' },
+              { label: 'Likelihood', value: risk.likelihood || 'Not rated' },
+              { label: 'Impact', value: risk.impact || 'Not rated' },
+              { label: 'Level', value: risk.level || 'Not rated' },
+              { label: 'Trigger Reason', value: triggerReason },
+              { label: 'Mitigation', value: risk.mitigation || 'No mitigation documented - please review.' },
+              { label: 'Risk Owner', value: risk.owner || 'Diane Kruger' },
+            ],
+            urgency: 'ACTION REQUIRED',
+            ...(process.env.FRONTEND_URL ? { cta: 'View Risk Register in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+          }),
           true
         );
         console.log(`[Risks] Risk triggered for ${p.clientName}: ${risk.description.slice(0,50)}`);
@@ -2698,20 +3015,19 @@ async function runBatch() {
     const activeCount = standard.filter(p => !['Completed','Terminated'].includes(p.status)).length;
     const draftCount  = (await db.getDrafts()).length;
     await sendEmail('diane.k@risk2solution.com',
-      '[Aurora] Good morning — daily project check',
-      `Good morning Diane,
-
-Aurora here with your daily project summary.
-
-Active projects: ${activeCount}
-Drafts awaiting your review: ${draftCount}
-
-Please log into Aurora to review any pending drafts and check project status.
-
-${process.env.FRONTEND_URL ? `Aurora portal: ${process.env.FRONTEND_URL}` : ''}
-
-Aurora
-R2S Project Management Intelligence`,
+      '[Aurora] Good morning - daily project check',
+      buildAlertEmailHtml({
+        title: 'Good Morning, Diane',
+        subtitle: `Daily Project Summary - ${new Date().toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}`,
+        greeting: 'Good morning Diane,',
+        intro: 'Here is your daily Aurora project summary.',
+        rows: [
+          { label: 'Active Projects', value: `${activeCount}`, bold: true },
+          { label: 'Drafts Awaiting Review', value: `${draftCount}`, bold: draftCount > 0, color: draftCount > 0 ? '#1a5f7a' : undefined },
+        ],
+        note: 'Please log into Aurora to review any pending drafts and check project status.',
+        ...(process.env.FRONTEND_URL ? { cta: 'Open Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+      }),
       true
     );
   }
@@ -2802,24 +3118,21 @@ R2S Project Management Intelligence`,
     // 5b. Weekly consultant check-in drafts
     const checkinCount = await generateWeeklyConsultantCheckins(standard);
 
-    // 5c. Monday reminder to Diane to review and send check-in drafts
+    // 5c. Monday reminder to Diane to review and send check-in emails
     await sendEmail('diane.k@risk2solution.com',
-      '[Aurora] Weekly action — please review and send check-in emails',
-      `Good morning Diane,
-
-Aurora has prepared your weekly emails for review. Please log into Aurora to review and send:
-
-• ${standard.filter(p => !['Completed','Terminated'].includes(p.status)).length} client status update emails
-• ${checkinCount} consultant/trainer check-in emails
-
-All drafts are in the info@risk2solution.com Outlook shared mailbox Drafts folder and visible in the Aurora portal under Comms Drafts.
-
-Please review each one for accuracy before sending.
-
-${process.env.FRONTEND_URL ? `Aurora portal: ${process.env.FRONTEND_URL}` : ''}
-
-Aurora
-R2S Project Management Intelligence`,
+      '[Aurora] Weekly action - please review and send your emails',
+      buildAlertEmailHtml({
+        title: 'Weekly Action Required',
+        subtitle: 'Emails ready for your review',
+        greeting: 'Good morning Diane,',
+        intro: 'Aurora has prepared your weekly emails and saved them as drafts ready for your review. Please check each one for accuracy before sending.',
+        bullets: [
+          `<strong>${standard.filter(p => !['Completed','Terminated'].includes(p.status)).length} client status update emails</strong> - weekly project updates for your clients`,
+          `<strong>${checkinCount} consultant/trainer check-in emails</strong> - weekly check-ins with your allocated consultants and trainers`,
+        ],
+        note: 'All drafts are in the <strong>info@risk2solution.com</strong> Outlook shared mailbox Drafts folder and visible in the Aurora portal under Comms Drafts.',
+        ...(process.env.FRONTEND_URL ? { cta: 'Open Aurora Portal', ctaUrl: process.env.FRONTEND_URL } : {}),
+      }),
       true
     );
 
@@ -2859,13 +3172,21 @@ R2S Project Management Intelligence`,
   });
 
   if (atRisk.length > 0) {
-    const summary = atRisk.map(p => {
+    const atRiskBullets = atRisk.map(p => {
       const days = Math.round((new Date(p.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
-      return `• ${p.clientName} (${p.projectName || 'project'}) — due in ${days} days — Phase: ${PHASES[p.phase||0]}`;
-    }).join('\n');
+      const dueStr = new Date(p.dueDate).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+      return `<strong>${p.clientName}</strong> - ${p.projectName || 'project'} - due ${dueStr} (${days} day${days !== 1 ? 's' : ''}) - Phase: ${PHASES[p.phase||0]}`;
+    });
     await sendInternalEmail(
-      '[Aurora] Projects due within 14 days',
-      `Good morning,\n\nAurora has identified ${atRisk.length} project(s) due within the next 14 days:\n\n${summary}\n\nPlease log into Aurora to review and action.\n\nAurora\nR2S Project Management Intelligence`
+      `[Aurora] ${atRisk.length} project${atRisk.length !== 1 ? 's' : ''} due within 14 days`,
+      buildAlertEmailHtml({
+        title: 'Projects Due Soon',
+        subtitle: `${atRisk.length} project${atRisk.length !== 1 ? 's' : ''} require attention`,
+        greeting: 'Good morning,',
+        intro: `Aurora has identified ${atRisk.length} project${atRisk.length !== 1 ? 's' : ''} due within the next 14 days. Please review and ensure all deliverables are on track.`,
+        bullets: atRiskBullets,
+        ...(process.env.FRONTEND_URL ? { cta: 'Open Aurora Portal', ctaUrl: process.env.FRONTEND_URL } : {}),
+      })
     );
   }
 
@@ -3056,29 +3377,25 @@ async function sendKickoffPrompt(project) {
   // 5. Email Diane with availability options and next steps
   await sendEmail(DIANE,
     `[Aurora] Schedule kick-off meeting: ${project.clientName}`,
-    `Hi Diane,
-
-The consultant briefing for ${project.projectName || project.clientName} has been sent to ${project.consultant || 'the consultant'}.
-
-The next step is to schedule the kick-off meeting with the client and consultant.
-
-${availabilityText}
-
-To schedule:
-• Confirm the date with ${project.consultant || 'the consultant'}
-• Send the meeting invite to ${project.clientContact || 'the client'} (${project.clientEmail || ''})
-• The kick-off agenda has been saved to the info@risk2solution.com Outlook drafts for your review
-
-Client contact: ${project.clientContact || 'See project record'}
-Client email: ${project.clientEmail || 'See project record'}
-Consultant: ${project.consultant || 'See project record'}
-
-Once the kick-off meeting is confirmed, update the project phase to Deployment in Aurora.
-
-${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}
-
-Aurora
-R2S Project Management Intelligence`,
+    buildAlertEmailHtml({
+      title: 'Schedule Kick-off Meeting',
+      subtitle: project.projectName || project.clientName,
+      greeting: 'Hi Diane,',
+      intro: `The consultant briefing for <strong>${project.projectName || project.clientName}</strong> has been sent to <strong>${project.consultant || 'the consultant'}</strong>. The next step is to schedule the kick-off meeting with the client and consultant.`,
+      rows: [
+        { label: 'Client Contact', value: project.clientContact || 'See project record' },
+        { label: 'Client Email', value: project.clientEmail || 'See project record' },
+        { label: 'Consultant', value: project.consultant || 'See project record', bold: true },
+      ],
+      note: availabilityText || 'Please check Outlook calendar for consultant availability.',
+      bullets: [
+        `Confirm the date with <strong>${project.consultant || 'the consultant'}</strong>`,
+        `Send the meeting invite to <strong>${project.clientContact || 'the client'}</strong> (${project.clientEmail || ''})`,
+        'The kick-off agenda has been saved to the info@risk2solution.com Outlook drafts for your review',
+        'Once confirmed, update the project phase to <strong>Deployment</strong> in Aurora',
+      ],
+      ...(process.env.FRONTEND_URL ? { cta: 'Open Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+    }),
     true
   );
 
@@ -3223,21 +3540,22 @@ Sign off as Diane Kruger with full signature.`,
     // Also notify Diane internally
     await sendEmail(DIANE,
       `[Aurora] Risk escalation draft ready: ${project.clientName}`,
-      `Aurora has identified a risk on the ${project.clientName} project and drafted an escalation email for your review.
-
-Risk: ${riskDescription}
-Project: ${project.projectName || project.clientName}
-Phase: ${PHASES[project.phase || 0]}
-Client contact: ${project.clientContact || 'See project record'}
-
-The draft escalation email is waiting in the Comms Drafts section of Aurora and in the info@risk2solution.com Outlook shared mailbox drafts folder.
-
-Please review before sending.
-
-${process.env.FRONTEND_URL ? 'Aurora portal: ' + process.env.FRONTEND_URL : ''}
-
-Aurora
-R2S Project Management Intelligence`,
+      buildAlertEmailHtml({
+        title: 'Risk Escalation Draft Ready',
+        subtitle: project.projectName || project.clientName,
+        greeting: 'Hi Diane,',
+        intro: `Aurora has identified a risk on the <strong>${project.clientName}</strong> project and drafted an escalation email for your review.`,
+        rows: [
+          { label: 'Client', value: project.clientName },
+          { label: 'Project', value: project.projectName || project.clientName },
+          { label: 'Risk', value: riskDescription, bold: true, color: '#c0392b' },
+          { label: 'Phase', value: PHASES[project.phase || 0] },
+          { label: 'Client Contact', value: project.clientContact || 'See project record' },
+        ],
+        note: 'The draft escalation email is in the Comms Drafts section of Aurora and in the info@risk2solution.com Outlook shared mailbox drafts folder. Please review before sending.',
+        urgency: 'ACTION REQUIRED',
+        ...(process.env.FRONTEND_URL ? { cta: 'Review Draft in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+      }),
       true
     );
     console.log(`[Escalation] Draft created for ${project.clientName}`);
@@ -3368,7 +3686,18 @@ app.put('/api/projects/:id', express.json(), async (req, res) => {
         );
         await sendInternalEmail(
           `[Aurora] Project closed: ${p.clientName}`,
-          `The ${p.projectName || p.clientName} project has been marked complete.\n\nAurora has set 1-year and 2-year follow-up reminders in the Outlook calendar.\n\nAurora\nR2S Project Management Intelligence`
+          buildAlertEmailHtml({
+            title: 'Project Closed',
+            subtitle: p.projectName || p.clientName,
+            greeting: 'Hi team,',
+            intro: `The <strong>${p.projectName || p.clientName}</strong> project has been marked complete.`,
+            note: 'Aurora has set 1-year and 2-year follow-up reminders in the Outlook calendar to maintain the client relationship.',
+            rows: [
+              { label: 'Client', value: p.clientName },
+              { label: 'Project', value: p.projectName || p.clientName },
+              { label: 'Status', value: 'Completed', bold: true, color: '#1a5f7a' },
+            ],
+          })
         );
         // Draft client feedback email
         try { await draftClientFeedback(p); } catch(e) { console.error('[Feedback]', e.message); }
@@ -4284,8 +4613,22 @@ W: www.risk2solution.com`;
     // Alert Diane
     await sendEmail('diane.k@risk2solution.com',
       `[Aurora] ${eventId ? 'Meeting booked' : 'Draft invite ready'}: ${eventTitle}`,
-      `Aurora has ${eventId ? 'created a calendar event and ' : ''}saved a draft meeting invite to your Outlook Drafts folder.\n\nEvent: ${eventTitle}\nDate: ${dateFormatted}\nTime: ${displayTime} AEST\nDuration: ${durationMinutes || 60} minutes\nLocation: ${location || 'TBC'}\n${!eventId ? '\nNote: The calendar event could not be created automatically — please add it manually in Outlook.\n' : ''}
-Open Outlook → Drafts → review the invite → hit Send when ready.\n\nAurora\nR2S Project Management Intelligence`,
+      buildAlertEmailHtml({
+        title: eventId ? 'Meeting Booked' : 'Draft Invite Ready',
+        subtitle: eventTitle,
+        greeting: 'Hi Diane,',
+        intro: `Aurora has ${eventId ? 'created a calendar event and ' : ''}saved a draft meeting invite to your Outlook Drafts folder.`,
+        rows: [
+          { label: 'Event', value: eventTitle, bold: true },
+          { label: 'Date', value: dateFormatted },
+          { label: 'Time', value: `${displayTime} AEST` },
+          { label: 'Duration', value: `${durationMinutes || 60} minutes` },
+          { label: 'Location', value: location || 'TBC' },
+        ],
+        note: eventId
+          ? 'Open Outlook Drafts, review the invite, and hit Send when ready.'
+          : 'The calendar event could not be created automatically - please add it manually in Outlook. Then open Outlook Drafts, review the invite, and hit Send when ready.',
+      }),
       true
     );
 
@@ -4846,8 +5189,20 @@ async function checkInternalTaskConfirmations(emailBody, emailSubject, fromEmail
       await writeInternalChecklist(project.id, checklist);
       console.log(`[Internal] ✓ Task auto-confirmed by ${fromEmail}: ${item.task.slice(0, 60)}`);
       await sendEmail('diane.k@risk2solution.com',
-        `[Aurora] Task confirmed: ${project.cohortName} — ${item.group}`,
-        `${fromEmail} has confirmed completion of the following task:\n\nProgramme: ${project.cohortName}\nPhase: ${item.phaseName}\nTask: ${item.task}\nCompleted by: ${fromEmail}\n\nAurora has marked this item as complete in the checklist.\n\n${process.env.FRONTEND_URL || ''}\n\nAurora\nR2S Project Management Intelligence`,
+        `[Aurora] Task confirmed: ${project.cohortName} - ${item.group}`,
+        buildAlertEmailHtml({
+          title: 'Task Confirmed Complete',
+          subtitle: project.cohortName,
+          greeting: 'Hi Diane,',
+          intro: `A task has been confirmed complete by <strong>${fromEmail}</strong>. Aurora has automatically marked this item as complete in the checklist.`,
+          rows: [
+            { label: 'Programme', value: project.cohortName },
+            { label: 'Phase', value: item.phaseName },
+            { label: 'Task', value: item.task, bold: true },
+            { label: 'Completed By', value: fromEmail },
+          ],
+          ...(process.env.FRONTEND_URL ? { cta: 'View Checklist in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+        }),
         true
       );
       return true;
@@ -5992,7 +6347,7 @@ async function sendWeeklyPMChecklist() {
 
   await sendEmail(
     'diane.k@risk2solution.com',
-    `[Aurora] Wednesday PM Check-in — ${active.length} active project${active.length !== 1 ? 's' : ''}`,
+    `[Aurora] Wednesday PM Check-in - ${active.length} active project${active.length !== 1 ? 's' : ''}`,
     html, false, ['kandia@risk2solution.com'], true
   );
   console.log(`[PMChecklist] Wednesday checklist sent to Diane (CC: Kandia) — ${active.length} projects`);
