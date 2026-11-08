@@ -3116,7 +3116,7 @@ Write as if briefing the CEO, COO and PM. Highlight what needs attention this we
   const html = `<!DOCTYPE html>
 <html xmlns:o="urn:schemas-microsoft-com:office:office">
 <head><meta charset="utf-8"/><!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]--></head>
-<body style="margin:0;padding:0;background:#0f0f1a;font-family:Arial,sans-serif">
+<body style="margin:0;padding:0;background:#ffffff;font-family:Arial,sans-serif">
 <div style="max-width:700px;margin:0 auto;background:#0f0f1a;padding:24px">
 
   <!-- Header -->
@@ -5661,7 +5661,8 @@ async function sendInternalProjectStatusReport() {
   }
 
   const html = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office"><head><meta charset="utf-8"/><!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]--></head>
-<body style="margin:0;padding:0;background:#0f0f1a;font-family:Arial,sans-serif">
+<body style="margin:0;padding:0;background:#ffffff;font-family:Arial,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;"><tr><td align="center" style="background:#0f0f1a;padding:16px 8px;">
 <table width="720" cellpadding="20" cellspacing="0" border="0" align="center" style="max-width:720px;"><tr><td>
 
   <!-- Header -->
@@ -5678,7 +5679,7 @@ async function sendInternalProjectStatusReport() {
     ${process.env.FRONTEND_URL ? '<br><a href="' + process.env.FRONTEND_URL + '" style="color:#6aa3ff">Open Aurora portal</a>' : ''}
   </div>
 
-</div></body></html>`;
+</div></td></tr></table></td></tr></table></body></html>`;
 
   const subject = `IoP Internal Programmes — Weekly Leadership Report (${now.toLocaleDateString('en-AU',{day:'numeric',month:'short'})})`;
   for (const r of RECIPIENTS) {
@@ -5935,15 +5936,15 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
 <meta name="viewport" content="width=device-width"/>
 <!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
 <style>
-  body { margin:0; padding:0; background:#0f0f1a; -ms-text-size-adjust:100%; -webkit-text-size-adjust:100%; }
+  body { margin:0; padding:0; background:#ffffff; -ms-text-size-adjust:100%; -webkit-text-size-adjust:100%; }
   table { border-collapse:collapse; mso-table-lspace:0pt; mso-table-rspace:0pt; }
   td { border-collapse:collapse; }
   img { border:0; outline:none; text-decoration:none; }
 </style>
 </head>
-<body style="margin:0;padding:0;background:#0f0f1a;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0f0f1a;">
-<tr><td align="center" style="padding:16px 8px;">
+<body style="margin:0;padding:0;background:#ffffff;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;">
+<tr><td align="center" style="padding:16px 8px;background:#0f0f1a;">
 <table width="680" cellpadding="0" cellspacing="0" border="0" style="max-width:680px;width:100%;">
 
   <!-- HEADER -->
@@ -6388,11 +6389,11 @@ app.post('/api/test/report/internal-leadership', async (req, res) => {
         ${dueThisWeek.length>0?`<div style="background:#ffd93d15;border:1px solid #ffd93d44;border-radius:6px;padding:10px"><div style="font-size:10px;font-weight:700;color:#ffd93d;margin-bottom:6px">📋 DUE THIS WEEK (${dueThisWeek.length})</div>${dueThisWeek.map(i=>`<div style="font-size:11px;color:#cccccc;margin-bottom:3px">• <b style="color:${ownerColors[i.owner]||'#aaa'}">${i.owner.split(' ')[0]}</b>: ${i.task.slice(0,70)}</div>`).join('')}</div>`:'<div style="font-size:11px;color:#00e8bb">✓ Nothing due this week</div>'}
       </div>`;
     }
-    const html = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office"><body style="margin:0;padding:0;background:#0f0f1a;font-family:Arial,sans-serif"><table width="700" cellpadding="20" cellspacing="0" border="0" align="center" style="max-width:700px;"><tr><td>
+    const html = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office"><body style="margin:0;padding:0;background:#ffffff;font-family:Arial,sans-serif"><table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;"><tr><td align="center" style="background:#0f0f1a;padding:16px 8px;"><table width="700" cellpadding="20" cellspacing="0" border="0" align="center" style="max-width:700px;"><tr><td>
       <div style="background:#1a1a3e;border-radius:12px;padding:24px;margin-bottom:16px;border:1px solid #2a2a4a"><div style="font-size:10px;color:#6aa3ff;text-transform:uppercase;letter-spacing:2px;margin-bottom:6px">TEST SEND · Institute of Presilience</div><div style="font-size:22px;font-weight:700;color:#fff;margin-bottom:4px">Internal Programmes — Leadership Report</div><div style="font-size:12px;color:#8899bb">${dateStr} · Aurora</div></div>
       ${reportSections}
       <div style="text-align:center;color:#555577;font-size:10px;padding:12px">🧪 TEST SEND — Aurora · R2S Project Management Intelligence</div>
-    </div></body></html>`;
+    </td></tr></table></td></tr></table></body></html>`;
     await sendEmail(TEST_EMAIL, `[TEST] IoP Internal Programmes — Leadership Report`, html, false, [], true);
     res.json({ success: true, sentTo: TEST_EMAIL });
   } catch(e) { res.status(500).json({ error: e.message }); }
@@ -6573,7 +6574,8 @@ async function sendWeeklyPMChecklist() {
       </div>`;
   }
 
-  const html = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office"><body style="margin:0;padding:0;background:#0f0f1a;font-family:Arial,sans-serif">
+  const html = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office"><body style="margin:0;padding:0;background:#ffffff;font-family:Arial,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;"><tr><td align="center" style="background:#0f0f1a;padding:16px 8px;">
   <table width="680" cellpadding="24" cellspacing="0" border="0" align="center" style="max-width:680px;"><tr><td>
     <div style="background:#1a1a3e;border-radius:12px;padding:24px;margin-bottom:20px;border:1px solid #2a2a5a">
       <div style="font-size:11px;color:#6aa3ff;text-transform:uppercase;letter-spacing:2px;margin-bottom:6px">Aurora · Weekly PM Checklist</div>
@@ -6600,7 +6602,7 @@ async function sendWeeklyPMChecklist() {
     <div style="text-align:center;color:#444;font-size:11px;padding-top:16px">
       Aurora · R2S Project Management Intelligence · Confidential
     </div>
-  </div></body></html>`;
+  </td></tr></table></td></tr></table></body></html>`;
 
   await sendEmail(
     'diane.k@risk2solution.com',
@@ -6709,9 +6711,9 @@ async function sendPMChecklistFollowUp() {
   const html = `<!DOCTYPE html>
 <html xmlns:o="urn:schemas-microsoft-com:office:office">
 <head><meta charset="utf-8"/><!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]--></head>
-<body style="margin:0;padding:0;background:#0f0f1a;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0f0f1a;">
-<tr><td align="center" style="padding:16px 8px;">
+<body style="margin:0;padding:0;background:#ffffff;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;">
+<tr><td align="center" style="background:#0f0f1a;padding:16px 8px;">
 <table width="680" cellpadding="0" cellspacing="0" border="0" style="max-width:680px;width:100%;">
 
   <!-- HEADER -->
