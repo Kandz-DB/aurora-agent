@@ -115,18 +115,24 @@ const TASK_TOKENS = {
   status_report: 800, portfolio_report: 900, closeout_report: 900,
 };
 
+// Replace em dashes and en dashes with a plain hyphen.
+// Em dashes show as garbled characters (=97) in Outlook on Windows.
+function noDashes(text) {
+  return typeof text === 'string' ? text.replace(/\u2014|\u2013/g, '-') : text;
+}
+
 async function aurora(taskType, userMessage, context) {
   const spend = await db.getSpend();
   if (spend.total >= CAP_USD) throw new Error('MONTHLY_CAP_REACHED');
 
   const model     = TASK_MODELS[taskType] || 'claude-haiku-4-5-20251001';
   const maxTokens = TASK_TOKENS[taskType] || 500;
-  const system    = context ? `${AURORA_PROMPT}\n\nPROJECT CONTEXT:\n${context}` : AURORA_PROMPT;
+  const system    = noDashes(context ? `${AURORA_PROMPT}\n\nPROJECT CONTEXT:\n${context}` : AURORA_PROMPT);
 
   const response = await client.messages.create({
     model, max_tokens: maxTokens,
     system,
-    messages: [{ role: 'user', content: userMessage }],
+    messages: [{ role: 'user', content: noDashes(userMessage) }],
   });
 
   const rates = model.includes('haiku') ? { in: 0.80, out: 4.00 } : { in: 3.00, out: 15.00 };
@@ -177,6 +183,7 @@ async function getOutlookToken() {
 }
 
 async function sendEmail(to, subject, body, isInternal = false, cc = [], isHtml = false) {
+  subject = noDashes(subject);
   const token = await getOutlookToken();
   const fromMailbox = process.env.OUTLOOK_SHARED_MAILBOX || 'info@risk2solution.com';
   // Auto-detect HTML if not explicitly set
@@ -237,7 +244,7 @@ async function saveDraftEmail(draft) {
       await axios.post(
         `https://graph.microsoft.com/v1.0/users/${fromMailbox}/messages`,
         {
-          subject: draft.subject,
+          subject: noDashes(draft.subject),
           body: bodyPayload,
           // Only set toRecipients if a real address exists — avoids drafts accidentally addressed to info@
           ...(draft.toEmail ? { toRecipients: [{ emailAddress: { address: draft.toEmail } }] } : {}),
@@ -310,7 +317,7 @@ async function analyseContract(rawText, filename) {
 
   const text = await aurora(
     'contract_extract',
-    `You are reading a client contract or proposal for Risk 2 Solution (R2S). Extract ALL of the following information and return it as a valid JSON object with exactly these keys. Be thorough — read the ENTIRE document including the costs summary and commercial offer sections which are often near the end.
+    `You are reading a client contract or proposal for Risk 2 Solution (R2S). Extract ALL of the following information and return it as a valid JSON object with exactly these keys. Be thorough - read the ENTIRE document including the costs summary and commercial offer sections which are often near the end.
 
 IMPORTANT FOR VALUE FIELD: Look for a TOTAL or GRAND TOTAL line in the costs summary table. This is usually the single largest dollar figure in the document. Do NOT use a per-session rate or sub-total. Find the overall total project cost (e.g. TOTAL $63,000).
 
@@ -321,18 +328,18 @@ IMPORTANT FOR VALUE FIELD: Look for a TOTAL or GRAND TOTAL line in the costs sum
   "clientContact": "primary client contact person full name",
   "clientEmail": "primary client contact email address",
   "clientPhone": "primary client contact phone number",
-  "value": "TOTAL project cost only — the grand total from the costs summary e.g. $63,000. Do NOT list individual line items.",
+  "value": "TOTAL project cost only - the grand total from the costs summary e.g. $63,000. Do NOT list individual line items.",
   "contractStart": "contract start date or engagement commencement date",
   "dueDate": "project completion date, contract end date, or due date",
-  "summary": "full description of services R2S is providing — extract the key paragraphs describing what R2S will do for the client",
-  "deliverables": "all specific deliverables and stages listed — include phase names and what is delivered in each",
+  "summary": "full description of services R2S is providing - extract the key paragraphs describing what R2S will do for the client",
+  "deliverables": "all specific deliverables and stages listed - include phase names and what is delivered in each",
   "milestones": "any key milestones, phases, or stages mentioned with dates or conditions",
-  "timeline": "overall project timeline description — start to finish with any phasing or scheduling mentioned",
+  "timeline": "overall project timeline description - start to finish with any phasing or scheduling mentioned",
   "invoicingNotes": "full payment terms, invoicing schedule, milestone payment triggers, and invoicing frequency",
   "consultant": "name(s) of any R2S consultant, trainer, or staff member assigned or mentioned",
   "consultantEmail": "email address of the assigned consultant or trainer if mentioned",
-  "flightsRequired": "yes or no — are flights required for this engagement",
-  "accommodationRequired": "yes or no — is accommodation required for this engagement",
+  "flightsRequired": "yes or no - are flights required for this engagement",
+  "accommodationRequired": "yes or no - is accommodation required for this engagement",
   "notes": "any special conditions, exclusions, cancellation terms, or important requirements"
 }
 
@@ -366,14 +373,14 @@ async function sendConsultantBriefing(project, extracted, prebuiltContext) {
   const firstName = consultantName.split(' ')[0];
   const briefingBody = await aurora(
     'consultant_briefing',
-    `Write a short project assignment email. Plain text only — no asterisks, no bold, no markdown formatting at all.
+    `Write a short project assignment email. Plain text only - no asterisks, no bold, no markdown formatting at all.
 
 Start exactly with:
 Hi ${firstName},
 
-You've been assigned to a new project for ${project.clientName} — ${project.projectName || project.clientName}. Commencing ${project.contractStart || 'TBC'} and due ${project.dueDate || 'TBC'}.
+You've been assigned to a new project for ${project.clientName} - ${project.projectName || project.clientName}. Commencing ${project.contractStart || 'TBC'} and due ${project.dueDate || 'TBC'}.
 
-Then write these four short sections with no section headings — just plain paragraphs and dot points:
+Then write these four short sections with no section headings - just plain paragraphs and dot points:
 
 1. SCOPE (1-2 sentences only): What R2S is doing for this client. Be concise.
 
@@ -403,7 +410,7 @@ Queensland, Australia`,
     context
   );
 
-  const subject = `Project briefing: ${project.clientName} — ${project.projectName || project.clientName}`;
+  const subject = `Project briefing: ${project.clientName} - ${project.projectName || project.clientName}`;
 
   // Save as draft in Outlook shared mailbox (requires approval before sending)
   const draft = {
@@ -937,7 +944,7 @@ Extract the following fields from the email and return ONLY valid JSON (no markd
 
 Rules:
 - programType must be "grad_cert" if Graduate Certificate / 11056NAT, or "grad_dip" if Graduate Diploma / 11066NAT
-- Extract ALL module/session dates mentioned — even if just listed as "Module 1: 6 Nov 2026" style
+- Extract ALL module/session dates mentioned - even if just listed as "Module 1: 6 Nov 2026" style
 - If no start/end time is given, use null
 - If studentCount is not mentioned, use null
 - cohortName should describe the intake clearly (year + month if available)
@@ -1440,7 +1447,7 @@ ${bodyText.slice(0, 4000)}`,
 
         if (isInternal && !isNoise && looksLikeProject) {
           await sendEmail('diane.k@risk2solution.com',
-            `[Aurora] R2S staff email — no project match: ${subject}`,
+            `[Aurora] R2S staff email - no project match: ${subject}`,
             `Aurora received an email from ${fromName} (${fromEmail}) that may relate to a project but could not be matched.
 
 Subject: ${subject}
@@ -1472,7 +1479,7 @@ R2S Project Management Intelligence`,
       // Full autonomous analysis
       try {
         const analysis = await aurora('contract_extract',
-          `Analyse this email and return a JSON object. Return ONLY the JSON — no explanation, no preamble, no markdown, just the raw JSON object starting with { and ending with }.
+          `Analyse this email and return a JSON object. Return ONLY the JSON - no explanation, no preamble, no markdown, just the raw JSON object starting with { and ending with }.
 
 Project context:
 - Project: ${matchedProject.projectName || matchedProject.clientName}
@@ -1486,7 +1493,7 @@ From: ${fromEmail}
 Subject: ${subject}
 Content: ${bodyText.slice(0, 2000)}
 
-PHASE CHANGE RULES — be proactive, not conservative:
+PHASE CHANGE RULES - be proactive, not conservative:
 - If email says work is "commencing", "starting", "about to begin", "wanting to start" → move to Deployment (phase 1)
 - If email says work is "underway", "in progress", "delivering", "on site" → move to Deployment (phase 1)  
 - If email says report is "submitted", "sent to client", "delivered", "complete", "finalised" → move to Reporting (phase 3)
@@ -1494,7 +1501,7 @@ PHASE CHANGE RULES — be proactive, not conservative:
 - If email says "waiting", "delayed", "on hold", "postponed" → set newStatus to "On Hold"
 - Only keep current phase if email has no project progress information
 
-INVOICE RULES — trigger if any of these are mentioned:
+INVOICE RULES - trigger if any of these are mentioned:
 - Delivery of any training session or workshop
 - Submission of any report or deliverable
 - Project commencement (first milestone)
@@ -1546,57 +1553,107 @@ Return this exact JSON (no other text):
 
         const actions = [];
 
-        // ── 1. Update project phase ───────────────────────────────────────────
-        if (parsed.phaseChange && typeof parsed.newPhase === 'number' && parsed.newPhase !== (matchedProject.phase || 0)) {
-          await db.updateProjectField(matchedProject.id, { phase: parsed.newPhase });
-          matchedProject.phase = parsed.newPhase;
-          actions.push(`Phase updated: ${PHASES[parsed.newPhase - 1] || 'Kick-off'} → ${PHASES[parsed.newPhase]}`);
-          console.log(`[Replies] Phase updated: ${matchedProject.clientName} → ${PHASES[parsed.newPhase]}`);
-          // Add suggestion so Diane can revert if Aurora got it wrong
-          await db.saveSuggestion({
-            id: `sug_phase_${matchedProject.id}_${Date.now()}`,
-            projectId: matchedProject.id,
-            clientName: matchedProject.clientName,
-            projectName: matchedProject.projectName,
-            type: 'phase_advance',
-            title: `Aurora moved ${matchedProject.clientName} to ${PHASES[parsed.newPhase]}`,
-            reason: `Based on an email from ${fromEmail}, Aurora automatically updated this project to ${PHASES[parsed.newPhase]}. Please confirm this is correct, or dismiss to revert.`,
-            action: { phase: parsed.newPhase },
-            confirmLabel: 'Confirmed — keep this phase',
-            dismissLabel: 'Revert to previous phase',
-          });
-        }
+        // ── 1-3. Phase, status and deliverable updates ──────────────────────────
+        // Emails from R2S staff (@risk2solution.com) still update the project straight away.
+        // Emails from anyone else (clients and other external senders) never change the project.
+        // Aurora collects what the email suggests into one suggestion and asks Diane to confirm.
+        // Nothing changes until Diane approves it in the portal. Dismissing leaves the project as it is.
+        const isInternalSender = fromEmail.toLowerCase().endsWith('@risk2solution.com');
+        const oldPhase = matchedProject.phase || 0;
+        const hasPhaseChange = parsed.phaseChange && typeof parsed.newPhase === 'number' &&
+          parsed.newPhase >= 0 && parsed.newPhase < PHASES.length && parsed.newPhase !== oldPhase;
+        const hasStatusChange = !!parsed.newStatus && parsed.newStatus !== matchedProject.status;
 
-        // ── 2. Update project status ──────────────────────────────────────────
-        if (parsed.newStatus && parsed.newStatus !== matchedProject.status) {
-          await db.updateProjectField(matchedProject.id, { status: parsed.newStatus });
-          actions.push(`Status updated to: ${parsed.newStatus}`);
-        }
-
-        // ── 3. Update deliverable statuses ────────────────────────────────────
+        // Work out which deliverables the email says are complete or in progress
+        const deliverableUpdates = [];
         if (parsed.completedDeliverables?.length || parsed.inProgressDeliverables?.length) {
           const deliverables = await db.getDeliverables(matchedProject.id);
-          if (deliverables.length > 0) {
-            for (const delName of (parsed.completedDeliverables || [])) {
-              const match = deliverables.find(d =>
-                d.name.toLowerCase().includes(delName.toLowerCase().slice(0,12)) ||
-                delName.toLowerCase().includes(d.name.toLowerCase().slice(0,12))
-              );
-              if (match) {
-                await db.updateDeliverable(matchedProject.id, match.id, { status: 'Complete' });
-                actions.push(`Deliverable marked complete: ${match.name}`);
-              }
+          const findDel = name => deliverables.find(d =>
+            d.name.toLowerCase().includes(name.toLowerCase().slice(0,12)) ||
+            name.toLowerCase().includes(d.name.toLowerCase().slice(0,12))
+          );
+          for (const delName of (parsed.completedDeliverables || [])) {
+            const match = findDel(delName);
+            if (match && match.status !== 'Complete' && !deliverableUpdates.some(u => u.id === match.id)) {
+              deliverableUpdates.push({ id: match.id, name: match.name, status: 'Complete' });
             }
-            for (const delName of (parsed.inProgressDeliverables || [])) {
-              const match = deliverables.find(d =>
-                d.name.toLowerCase().includes(delName.toLowerCase().slice(0,12)) ||
-                delName.toLowerCase().includes(d.name.toLowerCase().slice(0,12))
-              );
-              if (match && match.status !== 'Complete') {
-                await db.updateDeliverable(matchedProject.id, match.id, { status: 'In Progress' });
-                actions.push(`Deliverable in progress: ${match.name}`);
-              }
+          }
+          for (const delName of (parsed.inProgressDeliverables || [])) {
+            const match = findDel(delName);
+            if (match && match.status !== 'Complete' && match.status !== 'In Progress' && !deliverableUpdates.some(u => u.id === match.id)) {
+              deliverableUpdates.push({ id: match.id, name: match.name, status: 'In Progress' });
             }
+          }
+        }
+
+        // Changes waiting for Diane (external senders only)
+        const pendingChanges = [];
+
+        if (isInternalSender) {
+          // ── Staff email: apply straight away (unchanged behaviour) ──
+          if (hasPhaseChange) {
+            await db.updateProjectField(matchedProject.id, { phase: parsed.newPhase });
+            matchedProject.phase = parsed.newPhase;
+            actions.push(`Phase updated: ${PHASES[oldPhase]} → ${PHASES[parsed.newPhase]}`);
+            console.log(`[Replies] Phase updated: ${matchedProject.clientName} → ${PHASES[parsed.newPhase]}`);
+            // Suggestion so Diane can keep the change or revert it.
+            // previousPhase and autoApplied let the dismiss button put the old phase back.
+            await db.saveSuggestion({
+              id: `sug_phase_${matchedProject.id}_${Date.now()}`,
+              projectId: matchedProject.id,
+              clientName: matchedProject.clientName,
+              projectName: matchedProject.projectName,
+              type: 'phase_advance',
+              title: `Aurora moved ${matchedProject.clientName} to ${PHASES[parsed.newPhase]}`,
+              reason: `Based on an email from ${fromEmail}, Aurora automatically updated this project from ${PHASES[oldPhase]} to ${PHASES[parsed.newPhase]}. Please confirm this is correct, or revert to ${PHASES[oldPhase]}.`,
+              action: { phase: parsed.newPhase, previousPhase: oldPhase, autoApplied: true },
+              confirmLabel: 'Confirmed - keep this phase',
+              dismissLabel: `Revert to ${PHASES[oldPhase]}`,
+            });
+          }
+          if (hasStatusChange) {
+            await db.updateProjectField(matchedProject.id, { status: parsed.newStatus });
+            actions.push(`Status updated to: ${parsed.newStatus}`);
+          }
+          for (const u of deliverableUpdates) {
+            await db.updateDeliverable(matchedProject.id, u.id, { status: u.status });
+            actions.push(u.status === 'Complete' ? `Deliverable marked complete: ${u.name}` : `Deliverable in progress: ${u.name}`);
+          }
+        } else {
+          // ── Client or other external email: change nothing, ask Diane to confirm ──
+          const proposedAction = {};
+          if (hasPhaseChange) {
+            proposedAction.phase = parsed.newPhase;
+            pendingChanges.push({ label: 'Phase', value: `${PHASES[oldPhase]} → ${PHASES[parsed.newPhase]}` });
+          }
+          if (hasStatusChange) {
+            proposedAction.status = parsed.newStatus;
+            pendingChanges.push({ label: 'Status', value: `${matchedProject.status || 'Not set'} → ${parsed.newStatus}` });
+          }
+          if (deliverableUpdates.length) {
+            proposedAction.deliverableUpdates = deliverableUpdates;
+            for (const u of deliverableUpdates) {
+              pendingChanges.push({ label: 'Deliverable', value: `${u.name} → ${u.status}` });
+            }
+          }
+
+          if (pendingChanges.length) {
+            await db.saveSuggestion({
+              id: `sug_client_update_${matchedProject.id}_${Date.now()}`,
+              projectId: matchedProject.id,
+              clientName: matchedProject.clientName,
+              projectName: matchedProject.projectName,
+              type: 'client_update',
+              title: `Client email - confirm update for ${matchedProject.clientName}`,
+              reason: `An email from ${fromEmail} (subject: "${subject}") suggests these changes: ${pendingChanges.map(c => `${c.label}: ${c.value}`).join('; ')}. Aurora has not changed the project. Approve to apply these changes, or dismiss to leave the project as it is.`,
+              action: proposedAction,
+              confirmLabel: 'Approve and update project',
+              dismissLabel: 'Ignore - no change',
+            });
+            for (const c of pendingChanges) {
+              actions.push(`Awaiting your confirmation - ${c.label}: ${c.value} (not applied)`);
+            }
+            console.log(`[Replies] Client update flagged for Diane (not applied) for ${matchedProject.clientName} from ${fromEmail}: ${pendingChanges.map(c => c.label).join(', ')}`);
           }
         }
 
@@ -1679,7 +1736,7 @@ Return this exact JSON (no other text):
         if (parsed.hasBookableEvent && parsed.eventDate) {
           try {
             const booking = {
-              title: parsed.eventTitle || `${parsed.eventType} — ${matchedProject.clientName}`,
+              title: parsed.eventTitle || `${parsed.eventType} - ${matchedProject.clientName}`,
               description: `${parsed.statusSummary || ''}\n\nSource: Email from ${fromEmail}`,
               startDateTime: `${parsed.eventDate}T${parsed.eventTime || '09:00'}:00`,
               durationMinutes: parsed.eventDuration || 60,
@@ -1723,25 +1780,54 @@ Return this exact JSON (no other text):
           ? `\nActions taken by Aurora:\n${actions.map(a => `• ${a}`).join('\n')}\n`
           : '\nNo automatic actions were taken.\n';
 
-        await sendEmail('diane.k@risk2solution.com',
-          `[Aurora] Email processed: ${matchedProject.clientName}${actions.length ? ` - ${actions.length} action${actions.length > 1 ? 's' : ''} taken` : ''}`,
-          buildAlertEmailHtml({
-            title: 'Email Processed',
-            subtitle: matchedProject.projectName || matchedProject.clientName,
-            greeting: 'Hi Diane,',
-            intro: `Aurora has processed an email from <strong>${fromEmail}</strong> regarding the <strong>${matchedProject.projectName || matchedProject.clientName}</strong> project.`,
-            rows: [
-              { label: 'From', value: fromEmail },
-              { label: 'Summary', value: parsed.statusSummary },
-            ],
-            ...(actions.length ? {
-              bullets: actions.map(a => a),
-            } : {}),
-            note: actions.length ? '' : 'No automatic actions were taken. Please review the project record if needed.',
-            ...(process.env.FRONTEND_URL ? { cta: 'Review in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
-          }),
-          true
-        );
+        if (pendingChanges.length) {
+          // Client email suggests a change: tell Diane straight away and ask her to confirm.
+          // The project has NOT been changed.
+          const excerpt = bodyText.slice(0, 800).trim()
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') +
+            (bodyText.length > 800 ? '...' : '');
+          await sendEmail('diane.k@risk2solution.com',
+            `[Aurora] Client email - please confirm update: ${matchedProject.clientName}`,
+            buildAlertEmailHtml({
+              title: 'Client Update - Please Confirm',
+              subtitle: matchedProject.projectName || matchedProject.clientName,
+              greeting: 'Hi Diane,',
+              intro: `Aurora has received an email from <strong>${fromEmail}</strong> about the <strong>${matchedProject.projectName || matchedProject.clientName}</strong> project. The email suggests the project should be updated. <strong>Aurora has not changed anything.</strong> Please review the email and confirm in Aurora under Suggestions.`,
+              rows: [
+                { label: 'From', value: fromEmail },
+                { label: 'Subject', value: subject },
+                { label: 'Summary', value: parsed.statusSummary || 'See email below' },
+                ...pendingChanges.map(c => ({ label: `Proposed ${c.label}`, value: c.value, bold: true, color: '#c0392b' })),
+              ],
+              ...(actions.length ? { bullets: actions.map(a => a) } : {}),
+              body: `Email from the client:\n\n${excerpt}`,
+              note: 'Approve the suggestion in Aurora to apply these changes, or dismiss it to leave the project as it is.',
+              urgency: 'CONFIRMATION NEEDED',
+              ...(process.env.FRONTEND_URL ? { cta: 'Review in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+            }),
+            true
+          );
+        } else {
+          await sendEmail('diane.k@risk2solution.com',
+            `[Aurora] Email processed: ${matchedProject.clientName}${actions.length ? ` - ${actions.length} action${actions.length > 1 ? 's' : ''} taken` : ''}`,
+            buildAlertEmailHtml({
+              title: 'Email Processed',
+              subtitle: matchedProject.projectName || matchedProject.clientName,
+              greeting: 'Hi Diane,',
+              intro: `Aurora has processed an email from <strong>${fromEmail}</strong> regarding the <strong>${matchedProject.projectName || matchedProject.clientName}</strong> project.`,
+              rows: [
+                { label: 'From', value: fromEmail },
+                { label: 'Summary', value: parsed.statusSummary },
+              ],
+              ...(actions.length ? {
+                bullets: actions.map(a => a),
+              } : {}),
+              note: actions.length ? '' : 'No automatic actions were taken. Please review the project record if needed.',
+              ...(process.env.FRONTEND_URL ? { cta: 'Review in Aurora', ctaUrl: process.env.FRONTEND_URL } : {}),
+            }),
+            true
+          );
+        }
 
         console.log(`[Replies] ✓ ${matchedProject.clientName}: ${actions.length} actions taken`);
 
@@ -1833,8 +1919,8 @@ function buildAlertEmailHtml({ title = 'Aurora', subtitle = '', greeting = '', i
 <head><meta charset="UTF-8">
 <!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]-->
 </head>
-<body style="margin:0;padding:0;background-color:#f4f6f8;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6f8;">
+<body style="margin:0;padding:0;background-color:#ffffff;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;">
   <tr><td align="center" style="padding:24px 10px;">
     <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#ffffff;border:1px solid #dde2e8;">
       <!-- Header -->
@@ -1920,8 +2006,8 @@ function buildStatusEmailHtml({ clientContact, clientName, projectName, phaseNam
 <meta charset="UTF-8">
 <!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]-->
 </head>
-<body style="margin:0;padding:0;background-color:#f4f6f8;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6f8;">
+<body style="margin:0;padding:0;background-color:#ffffff;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;">
   <tr>
     <td align="center" style="padding:24px 10px;">
       <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#ffffff;border:1px solid #dde2e8;">
@@ -2673,6 +2759,31 @@ async function applySuggestion(suggestion) {
     }
   }
 
+  // Status change on its own (for example from a client email Diane has confirmed)
+  if (suggestion.action?.status && suggestion.action?.phase === undefined) {
+    await db.updateProjectField(suggestion.projectId, { status: suggestion.action.status });
+    await db.logActivity(suggestion.projectId, {
+      type: 'status_change',
+      summary: `Status updated to ${suggestion.action.status} - Diane approved Aurora suggestion: "${suggestion.title}"`,
+    });
+    console.log(`[applySuggestion] Status: ${project.status || 'Not set'} → ${suggestion.action.status}`);
+  }
+
+  // Deliverable updates (from a client email Diane has confirmed)
+  if (Array.isArray(suggestion.action?.deliverableUpdates)) {
+    for (const u of suggestion.action.deliverableUpdates) {
+      try {
+        await db.updateDeliverable(suggestion.projectId, u.id, { status: u.status });
+        await db.logActivity(suggestion.projectId, {
+          type: 'deliverable_update',
+          summary: `Deliverable "${u.name}" set to ${u.status} - Diane approved Aurora suggestion`,
+        });
+      } catch (e) {
+        console.error(`[applySuggestion] Deliverable update failed for ${u.name}:`, e.message);
+      }
+    }
+  }
+
   // If suggestion was to draft an escalation
   if (suggestion.action?.draftEscalation) {
     await draftRiskEscalation(project, suggestion.action.riskDescription || 'Risk identified by Aurora');
@@ -3107,7 +3218,7 @@ On hold: ${onHold}
 
 Project summaries: ${contextSummary}
 
-Write as if briefing the CEO, COO and PM. Highlight what needs attention this week. Plain text, no asterisks, no markdown, no bullet points in this paragraph — just clear professional prose.`,
+Write as if briefing the CEO, COO and PM. Highlight what needs attention this week. Plain text, no asterisks, no markdown, no bullet points in this paragraph - just clear professional prose.`,
       null
     );
   } catch(e) { narrative = `Weekly project status report for the week of ${dateStr}. ${standard.length} active projects with a total portfolio value of $${Math.round(totalValue).toLocaleString('en-AU')}.`; }
@@ -3200,7 +3311,7 @@ Write as if briefing the CEO, COO and PM. Highlight what needs attention this we
   // Send to all recipients
   for (const recipient of RECIPIENTS) {
     try {
-      await sendEmail(recipient, `R2S Weekly Project Status — ${now.toLocaleDateString('en-AU', { day:'numeric', month:'short' })}`, html, false, [], true);
+      await sendEmail(recipient, `R2S Weekly Project Status - ${now.toLocaleDateString('en-AU', { day:'numeric', month:'short' })}`, html, false, [], true);
       console.log(`[WeeklyReport] Sent to ${recipient}`);
     } catch(e) {
       console.error(`[WeeklyReport] Failed to send to ${recipient}:`, e.message);
@@ -3505,9 +3616,9 @@ Write the agenda with these sections:
 
 RISK 2 SOLUTION GROUP
 Kick-off Meeting Agenda
-${project.clientName} — ${project.projectName || 'Project Engagement'}
+${project.clientName} - ${project.projectName || 'Project Engagement'}
 Date: [To be confirmed]
-Location: [To be confirmed — virtual or on-site]
+Location: [To be confirmed - virtual or on-site]
 Attendees: ${project.clientContact || '[Client contact]'} (${project.clientName}), ${project.consultant || '[R2S Consultant]'} (R2S), Diane Kruger (R2S)
 Duration: 60-90 minutes
 
@@ -3590,7 +3701,7 @@ async function sendKickoffPrompt(project) {
       urgency: 'routine', toName: project.clientContact,
       toEmail: project.clientEmail,
       ccEmail: 'diane.k@risk2solution.com',
-      subject: `Kick-off Meeting Agenda — ${project.clientName} — ${project.projectName || 'Project'}`,
+      subject: `Kick-off Meeting Agenda - ${project.clientName} - ${project.projectName || 'Project'}`,
       body: agendaText, source: 'auto',
     };
     await db.saveDraft(agendaDraft);
@@ -3638,7 +3749,7 @@ async function draftClientOnboarding(project) {
 FORMAT RULES:
 - Plain text only. No asterisks, no bold markdown, no long dashes (use a hyphen - instead of an em dash).
 - Professional, warm, and human-centred tone.
-- Concise — this is a welcome email, not a report.
+- Concise - this is a welcome email, not a report.
 - CRITICAL: Do NOT include any To:, CC:, Subject:, or email header lines anywhere in the body. Start directly with the greeting.
 - CRITICAL: Do NOT include any language such as "this is a draft", "note to Diane", "please review before sending", "for Diane's review", or any similar internal instructions. Write as if sending directly to the client.
 - CRITICAL: Do NOT add any meta-commentary, preamble, or notes about the email itself.
@@ -3651,7 +3762,7 @@ Line 3: "Welcome to Risk 2 Solution."
 Line 4: (blank line)
 Then continue with:
 
-1. A warm welcome sentence (1 sentence — do NOT repeat "Welcome to Risk 2 Solution" — just continue warmly)
+1. A warm welcome sentence (1 sentence - do NOT repeat "Welcome to Risk 2 Solution" - just continue warmly)
 
 2. Brief confirmation of what R2S will be delivering (1-2 sentences referencing the project scope)
 
@@ -3668,7 +3779,7 @@ Then continue with:
 
 To help us set up your project correctly, please complete and return the following onboarding form:
 
-ONBOARDING FORM — ${project.clientName}
+ONBOARDING FORM - ${project.clientName}
 
 Primary contact person:
 Phone number:
@@ -3681,7 +3792,7 @@ Update report frequency (please select one):
 [ ] Monthly
 
 Is a Purchase Order (PO) required for invoicing?
-[ ] Yes — PO number: ________________________________
+[ ] Yes - PO number: ________________________________
 [ ] No
 
 Accounts payable contact name:
@@ -3763,7 +3874,7 @@ async function draftRiskEscalation(project, riskDescription) {
 
 FORMAT RULES:
 - Plain text only. No asterisks, no bold markdown, no long dashes.
-- Professional and measured tone — serious but not alarming.
+- Professional and measured tone - serious but not alarming.
 - Keep it factual and solution-focused.
 
 Risk description: ${riskDescription}
@@ -3788,7 +3899,7 @@ Sign off as Diane Kruger with full signature.`,
       projectName: project.projectName, type: 'escalation_email',
       urgency: 'urgent', toName: project.clientContact,
       toEmail: project.clientEmail,
-      subject: `Project Update — ${project.projectName || project.clientName} — Action Required`,
+      subject: `Project Update - ${project.projectName || project.clientName} - Action Required`,
       body: escalationBody, source: 'auto',
     };
     await db.saveDraft(draft);
@@ -3838,7 +3949,7 @@ Write starting with "Hi ${(project.clientContact || 'there').split(' ')[0]},"
 Cover:
 1. Thank the client for the engagement (1-2 sentences)
 2. Brief note on what was delivered
-3. A genuine request for feedback — how did R2S perform, what could be improved, would they recommend R2S
+3. A genuine request for feedback - how did R2S perform, what could be improved, would they recommend R2S
 4. Optional: mention R2S would welcome the opportunity to continue supporting them
 5. Offer to arrange a brief debrief call if they would find it useful
 
@@ -3852,7 +3963,7 @@ Sign off as Diane Kruger with full signature.`,
       projectName: project.projectName, type: 'feedback_request',
       urgency: 'routine', toName: project.clientContact,
       toEmail: project.clientEmail,
-      subject: `Thank you — ${project.projectName || project.clientName} — Your feedback`,
+      subject: `Thank you - ${project.projectName || project.clientName} - Your feedback`,
       body: feedbackBody, source: 'auto',
     };
     await db.saveDraft(draft);
@@ -3872,12 +3983,17 @@ cron.schedule('0 20 * * *', () => runBatch().catch(console.error), { timezone: '
 // Wednesday 4pm AEST = Wednesday 6am UTC
 cron.schedule('0 6 * * 3', () => sendPMChecklistFollowUp().catch(console.error), { timezone: 'UTC' });
 
-// Email polling: every hour 7am-7pm AEST weekdays
-// AEST UTC+10: 7am=9pm UTC, 7pm=9am UTC
-cron.schedule('0 21-23,0-9 * * 1-5', async () => {
+// Email polling: every hour, 7am to 7pm AEST, Monday to Friday.
+// AEST is UTC+10, so 7am AEST is 9pm UTC the previous day and 7pm AEST is 9am UTC.
+// The window crosses midnight UTC, so it needs two schedules:
+//   9pm-11pm UTC Sunday to Thursday = 7am-9am AEST Monday to Friday
+//   midnight-9am UTC Monday to Friday = 10am-7pm AEST Monday to Friday
+async function scheduledInboxPoll() {
   console.log('[Poll] Scheduled hourly check...');
   try { await readConsultantReplies(); } catch(e) { console.error('[Poll] Error:', e.message); }
-}, { timezone: 'UTC' });
+}
+cron.schedule('0 21-23 * * 0-4', scheduledInboxPoll, { timezone: 'UTC' });
+cron.schedule('0 0-9 * * 1-5', scheduledInboxPoll, { timezone: 'UTC' });
 
 // Keepalive ping every 5 minutes — prevents Azure from sleeping the app
 cron.schedule('*/5 * * * *', async () => {
@@ -4463,9 +4579,38 @@ app.post('/api/suggestions/:id/dismiss', async (req, res) => {
   try {
     const id = req.params.id;
     console.log(`[Suggestions] Dismissing: ${id}`);
+
+    // "Revert to previous phase": if Aurora already applied this phase change
+    // (staff emails), put the project back to the phase it was in before.
+    let reverted = false;
+    let revertMessage = '';
+    const suggestions = await db.getSuggestions();
+    const suggestion = suggestions.find(s => s.id === id);
+    if (suggestion && suggestion.type === 'phase_advance' && suggestion.action?.autoApplied &&
+        typeof suggestion.action.previousPhase === 'number') {
+      const project = await db.getProject(suggestion.projectId);
+      if (project) {
+        const currentPhase = project.phase || 0;
+        if (currentPhase === suggestion.action.phase) {
+          await db.updateProjectField(suggestion.projectId, { phase: suggestion.action.previousPhase });
+          await db.logActivity(suggestion.projectId, {
+            type: 'phase_change',
+            summary: `Phase reverted from ${PHASES[currentPhase]} to ${PHASES[suggestion.action.previousPhase]} - Diane reverted Aurora's automatic change`,
+          });
+          reverted = true;
+          revertMessage = `Phase reverted to ${PHASES[suggestion.action.previousPhase]}`;
+          console.log(`[Suggestions] Reverted ${project.clientName}: ${PHASES[currentPhase]} → ${PHASES[suggestion.action.previousPhase]}`);
+        } else {
+          // The phase has been changed again since, so do not overwrite the newer change
+          revertMessage = `Not reverted - the project is now in ${PHASES[currentPhase]}, which was set after this suggestion`;
+          console.log(`[Suggestions] Revert skipped for ${project.clientName}: phase is now ${PHASES[currentPhase]}, not ${PHASES[suggestion.action.phase]}`);
+        }
+      }
+    }
+
     await db.updateSuggestion(id, 'dismissed');
     console.log(`[Suggestions] ✓ Dismissed: ${id}`);
-    res.json({ success: true });
+    res.json({ success: true, reverted, message: revertMessage });
   } catch (e) {
     console.error('[Suggestions] Dismiss error:', e.message);
     res.status(500).json({ error: e.message });
@@ -4773,7 +4918,7 @@ app.post('/api/projects/:id/deliverables/:delId/book', express.json(), async (re
     const deliverables = await db.getDeliverables(req.params.id);
     const del = deliverables.find(d => d.id === req.params.delId);
 
-    const eventTitle = title || (del ? del.name : 'Meeting') + ` — ${project.clientName}`;
+    const eventTitle = title || (del ? del.name : 'Meeting') + ` - ${project.clientName}`;
     const displayTime = timeDisplay || time;
     const dateFormatted = new Date(date).toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
 
@@ -4843,7 +4988,7 @@ W: www.risk2solution.com`;
       toName: project.clientContact,
       toEmail: project.clientEmail || 'info@risk2solution.com',
       ccEmail: 'diane.k@risk2solution.com',
-      subject: `Meeting Confirmation — ${eventTitle} — ${dateFormatted}`,
+      subject: `Meeting Confirmation - ${eventTitle} - ${dateFormatted}`,
       body: inviteBody,
       source: 'booking',
       createdAt: new Date().toISOString(),
@@ -5254,8 +5399,8 @@ async function sendInternalTaskReminder(project, item) {
 <meta charset="UTF-8">
 <!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]-->
 </head>
-<body style="margin:0;padding:0;background-color:#f4f6f8;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6f8;">
+<body style="margin:0;padding:0;background-color:#ffffff;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;">
   <tr>
     <td align="center" style="padding:24px 10px;">
       <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#ffffff;border:1px solid #dde2e8;">
@@ -5681,7 +5826,7 @@ async function sendInternalProjectStatusReport() {
 
 </div></td></tr></table></td></tr></table></body></html>`;
 
-  const subject = `IoP Internal Programmes — Weekly Leadership Report (${now.toLocaleDateString('en-AU',{day:'numeric',month:'short'})})`;
+  const subject = `IoP Internal Programmes - Weekly Leadership Report (${now.toLocaleDateString('en-AU',{day:'numeric',month:'short'})})`;
   for (const r of RECIPIENTS) {
     await sendEmail(r, subject, html, false, [], true);
   }
@@ -6133,7 +6278,7 @@ async function sendInternalWeeklyOpsUpdate(forceAll = false) {
 </td></tr></table>
 </body></html>`;
 
-    const subject = `${global._testMode?'[TEST] ':''}[Aurora] ${project.cohortName} — Weekly Programme Dashboard${overdue.length > 0 ? ` ⚠️ ${overdue.length} overdue` : daysToNext !== null && daysToNext <= 7 ? ' 🔴 Module this week' : ''}`;
+    const subject = `${global._testMode?'[TEST] ':''}[Aurora] ${project.cohortName} - Weekly Programme Dashboard${overdue.length > 0 ? ` ⚠️ ${overdue.length} overdue` : daysToNext !== null && daysToNext <= 7 ? ' 🔴 Module this week' : ''}`;
 
     // Send with attachment if we have one, otherwise plain HTML
     if (excelBuffer && token) {
@@ -6394,7 +6539,7 @@ app.post('/api/test/report/internal-leadership', async (req, res) => {
       ${reportSections}
       <div style="text-align:center;color:#555577;font-size:10px;padding:12px">🧪 TEST SEND — Aurora · R2S Project Management Intelligence</div>
     </td></tr></table></td></tr></table></body></html>`;
-    await sendEmail(TEST_EMAIL, `[TEST] IoP Internal Programmes — Leadership Report`, html, false, [], true);
+    await sendEmail(TEST_EMAIL, `[TEST] IoP Internal Programmes - Leadership Report`, html, false, [], true);
     res.json({ success: true, sentTo: TEST_EMAIL });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -6783,7 +6928,7 @@ async function sendPMChecklistFollowUp() {
 </td></tr></table>
 </body></html>`;
 
-  const subject = `[Aurora] PM Checklist — ${allComplete ? 'All complete ✓' : `${totalOutstanding} outstanding across ${projectData.filter(d=>d.outstanding.length>0).length} project${projectData.filter(d=>d.outstanding.length>0).length!==1?'s':''}`} · ${now.toLocaleDateString('en-AU',{day:'numeric',month:'short'})}`;
+  const subject = `[Aurora] PM Checklist - ${allComplete ? 'All complete ✓' : `${totalOutstanding} outstanding across ${projectData.filter(d=>d.outstanding.length>0).length} project${projectData.filter(d=>d.outstanding.length>0).length!==1?'s':''}`} · ${now.toLocaleDateString('en-AU',{day:'numeric',month:'short'})}`;
 
   // Send to Kandia ONLY — no CC to Diane
   await sendEmail('kandia@risk2solution.com', subject, html, false, [], true);
